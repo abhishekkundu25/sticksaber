@@ -1,0 +1,15 @@
+{
+  "name": "sticksaber",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Side-view stick-figure energy-sword action game. Zero-dependency ES modules, Canvas 2D + WebAudio.",
+  "scripts": {
+    "start": "node tools/serve.js",
+    "fuzz": "node tools/fuzz.js",
+    "smoke": "node tools/smoke.js"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.17.0"
+  }
+}

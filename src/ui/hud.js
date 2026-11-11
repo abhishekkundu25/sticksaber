@@ -1,0 +1,245 @@
+// HUD, banners and menus, drawn on the game canvas in logical (720-high) units.
+import { clamp, TAU } from '../core/math.js';
+import { RANK_NAMES, famLabel } from '../game/world.js';
+import { STAGES } from '../game/encounters.js';
+
+const FONT = '"Avenir Next Condensed", "Bahnschrift", "DIN Condensed", "Roboto Condensed", "Arial Narrow", sans-serif';
+const RANK_COL = ['#8fa3b8', '#8fa3b8', '#9fe8ff', '#7dffb0', '#ffd36b', '#ff6bd6'];
+const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
+
+export const MENU = ['ASCEND', 'TRAINING ROOM', 'CONTROLS'];
+const MOVELIST = [
+  ['MOVE', 'A / D  or  ← / →'], ['JUMP  ·  DOUBLE JUMP', 'SPACE / W'], ['DASH  (brief invulnerability)', 'SHIFT'],
+  ['LIGHT STRING', 'J  J  J  J'], ['HEAVY  ·  hold to charge', 'K'], ['GUARD  ·  tap on impact to PARRY', 'L'],
+  ['RIPOSTE  (after a parry)', 'J or K'], ['LAUNCHER', 'S + K   or   J J K'], ['BREAKER  ·  COMET', 'J K   ·   J J J K'],
+  ['AIR STRING  ·  SPIKE', 'J J J   ·   K'], ['PLUNGE  (in the air)', 'S + K'], ['DASH CUT', 'SHIFT then J'],
+  ['SABER THROW  (1 focus)', 'I'], ['RECOVER  (as you hit the floor)', 'SHIFT'], ['PAUSE', 'ESC'],
+];
+
+export class Hud {
+  constructor() {
+    this.hpLag = 1; this.comboShown = 0; this.comboPop = 0; this.bossLag = 1; this.t = 0;
+    this.vig = null; this.bars = 0;
+  }
+
+  text(ctx, s, x, y, size, color, align = 'left', weight = 600, spacing = 0) {
+    ctx.font = `${weight} ${size}px ${FONT}`;
+    ctx.textAlign = align; ctx.textBaseline = 'middle';
+    if ('letterSpacing' in ctx) ctx.letterSpacing = `${spacing}px`;
+    ctx.fillStyle = color; ctx.fillText(s, x, y);
+  }
+
+  draw(ctx, view, world, dir, app, dt) {
+    this.t += dt;
+    const W = view.w, H = view.h;
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    const p = world.player;
+
+    // Cinematic bars ease in while time is slowed.
+    const slow = world.timeScale < 0.75 && app.state === 'play';
+    this.bars += ((slow ? 1 : 0) - this.bars) * Math.min(1, dt * 8);
+    if (this.bars > 0.01) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, 26 * this.bars); ctx.fillRect(0, H - 26 * this.bars, W, 26 * this.bars); }
+    if (world.witch > 0 && app.state === 'play') { ctx.globalAlpha = 0.1 * Math.min(1, world.witch * 3); ctx.fillStyle = '#56e9ff'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+
+    if (app.state === 'play' || app.state === 'pause') {
+      if (p) this.player(ctx, world, p, dt);
+      this.combo(ctx, W, world, dt);
+      if (world.boss && !world.boss.remove && world.boss.y > -2000) this.boss(ctx, W, H, world, world.boss, dt);
+      if (!dir.training) {
+        const s = dir.stageDef;
+        this.text(ctx, `FLOOR ${ROMAN[dir.stage]}   ·   ${s.boss ? 'EXAMINATION' : `WAVE ${dir.wave + 1} / ${dir.waveCount}`}`, W - 36, 34, 14, '#ffffffaa', 'right', 600, 3);
+      } else this.text(ctx, 'TRAINING ROOM', W - 36, 34, 14, '#ffffffaa', 'right', 600, 3);
+      if (dir.hint && dir.hintT > 0) {
+        const a = Math.min(1, dir.hintT, dir.training ? 1 : (11 - dir.hintT) * 2);
+        ctx.globalAlpha = a * 0.55; ctx.fillStyle = '#000';
+        const y = world.boss && !world.boss.dead ? H - 118 : H - 44;
+        ctx.font = `600 15px ${FONT}`; if ('letterSpacing' in ctx) ctx.letterSpacing = '1px';
+        const tw = ctx.measureText(dir.hint).width + 44;
+        ctx.fillRect(W / 2 - tw / 2, y - 15, tw, 30);
+        ctx.globalAlpha = a; this.text(ctx, dir.hint, W / 2, y + 1, 15, '#dff6ff', 'center', 600, 1);
+        ctx.globalAlpha = 1;
+      }
+      // Low health pulse.
+      if (p && !p.dead && p.hp < 32) this.vignette(ctx, W, H, 0.35 + Math.sin(this.t * 5) * 0.15);
+    }
+
+    const fl = world.screenFlash;
+    if (fl) { ctx.globalAlpha = (fl.t / fl.max) ** 2 * 0.24; ctx.fillStyle = fl.color; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+    const b = world.bannerMsg;
+    if (b && app.state === 'play') this.banner(ctx, W, b);
+
+    if (app.state === 'play' && dir.state === 'dead') this.dead(ctx, W, H, dir);
+    if (app.state === 'play' && dir.state === 'victory') this.victory(ctx, W, H, world, dir);
+    if (dir.fade > 0) { ctx.globalAlpha = dir.fade; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+    if (app.state === 'menu') this.menu(ctx, W, H, app);
+    if (app.state === 'controls') this.controls(ctx, W, H, 'ENTER or ESC to return');
+    if (app.state === 'pause') this.controls(ctx, W, H, 'ESC resume      ·      Q quit to menu', 'PAUSED');
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+  }
+
+  vignette(ctx, W, H, a) {
+    if (!this.vig) {
+      this.vig = document.createElement('canvas'); this.vig.width = 256; this.vig.height = 144;
+      const g = this.vig.getContext('2d'), gr = g.createRadialGradient(128, 72, 50, 128, 72, 150);
+      gr.addColorStop(0, '#ff203000'); gr.addColorStop(1, '#ff2030cc');
+      g.fillStyle = gr; g.fillRect(0, 0, 256, 144);
+    }
+    ctx.globalAlpha = a; ctx.drawImage(this.vig, 0, 0, W, H); ctx.globalAlpha = 1;
+  }
+
+  player(ctx, world, p, dt) {
+    const x = 36, y = 34, w = 320;
+    const hp = Math.max(0, p.hp) / p.maxHp;
+    this.hpLag += (hp - this.hpLag) * Math.min(1, dt * (hp < this.hpLag ? 2.5 : 20));
+    this.text(ctx, 'INITIATE ZERO', x, y - 12, 12, '#ffffff99', 'left', 600, 3);
+    ctx.fillStyle = '#00000088'; ctx.fillRect(x - 2, y - 2, w + 4, 14);
+    ctx.fillStyle = '#ffffff1c'; ctx.fillRect(x, y, w, 10);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(x, y, w * this.hpLag, 10);
+    const rally = Math.min(world.rally / p.maxHp, 1 - hp);
+    if (rally > 0) { ctx.fillStyle = '#ff9a2e'; ctx.globalAlpha = 0.6 + Math.sin(this.t * 10) * 0.2; ctx.fillRect(x + w * hp, y, w * rally, 10); ctx.globalAlpha = 1; }
+    const gr = ctx.createLinearGradient(x, 0, x + w, 0);
+    gr.addColorStop(0, '#2bb8e0'); gr.addColorStop(1, '#a8f4ff');
+    ctx.fillStyle = hp < 0.32 ? '#ff5060' : gr; ctx.fillRect(x, y, w * hp, 10);
+    // Guard posture: fills as you block.
+    const po = p.posture / p.maxPosture;
+    if (po > 0.01) { ctx.fillStyle = '#00000088'; ctx.fillRect(x, y + 13, w * 0.6, 4); ctx.fillStyle = po > 0.75 ? '#ff6b4a' : '#ffd36b'; ctx.fillRect(x, y + 13, w * 0.6 * po, 4); }
+    // Focus pips.
+    const fy = y + 24;
+    for (let i = 0; i < 3; i++) {
+      const fx = x + i * 46, k = clamp(world.focus / 100 - i, 0, 1);
+      ctx.fillStyle = '#00000088'; ctx.fillRect(fx - 1, fy - 1, 42, 8);
+      ctx.fillStyle = '#ffffff1c'; ctx.fillRect(fx, fy, 40, 6);
+      ctx.fillStyle = k >= 1 ? '#56e9ff' : '#2b7f96'; ctx.fillRect(fx, fy, 40 * k, 6);
+    }
+    this.text(ctx, p.armed ? 'FOCUS' : 'SABER OUT', x + 146, fy + 4, 11, p.armed ? '#ffffff77' : '#56e9ff', 'left', 600, 2);
+  }
+
+  combo(ctx, W, world, dt) {
+    const st = world.style;
+    if (st.combo !== this.comboShown) { if (st.combo > this.comboShown) this.comboPop = 1; this.comboShown = st.combo; }
+    this.comboPop = Math.max(0, this.comboPop - dt * 6);
+    const x = W - 44, y = 150;
+    if (st.rank > 0) {
+      const col = RANK_COL[st.rank], pop = 1 + Math.max(0, st.rankT) * 0.8;
+      this.text(ctx, RANK_NAMES[st.rank], x, y, 64 * pop, col, 'right', 800, 0);
+      const lo = [0, 18, 42, 72, 108, 150][st.rank], hi = [18, 42, 72, 108, 150, 180][st.rank];
+      const k = clamp((st.points - lo) / (hi - lo), 0, 1);
+      ctx.fillStyle = '#ffffff22'; ctx.fillRect(x - 70, y + 38, 70, 3);
+      ctx.fillStyle = col; ctx.fillRect(x - 70 * k, y + 38, 70 * k, 3);
+      this.text(ctx, 'STYLE', x - 76, y + 39, 10, '#ffffff77', 'right', 600, 2);
+    }
+    if (st.combo >= 2) {
+      const a = Math.min(1, st.comboT * 2);
+      ctx.globalAlpha = a;
+      this.text(ctx, String(st.combo), x, y + 82, 46 * (1 + this.comboPop * 0.25), '#ffffff', 'right', 800, 0);
+      this.text(ctx, 'HITS', x, y + 112, 12, '#ffffffaa', 'right', 600, 4);
+      // Variety read-out: tells the player when a string is going stale.
+      const last = st.recent[st.recent.length - 1]; let rep = 0;
+      for (const r of st.recent) if (r === last) rep++;
+      if (rep >= 3) this.text(ctx, 'STALE', x, y + 138, 12, '#ff8a6b', 'right', 700, 4);
+      else if (st.lastFresh > 0) this.text(ctx, 'FRESH', x, y + 138, 12, '#9ff3ff', 'right', 700, 4);
+      ctx.fillStyle = '#ffffff55'; ctx.fillRect(x - 60 * clamp(st.comboT / 2.8, 0, 1), y + 122, 60 * clamp(st.comboT / 2.8, 0, 1), 2);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  boss(ctx, W, H, world, b, dt) {
+    const w = Math.min(680, W - 240), x = W / 2 - w / 2, y = H - 64;
+    const hp = clamp(b.hp / b.maxHp, 0, 1);
+    this.bossLag += (hp - this.bossLag) * Math.min(1, dt * (hp < this.bossLag ? 1.8 : 20));
+    this.text(ctx, b.def.name, x, y - 16, 18, '#ffffff', 'left', 700, 5);
+    this.text(ctx, b.double ? 'PHASE II' : b.def.title.toUpperCase(), x + w, y - 15, 11, b.double ? b.color : '#ffffff88', 'right', 600, 3);
+    ctx.fillStyle = '#000000aa'; ctx.fillRect(x - 2, y - 2, w + 4, 14);
+    ctx.fillStyle = '#ffffff18'; ctx.fillRect(x, y, w, 10);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(x, y, w * this.bossLag, 10);
+    ctx.fillStyle = b.color; ctx.fillRect(x, y, w * hp, 10);
+    if (world.bossChannel > 0) {
+      // Preview of what the heal will restore if it is not interrupted.
+      ctx.globalAlpha = 0.45 + Math.sin(this.t * 12) * 0.25; ctx.fillStyle = '#7dffb0';
+      ctx.fillRect(x + w * hp, y, w * Math.min(0.2, 1 - hp), 10); ctx.globalAlpha = 1;
+      ctx.fillStyle = '#7dffb0'; ctx.fillRect(x, y - 6, w * world.bossChannel, 2);
+      this.text(ctx, 'RECALIBRATING   ·   INTERRUPT IT', W / 2, y - 16, 13, '#7dffb0', 'center', 700, 3);
+    }
+    ctx.fillStyle = '#ffffff55'; ctx.fillRect(x + w * 0.6, y - 2, 1.5, 14);
+    const po = clamp(b.posture / b.maxPosture, 0, 1);
+    ctx.fillStyle = '#ffffff18'; ctx.fillRect(x + w * 0.2, y + 15, w * 0.6, 3);
+    ctx.fillStyle = b.broken ? '#ffffff' : '#ffd36b'; ctx.fillRect(W / 2 - w * 0.3 * po, y + 15, w * 0.6 * po, 3);
+    if (b.reads) {
+      const a = 0.75 + Math.sin(this.t * 9) * 0.25;
+      ctx.globalAlpha = a; this.text(ctx, `IT HAS READ YOUR ${famLabel(b.reads)}   ·   CHANGE ATTACK`, W / 2, y + 32, 12, '#ff6b6b', 'center', 700, 2); ctx.globalAlpha = 1;
+    } else if (b.broken) this.text(ctx, 'POSTURE BROKEN', W / 2, y + 32, 12, '#ffd36b', 'center', 700, 3);
+  }
+
+  banner(ctx, W, b) {
+    const a = Math.min(1, (b.max - b.t) * 3, b.t * 2), y = 214;
+    const slide = (1 - Math.min(1, (b.max - b.t) * 3)) * 30;
+    ctx.globalAlpha = a;
+    this.text(ctx, b.title, W / 2 + slide, y, 46, '#ffffff', 'center', 700, 14);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(W / 2 - 150 * a, y + 34, 300 * a, 1.5);
+    if (b.sub) this.text(ctx, b.sub.toUpperCase(), W / 2 - slide, y + 56, 14, '#ffffffbb', 'center', 600, 5);
+    ctx.globalAlpha = 1;
+  }
+
+  dead(ctx, W, H, dir) {
+    const a = clamp(dir.t - 0.6, 0, 1);
+    ctx.globalAlpha = a * 0.6; ctx.fillStyle = '#12020a'; ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = a;
+    this.text(ctx, 'YOU FELL', W / 2, H / 2 - 30, 70, '#ff5060', 'center', 800, 18);
+    this.text(ctx, 'ENTER  retry this wave        ESC  menu', W / 2, H / 2 + 40, 16, '#ffffffcc', 'center', 600, 3);
+    ctx.globalAlpha = 1;
+  }
+
+  victory(ctx, W, H, world, dir) {
+    const a = clamp(dir.t, 0, 1);
+    ctx.globalAlpha = a * 0.72; ctx.fillStyle = '#05060a'; ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = a;
+    this.text(ctx, 'EXAMINATION PASSED', W / 2, 170, 58, '#ffe2a0', 'center', 800, 14);
+    ctx.fillStyle = '#ffe2a0'; ctx.fillRect(W / 2 - 220, 212, 440, 1.5);
+    const m = Math.floor(dir.runTime / 60), s = Math.floor(dir.runTime % 60);
+    const rows = [['TIME', `${m}:${String(s).padStart(2, '0')}`], ['FALLS', dir.deaths], ['BEST COMBO', world.style.best], ['PARRIES', world.stats.parries], ['PERFECT DODGES', world.stats.dodges],
+      ['HEALS INTERRUPTED', world.stats.interrupts], ['TIMES READ', world.stats.reads], ['HITS TAKEN', world.stats.hitsTaken]];
+    rows.forEach(([k, v], i) => {
+      const y = 262 + i * 34;
+      this.text(ctx, k, W / 2 - 20, y, 16, '#ffffff99', 'right', 600, 4);
+      this.text(ctx, String(v), W / 2 + 20, y, 22, '#ffffff', 'left', 700, 2);
+    });
+    this.text(ctx, 'ENTER  return to menu', W / 2, H - 90, 15, '#ffffffcc', 'center', 600, 3);
+    ctx.globalAlpha = 1;
+  }
+
+  menu(ctx, W, H, app) {
+    const gr = ctx.createLinearGradient(0, 0, 0, H);
+    gr.addColorStop(0, '#04060bd8'); gr.addColorStop(0.5, '#04060b88'); gr.addColorStop(1, '#04060be6');
+    ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+    const cx = W / 2, ty = 210;
+    this.text(ctx, 'STICKSABER', cx, ty, 112, '#ffffff', 'center', 800, 18);
+    // A lit blade under the title.
+    const bw = 520, pulse = 0.85 + Math.sin(this.t * 3) * 0.15;
+    ctx.globalCompositeOperation = 'lighter';
+    for (const [h, al] of [[26, 0.08], [12, 0.18], [5, 0.5]]) { ctx.globalAlpha = al * pulse; ctx.fillStyle = '#56e9ff'; ctx.fillRect(cx - bw / 2, ty + 70 - h / 2, bw, h); }
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(cx - bw / 2, ty + 69, bw, 2);
+    ctx.fillStyle = '#aeb9c8'; ctx.fillRect(cx - bw / 2 - 46, ty + 67, 46, 6);
+    this.text(ctx, 'A S C E N D   T H E   S P I R E', cx, ty + 104, 14, '#ffffff99', 'center', 600, 4);
+    MENU.forEach((m, i) => {
+      const y = 400 + i * 52, sel = i === app.idx;
+      this.text(ctx, m, cx, y, sel ? 30 : 24, sel ? '#56e9ff' : '#ffffffaa', 'center', sel ? 700 : 600, 8);
+      if (sel) { ctx.fillStyle = '#56e9ff'; ctx.fillRect(cx - 150, y + 20, 300, 1.5); }
+    });
+    this.text(ctx, 'W / S  select        ENTER  confirm        F  fullscreen        M  mute', cx, H - 44, 13, '#ffffff77', 'center', 600, 3);
+    this.text(ctx, `${STAGES.length} FLOORS  ·  COMBAT PROTOTYPE`, cx, H - 70, 11, '#ffffff55', 'center', 600, 4);
+  }
+
+  controls(ctx, W, H, foot, title = 'CONTROLS') {
+    ctx.fillStyle = '#04060be0'; ctx.fillRect(0, 0, W, H);
+    this.text(ctx, title, W / 2, 74, 40, '#ffffff', 'center', 700, 14);
+    ctx.fillStyle = '#56e9ff'; ctx.fillRect(W / 2 - 120, 104, 240, 1.5);
+    MOVELIST.forEach(([k, v], i) => {
+      const y = 148 + i * 33;
+      this.text(ctx, k, W / 2 - 24, y, 15, '#ffffffaa', 'right', 600, 3);
+      this.text(ctx, v, W / 2 + 24, y, 17, '#56e9ff', 'left', 700, 3);
+    });
+    this.text(ctx, 'Gamepad:  A jump   X light   Y heavy   B dash   RB guard   LB throw', W / 2, H - 78, 13, '#ffffff77', 'center', 600, 2);
+    this.text(ctx, foot, W / 2, H - 46, 14, '#ffffffcc', 'center', 600, 3);
+  }
+}
