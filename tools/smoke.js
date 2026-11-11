@@ -29,6 +29,7 @@ const scenario = process.argv[2] || 'all';
 try {
   await sleep(900);
   await shot('01-menu');
+  if (scenario === 'menu') { await sleep(5000); await shot('01-menu-live'); }
   if (scenario === 'all' || scenario === 'train') {
     await ev(() => window.__game.startTraining());
     await sleep(700);
@@ -64,7 +65,7 @@ try {
   if (scenario === 'all' || scenario === 'boss') {
     // Let the scripted player fight the boss at a fixed timestep and grab each signature moment once.
     const shots = await ev(async () => {
-      const { BotInput } = await import('/tools/bot.js');
+      const { BotInput } = await import('/src/game/bot.js');
       const g = window.__game, w = g.world;
       g.app.manual = true; g.startRun(); g.director.startRun(2);
       const real = w.input; w.input = new BotInput(w, 0.85);

@@ -74,6 +74,8 @@ export class Director {
     const hp = fresh || !this.keepHp ? null : this.keepHp;
     const p = w.spawnPlayer(-320);
     if (hp) p.hp = hp;
+    // Arrive by drop beam, like everything else on the Spire.
+    p.y = -520; p.vy = 500; p.onGround = false; w.fx.beam(p.x, 0.8, p.color);
     w.cam.x = -200; w.rally = 0;
     w.enemyDmg = def.dmg; w.maxAttackers = def.attackers;
     this.state = 'intro'; this.t = 0; this.pending.length = 0;

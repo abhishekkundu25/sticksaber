@@ -3,7 +3,7 @@
 // floor can be cleared and how long it takes.   node tools/fuzz.js [quick]
 import { World } from '../src/game/world.js';
 import { Director, STAGES } from '../src/game/encounters.js';
-import { BotInput } from './bot.js';
+import { BotInput } from '../src/game/bot.js';
 
 const ACTIONS = ['left', 'right', 'down', 'jump', 'light', 'heavy', 'guard', 'dash', 'special'];
 class RandomInput {

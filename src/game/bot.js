@@ -1,6 +1,7 @@
-// A scripted player used by the soak test. It reads enemy wind-ups the way a person would (parry
-// white tells, dodge red ones, jump shockwaves) and mixes its combos. `skill` (0..1) is the chance
-// it reacts to any given threat, so balance can be checked for weak and strong players.
+// A scripted player. The soak test uses it to check balance, and the title screen uses it to play a
+// live fight behind the menu. It reads enemy wind-ups the way a person would (parry white tells,
+// dodge red ones, jump shockwaves) and mixes its combos. `skill` (0..1) is the chance it reacts to
+// any given threat.
 const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'light', 'heavy', 'guard', 'dash', 'special'];
 const COMBOS = [
   ['light', 'light', 'light', 'light'], ['light', 'light', 'heavy'], ['heavy'], ['light', 'heavy'],

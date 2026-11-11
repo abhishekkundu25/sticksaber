@@ -37,7 +37,7 @@ const SCRIPTS = {
 };
 
 async function run(name) {
-  const sc = { z: 0.62, ...SCRIPTS[name] };
+  const sc = { z: Number(process.env.Z || 0.62), ...SCRIPTS[name] };
   const url = await page.evaluate(async (sc) => {
     const g = window.__game, w = g.world;
     g.app.manual = true;

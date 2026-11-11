@@ -11,24 +11,24 @@ export const ENEMIES = {
   initiate: { ...base, kind: 'initiate', name: 'Initiate', hp: 50, posture: 55, chainBreak: 6, heavyBlockMul: 2, color: '#ff3b4e', outline: '#ff9a9a', runSpeed: 230, blade: { len: 66 }, deco: 'hood',
     ai: { range: [75, 115], cd: [0.45, 1.2], guard: 0.25, moves: [{ id: 'i_slash', max: 135, w: 3 }, { id: 'i_combo', max: 135, w: 2 }, { id: 'i_leap', min: 170, max: 330, w: 2 }] } },
   // Walking wall. Frontal shield eats light attacks; slow to turn. Answer: heavies, charged heavies, or get behind.
-  bulwark: { ...base, kind: 'bulwark', name: 'Bulwark', scale: 1.14, hp: 95, chainBreak: 3, posture: 100, armor: 1, tier: 2, color: '#ff9a2e', outline: '#ffc98a', shieldColor: '#ffb14a', lineW: 7.2, runSpeed: 140,
+  bulwark: { ...base, kind: 'bulwark', name: 'Bulwark', scale: 1.14, hp: 140, chainBreak: 3, posture: 100, armor: 1, tier: 2, color: '#ff9a2e', outline: '#ffc98a', shieldColor: '#ffb14a', lineW: 7.2, runSpeed: 140,
     blade: { len: 40 }, shield: true, blockMul: 0.45, heavyBlockMul: 2.4, parryPosture: 55, deco: 'bulwark',
     stance: { ua: -0.15, la: 0.55, ha: -1.15, hr: 0.7, bl: -0.5, lean: 0.14, py: 45 },
     ai: { range: [70, 105], cd: [1.0, 2.0], turnLag: 0.55, moves: [{ id: 'b_bash', max: 125, w: 3 }, { id: 'b_over', max: 140, w: 2 }] } },
   // Fencer with a double-ended staff. Darts in and out, blocks, and reads repeated moves. Answer: parry the flurry, vary your strings.
-  duelist: { ...base, kind: 'duelist', name: 'Duelist', scale: 1.1, hp: 120, posture: 90, chainBreak: 3, armor: 1, color: '#ff4fd8', outline: '#ffa6ee', lineW: 4.2, runSpeed: 300,
+  duelist: { ...base, kind: 'duelist', name: 'Duelist', scale: 1.1, hp: 180, posture: 90, chainBreak: 3, armor: 1, color: '#ff4fd8', outline: '#ffa6ee', lineW: 4.2, runSpeed: 300,
     blade: { len: 46, double: true }, adaptAt: 4, counter: 'd_counter', parryPosture: 50, deco: 'crest',
     ribbons: [{ n: 8, seg: 6, color: '#ff4fd8', width: 3 }], ribbonJoint: 'head',
     stance: { ha: -0.3, hr: 0.55, bl: 1.2, lean: 0.06 },
     ai: { range: [170, 250], cd: [0.35, 0.9], guard: 0.55, counterAfter: 2, retreat: 0.45, moves: [{ id: 'd_flurry', min: 110, max: 340, w: 3 }, { id: 'd_spin', max: 150, w: 2 }] } },
   // Ranged pest. Keeps distance, telegraphs with a sight line. Answer: parry or cut the bolt back, or close in.
-  marksman: { ...base, kind: 'marksman', name: 'Marksman', scale: 0.96, hp: 34, posture: 40, color: '#c8ff3a', outline: '#e4ff9c', runSpeed: 240, blade: { len: 44, gun: true }, ranged: true, deco: 'visor',
+  marksman: { ...base, kind: 'marksman', name: 'Marksman', scale: 0.96, hp: 40, posture: 40, color: '#c8ff3a', outline: '#e4ff9c', runSpeed: 240, blade: { len: 44, gun: true }, ranged: true, deco: 'visor',
     stance: { ha: -0.25, hr: 0.7, bl: -0.1, ua: -0.5, la: -0.1, py: 44 }, ctrl: marksmanCtrl },
   // Siege engine. Never flinches until its posture breaks. Answer: parry the wide swing, dodge the red smash and punish, bait the charge into a wall.
-  brute: { ...base, kind: 'brute', name: 'Brute', scale: 1.5, hp: 280, posture: 130, armor: 2, tier: 3, color: '#ff2a2a', outline: '#ff8a70', lineW: 8, runSpeed: 150,
+  brute: { ...base, kind: 'brute', name: 'Brute', scale: 1.5, hp: 440, posture: 130, armor: 2, tier: 3, color: '#ff2a2a', outline: '#ff8a70', lineW: 8, runSpeed: 150,
     blade: { len: 80, wide: true }, parryPosture: 45, parryRecoil: 0.85, breakDur: 3.2, getup: 0.9, deco: 'horns',
     stance: { lean: 0.26, ha: -0.9, hr: 0.8, bl: -0.3, py: 44, f1x: 20, f2x: -22 },
-    ai: { range: [110, 165], cd: [0.9, 1.8], moves: [{ id: 'br_swing', max: 200, w: 3 }, { id: 'br_smash', max: 180, w: 2 }, { id: 'br_charge', min: 380, max: 1200, w: 3 }] },
+    ai: { range: [110, 165], cd: [0.5, 1.2], moves: [{ id: 'br_swing', max: 200, w: 3 }, { id: 'br_smash', max: 180, w: 2 }, { id: 'br_charge', min: 380, max: 1200, w: 3 }] },
     hitWall(f, world) {
       if (f.move?.id !== 'br_charge' || f.mt < 0.75) return;
       world.shake(0.7); world.sfx('wallSplat', f.x); world.fx.spark(f.x + f.facing * 30, -80, f.facing > 0 ? Math.PI : 0, 1.2, 24, 600, '#ffd36b');

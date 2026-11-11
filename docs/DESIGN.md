@@ -53,7 +53,7 @@ Two systems push the player to mix moves.
 1. Staleness applies to every enemy. The game keeps your last ten landed moves. A move absent from that list deals 112% damage. A move that appears twice deals 80%, three times or more 60%. Fresh moves also fill the style rank and the focus meter faster.
 2. Adaptation applies to Duelists and bosses. Each landed or blocked hit raises a counter for its move family (light strings, heavy strikes, launchers, air combos, plunges, throws). Hits from other families lower it. When a counter passes the enemy's threshold, ADAPTED appears and the HUD names the family. From then on the enemy turns that family aside and counters, or takes 40% damage from it if it is mid-attack. Landing hits from other families clears the read.
 
-A scripted player that only uses the light string clears floors one and two, then dies about 40 times to the Proctor without winning. The same script with mixed combos beats the Proctor in about a minute.
+A scripted player that only uses the light string clears floors one and two, then dies about 40 times to the Proctor without winning. A scripted player that mixes its combos and parries most attacks beats the Proctor in about a minute.
 
 ### Telegraphs
 

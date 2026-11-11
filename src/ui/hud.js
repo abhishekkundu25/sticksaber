@@ -64,7 +64,7 @@ export class Hud {
     }
 
     const fl = world.screenFlash;
-    if (fl) { ctx.globalAlpha = (fl.t / fl.max) ** 2 * 0.24; ctx.fillStyle = fl.color; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+    if (fl && app.state === 'play') { ctx.globalAlpha = (fl.t / fl.max) ** 2 * 0.24; ctx.fillStyle = fl.color; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
     const b = world.bannerMsg;
     if (b && app.state === 'play') this.banner(ctx, W, b);
 
@@ -209,9 +209,9 @@ export class Hud {
 
   menu(ctx, W, H, app) {
     const gr = ctx.createLinearGradient(0, 0, 0, H);
-    gr.addColorStop(0, '#04060bd8'); gr.addColorStop(0.5, '#04060b88'); gr.addColorStop(1, '#04060be6');
+    gr.addColorStop(0, '#04060be0'); gr.addColorStop(0.42, '#04060b70'); gr.addColorStop(0.7, '#04060b30'); gr.addColorStop(0.84, '#04060bb0'); gr.addColorStop(1, '#04060bf0');
     ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
-    const cx = W / 2, ty = 210;
+    const cx = W / 2, ty = 150;
     this.text(ctx, 'STICKSABER', cx, ty, 112, '#ffffff', 'center', 800, 18);
     // A lit blade under the title.
     const bw = 520, pulse = 0.85 + Math.sin(this.t * 3) * 0.15;
@@ -221,13 +221,14 @@ export class Hud {
     ctx.fillStyle = '#ffffff'; ctx.fillRect(cx - bw / 2, ty + 69, bw, 2);
     ctx.fillStyle = '#aeb9c8'; ctx.fillRect(cx - bw / 2 - 46, ty + 67, 46, 6);
     this.text(ctx, 'A S C E N D   T H E   S P I R E', cx, ty + 104, 14, '#ffffff99', 'center', 600, 4);
+    // Menu runs along the bottom so the sparring match behind it stays visible.
     MENU.forEach((m, i) => {
-      const y = 400 + i * 52, sel = i === app.idx;
-      this.text(ctx, m, cx, y, sel ? 30 : 24, sel ? '#56e9ff' : '#ffffffaa', 'center', sel ? 700 : 600, 8);
-      if (sel) { ctx.fillStyle = '#56e9ff'; ctx.fillRect(cx - 150, y + 20, 300, 1.5); }
+      const x = cx + (i - (MENU.length - 1) / 2) * 290, y = H - 96, sel = i === app.idx;
+      this.text(ctx, m, x, y, sel ? 28 : 22, sel ? '#56e9ff' : '#ffffffaa', 'center', sel ? 700 : 600, 7);
+      if (sel) { ctx.fillStyle = '#56e9ff'; ctx.fillRect(x - 110, y + 20, 220, 1.5); }
     });
-    this.text(ctx, 'W / S  select        ENTER  confirm        F  fullscreen        M  mute', cx, H - 44, 13, '#ffffff77', 'center', 600, 3);
-    this.text(ctx, `${STAGES.length} FLOORS  ·  COMBAT PROTOTYPE`, cx, H - 70, 11, '#ffffff55', 'center', 600, 4);
+    this.text(ctx, 'A / D  select        ENTER  confirm        F  fullscreen        M  mute', cx, H - 36, 13, '#ffffff77', 'center', 600, 3);
+    this.text(ctx, `${STAGES.length} FLOORS  ·  COMBAT PROTOTYPE`, cx, ty + 128, 11, '#ffffff55', 'center', 600, 4);
   }
 
   controls(ctx, W, H, foot, title = 'CONTROLS') {
