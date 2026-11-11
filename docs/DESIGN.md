@@ -162,7 +162,7 @@ Measured in headless Chrome at 1280x720 with six enemies fighting: median frame 
 
 ## Sound
 
-Every sound is synthesized with the Web Audio API. A saber hum tracks swing speed. The two telegraph tones differ enough to tell apart with your eyes closed. Music is generative and its intensity follows the number of enemies and your style rank. Slow motion sweeps a low-pass filter over the mix.
+Every sound is synthesized with the Web Audio API. A saber hum rises from 88 Hz to 115 Hz with swing speed. The parryable telegraph is a bright glint centred near 4.5 kHz and the unblockable one is a low buzz near 0.5 kHz, so the two are distinct by ear. Music is generative and its intensity follows the number of enemies and your style rank. Slow motion sweeps a low-pass filter over the mix. Nobody has listened to any of it yet. The balance was set from measurements, so expect to retune it by ear.
 
 ## Open questions for you
 

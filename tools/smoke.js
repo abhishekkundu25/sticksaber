@@ -96,6 +96,7 @@ try {
   if (scenario === 'all' || scenario === 'perf') {
     // Busy scene: every enemy type fighting, measure rAF cadence and render cost.
     await ev(() => { const g = window.__game; g.startTraining(); ['Digit1', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].forEach((k) => g.director.trainingKey(k)); });
+    await tap('KeyL'); // a real key press, so the page is allowed to start audio
     await sleep(1500);
     const perf = await ev(() => new Promise((res) => {
       const ts = []; let n = 0;
@@ -103,6 +104,8 @@ try {
       requestAnimationFrame(tick);
     }));
     console.log('perf', JSON.stringify(perf));
+    // Confirms the game is really driving the sound engine (context running, sounds played, no swallowed errors).
+    console.log('audio', JSON.stringify(await ev(async () => (await import('/src/audio/audio.js')).audioDev.stats())));
     await shot('20-busy');
   }
 } finally {

@@ -61,6 +61,8 @@ Fullscreen is F. Mute is M.
 | `npm run fuzz` | Runs the simulation headless at 120 Hz with random input and with scripted players of different skill. Fails on any exception or non-finite value, and prints clear times per floor. |
 | `npm run smoke` | Drives the real game in headless Chrome, reports runtime errors and frame times, and writes screenshots to `tools/out/`. |
 | `node tools/strip.js [name]` | Writes frame-by-frame contact sheets of moves to `tools/out/`. |
+| `node tools/audio-test.js` | Measures every sound in headless Chrome and fails on silence, clipping or errors. With `npm start` running, http://localhost:5173/tools/audio-test.html is a soundboard with a button per sound. |
+| `node tools/arena-shot.js` | Screenshots each arena at several camera positions. Needs `node tools/serve.js 5182` running. |
 
 The smoke and strip tools need Chrome and `npm install` (for `puppeteer-core`).
 
