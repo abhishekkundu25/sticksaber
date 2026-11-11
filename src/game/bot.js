@@ -2,6 +2,7 @@
 // live fight behind the menu. It reads enemy wind-ups the way a person would (parry white tells,
 // dodge red ones, jump shockwaves) and mixes its combos. `skill` (0..1) is the chance it reacts to
 // any given threat.
+import { rng } from '../core/math.js';
 const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'light', 'heavy', 'guard', 'dash', 'special'];
 const COMBOS = [
   ['light', 'light', 'light', 'light'], ['light', 'light', 'heavy'], ['heavy'], ['light', 'heavy'],
@@ -42,7 +43,7 @@ export class BotInput {
         if (lead > 0.11 || lead < -0.02 || dist > reach) continue;
         if (this.seen.get(e) === key) continue;
         this.seen.set(e, key);
-        if (Math.random() > this.skill) continue;
+        if (rng() > this.skill) continue;
         if (h.unblockable) { if (e.move.id === 'br_charge' || h.sweepBody) this.press('jump', 0.25); else { this.press(e.x > p.x ? 'left' : 'right', 0.25); this.press('dash'); } }
         else { this.down[e.x > p.x ? 'right' : 'left'] = false; p.facing = e.x > p.x ? 1 : -1; this.press('guard', 0.22); }
         this.script.length = 0; this.wait = 0.2;
@@ -52,13 +53,13 @@ export class BotInput {
       if (q.team === 0) continue;
       const d = Math.abs(q.x - p.x);
       if (this.seen.get(q)) continue;
-      if (q.type === 'bolt' && d < 110 && Math.abs(q.y - p.cy) < 90) { this.seen.set(q, 1); if (Math.random() < this.skill) { p.facing = q.x > p.x ? 1 : -1; this.press('guard', 0.2); this.wait = 0.2; } }
-      if ((q.type === 'wave' || q.type === 'crescent') && d < 120 && (q.x - p.x) * q.dir < 0) { this.seen.set(q, 1); if (Math.random() < this.skill) { this.press('jump', 0.3); this.wait = 0.25; } }
+      if (q.type === 'bolt' && d < 110 && Math.abs(q.y - p.cy) < 90) { this.seen.set(q, 1); if (rng() < this.skill) { p.facing = q.x > p.x ? 1 : -1; this.press('guard', 0.2); this.wait = 0.2; } }
+      if ((q.type === 'wave' || q.type === 'crescent') && d < 120 && (q.x - p.x) * q.dir < 0) { this.seen.set(q, 1); if (rng() < this.skill) { this.press('jump', 0.3); this.wait = 0.25; } }
     }
-    if (w.marker?.lock && Math.abs(w.marker.x - p.x) < 150 && !this.seen.get(w.marker)) { this.seen.set(w.marker, 1); if (Math.random() < this.skill) { this.press('right', 0.3); this.press('dash'); } }
+    if (w.marker?.lock && Math.abs(w.marker.x - p.x) < 150 && !this.seen.get(w.marker)) { this.seen.set(w.marker, 1); if (rng() < this.skill) { this.press('right', 0.3); this.press('dash'); } }
 
-    if (p.state === 'ragdoll' && p.rag.y[2] > -50 && Math.random() < this.skill * dt * 20) this.press('dash');
-    if (p.riposteT > 0 && Math.random() < this.skill) { this.press('light'); return; }
+    if (p.state === 'ragdoll' && p.rag.y[2] > -50 && rng() < this.skill * dt * 20) this.press('dash');
+    if (p.riposteT > 0 && rng() < this.skill) { this.press('light'); return; }
     if (this.down.guard || !tgt) return;
     if ((this.wait -= dt) > 0) return;
 
@@ -67,10 +68,10 @@ export class BotInput {
     if (channel && td > 260 && w.focus >= 100 && p.armed) { this.press('special'); this.wait = 0.5; return; }
     if (tgt.y < -400) { this.down[p.x > 0 ? 'left' : 'right'] = true; return; } // boss is airborne: keep moving
     const reach = 96 + 34 * (tgt.scale - 1);
-    if (td > reach) { this.down[dir] = true; if (td > 420 && p.dashCd <= 0 && Math.random() < dt * 3) this.press('dash'); return; }
+    if (td > reach) { this.down[dir] = true; if (td > 420 && p.dashCd <= 0 && rng() < dt * 3) this.press('dash'); return; }
     if (!this.script.length) {
       // `repeat` forces the same string every time, to check that the game punishes it.
-      this.script = [...(this.repeat || COMBOS[(Math.random() * COMBOS.length) | 0])];
+      this.script = [...(this.repeat || COMBOS[(rng() * COMBOS.length) | 0])];
       if (Math.abs(dx) > 8) p.facing = dx > 0 ? 1 : -1;
     }
     const step = this.script.shift();

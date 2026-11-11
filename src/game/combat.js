@@ -1,6 +1,6 @@
 // Hit detection and resolution: swept blade vs. body circles, then guard / parry / clash / read /
 // damage / reaction in that order.
-import { distPointSeg, rand } from '../core/math.js';
+import { distPointSeg, rand, rng } from '../core/math.js';
 
 const hc = new Float32Array(12);
 export function hurtCircles(f, out = hc) {
@@ -13,7 +13,12 @@ export function hurtCircles(f, out = hc) {
 }
 
 // Does attacker A's current weapon sweep touch any of B's circles? Returns the index of the circle hit or -1.
-function weaponTouches(A, h, c) {
+function weaponTouches(A, h, c, B) {
+  if (h.shape === 'low') {
+    // A sweep along the floor: only bodies standing in its reach are hit, so a jump clears it.
+    const ox = A.x + h.ox * A.scale * A.facing;
+    return B.y > -44 && Math.abs(B.x - ox) < h.r * A.scale ? 9 : -1;
+  }
   if (h.shape === 'circle') {
     const ox = A.x + h.ox * A.scale * A.facing, oy = A.y + h.oy * A.scale, r = h.r * A.scale;
     for (let i = 0; i < 12; i += 3) if (Math.hypot(c[i] - ox, c[i + 1] - oy) < r + c[i + 2]) return i;
@@ -36,14 +41,14 @@ export function resolveCombat(world) {
   const fs = world.fighters;
   for (let a = 0; a < fs.length; a++) {
     const A = fs[a];
-    if (!A.activeHit || A.state !== 'attack') continue;
+    if (!A.activeHit || (A.state !== 'attack' && A.state !== 'custom')) continue;
     for (let b = 0; b < fs.length; b++) {
       const B = fs[b];
       const h = A.activeHit;
       if (!h) break; // a clash or parry earlier in this loop ended the attack
-      if (B.team === A.team || B.remove || A.hitSet.has(B)) continue;
+      if (B.team === A.team || B.remove || B.phantom || A.hitSet.has(B)) continue;
       const c = hurtCircles(B);
-      const i = weaponTouches(A, h, c);
+      const i = weaponTouches(A, h, c, B);
       if (i >= 0) applyHit(world, A, B, h, c[i], c[i + 1]);
     }
   }
@@ -92,7 +97,7 @@ export function applyHit(world, A, B, h, cx, cy) {
     if (A?.charged) { dmg *= 1.6; post *= 1.8; }
     world.gainFocus(6 * r.mul * (fresh ? 1.5 : 1) * (1 + world.style.rank * 0.12));
     if (A) A.hitLanded = true;
-  } else dmg *= world.enemyDmg;
+  } else dmg *= world.enemyDmg * (A ? A.dmgMul : 1);
   if (B.broken) dmg *= 1.5;
   const pm = B.move?.punish;
   if (pm && B.state === 'attack' && B.mt >= pm[0] && B.mt <= pm[1]) { post *= 1.8; dmg *= 1.25; punished = true; }
@@ -107,7 +112,7 @@ export function applyHit(world, A, B, h, cx, cy) {
       B.adapt[fam] = (B.adapt[fam] || 0) + 1;
       if (B.adapt[fam] >= B.def.adaptAt && B.reads !== fam) { B.reads = fam; world.onAdapt(B, fam); }
     }
-    if (B.state !== 'stagger') { B.posture += post; B.postureDelay = 2.4; }
+    if (B.state !== 'stagger') { B.posture += post * (B.def.postureTaken ?? 1); B.postureDelay = 2.4; }
     B.ai.hurt?.(B, world, A, h);
   }
 
@@ -177,7 +182,7 @@ function kill(world, A, B, h, cx, cy, dir) {
   B.die(kvx, kvy, rand(-7, 7));
   if (spike) B.rag.bounce = 0.6;
   let cut = -1;
-  if (!B.isPlayer && !h.shape && (h.dmg >= 9 || Math.random() < 0.5)) cut = B.severNear(cx, cy);
+  if (!B.isPlayer && !h.shape && (h.dmg >= 9 || rng() < 0.5)) cut = B.severNear(cx, cy);
   world.onKill(A, B, h, cx, cy, dir, cut);
   return 'kill';
 }
@@ -205,6 +210,7 @@ function parry(world, D, A, h, cx, cy, dir) {
   world.lastParried = A;
   A.posture += A.def.parryPosture ?? 50; A.postureDelay = 3; A.barT = 3.5;
   if (A.posture >= A.maxPosture && !A.broken) breakPosture(world, A);
+  else if (A.def.flying) A.toRagdoll(-dir * 260, -120, 5); // a parried drone drops out of the air
   else { A.setState('recoil', A.def.parryRecoil ?? 0.95); A.vx = -dir * 180; A.ai.onParried?.(A, world); }
   return 'parry';
 }

@@ -1,6 +1,6 @@
 // The simulation: owns fighters, projectiles, effects, time control and the camera. No DOM access, so
 // it runs headless for fuzz tests; sound and input are injected.
-import { clamp, lerp, rand, noise1 } from '../core/math.js';
+import { clamp, lerp, rand, noise1, rng } from '../core/math.js';
 import { Fighter } from './fighter.js';
 import { resolveCombat } from './combat.js';
 import { Projectiles } from './projectiles.js';
@@ -63,6 +63,7 @@ export class World {
     this.bannerMsg = null; this.screenFlash = null; this.lockInput = false;
     this.events = []; // drained by the director / main loop: {type, ...}
     this.training = false;
+    this.floor = 1; // 1-based floor number; enemies unlock extra attacks as it rises
   }
 
   // ───────────── setup ─────────────
@@ -73,12 +74,31 @@ export class World {
     this.cam.x = x;
     return p;
   }
-  spawnEnemy(kind, x, drop = true) {
+  // opts: { elite: 'swift' | 'armored' | 'volatile', temper: 'aggressive' | 'cautious' | 'flank' }
+  spawnEnemy(kind, x, drop = true, opts = null) {
     const def = ENEMIES[kind];
     const f = new Fighter(def, clamp(x, this.minX + 60, this.maxX - 60), 1);
     if (def.hitWall) f.hitWall = (w) => def.hitWall(f, w);
     f.face(this.player ? this.player.x : 0);
-    if (drop) { f.y = -620; f.vy = 500; f.onGround = false; this.fx.beam(f.x, 0.7, def.color); this.sfx('ignite', f.x, 0.5); }
+    if (opts?.temper) f.temper = opts.temper;
+    if (opts?.elite) {
+      f.elite = opts.elite;
+      f.hp = f.maxHp = Math.round(def.hp * 1.35);
+      if (opts.elite === 'swift') f.rate = 1.25;
+    }
+    if (drop) {
+      f.y = def.flying ? -520 : -620; f.vy = 500; f.onGround = false;
+      this.fx.beam(f.x, 0.7, def.color); this.sfx(f.elite ? 'elite' : 'ignite', f.x, f.elite ? 0.9 : 0.5);
+    }
+    this.fighters.push(f);
+    return f;
+  }
+  // An afterimage that repeats one of the boss's moves a beat later. It cannot be hit.
+  spawnEcho(src, move, delay) {
+    const f = new Fighter(ENEMIES.echo, src.x, 1);
+    f.facing = src.facing; f.phantom = true; f.double = src.double; f.color = src.color; f.fade = 0.5; f.dmgMul = 0.6;
+    f.p.set(src.p); f.ai.wait = delay; f.ai.move = move;
+    f.computeJoints();
     this.fighters.push(f);
     return f;
   }
@@ -87,10 +107,12 @@ export class World {
     this.projectiles.clear(); this.boss = null; this.marker = null; this.bossChannel = 0;
     if (this.player) this.player.armed = true;
   }
-  get enemies() { return this.fighters.filter((f) => f.team === 1 && !f.dead); }
+  get enemies() { return this.fighters.filter((f) => f.team === 1 && !f.dead && !f.phantom); }
+  // Allocation-free count for per-frame callers.
+  countEnemies() { let n = 0; for (const f of this.fighters) if (f.team === 1 && !f.dead && !f.phantom) n++; return n; }
 
   // ───────────── services used by fighters / combat ─────────────
-  sfx(name, x, vol = 1) { this.sfxOut?.(name, x, vol); }
+  sfx(name, x, vol = 1, pitch = 1) { this.sfxOut?.(name, x, vol, pitch); }
   audioLoop(name, on) { this.loopOut?.(name, on); }
   stop(t) { if (t > this.hitstop) this.hitstop = t; }
   slow(k, t) { if (this.slowT <= 0 || k <= this.slowK) { this.slowK = k; this.slowT = Math.max(this.slowT, t); } }
@@ -108,7 +130,7 @@ export class World {
   requestAttack(f, ranged = false) {
     if (this.time - this.lastAtkT < this.atkGap) return false;
     let n = 0;
-    for (const e of this.fighters) if (e !== f && e.team === 1 && !e.dead && e.state === 'attack' && !!e.def.ranged === ranged) n++;
+    for (const e of this.fighters) if (e !== f && e.team === 1 && !e.dead && !e.phantom && (e.state === 'attack' || e.ai.busy) && !!e.def.ranged === ranged) n++;
     if (n >= (ranged ? 1 : this.maxAttackers)) return false;
     this.lastAtkT = this.time;
     return true;
@@ -118,7 +140,7 @@ export class World {
   stepSpeed(f, v) {
     if (v > 700) return v;
     for (const e of this.fighters) {
-      if (e.team === f.team || e.dead || e.rag) continue;
+      if (e.team === f.team || e.dead || e.rag || e.phantom || e.def.flying) continue;
       const d = (e.x - f.x) * f.facing;
       if (d > 0 && d < 54 * (f.scale + e.scale) / 2 + 6 && Math.abs(e.y - f.y) < 90) return 0;
     }
@@ -138,6 +160,11 @@ export class World {
       fx.spark(f.x, -3, -Math.PI / 2, 1.4, 26, 640, f.color); fx.dust(f.x - 20, 0, 6, -1, 300); fx.dust(f.x + 20, 0, 6, 1, 300);
       fx.flash(f.x, -10, 130, f.color, 0.16);
       this.sfx('slam', f.x); this.shake(0.5);
+    } else if (name === 'hammer') {
+      const x = f.tx;
+      fx.spark(x, -3, -Math.PI / 2, 1.3, 30, 760, f.color, { white: 0.4 }); fx.dust(x - 20, 0, 7, -1, 300); fx.dust(x + 20, 0, 7, 1, 300);
+      fx.flash(x, -10, 150, f.color, 0.18); fx.ring(x, -2, 14, 230, 0.4, f.color, 0.22, 7);
+      this.sfx('hammer', x); this.shake(0.6);
     } else if (name === 'riposteLine') {
       fx.slash(f.x + f.facing * 150, f.cy, 0, 520, f.color, 0.3, 7);
       for (let i = 0; i < 3; i++) fx.ghost(f, f.color, 0.3 + i * 0.06);
@@ -145,14 +172,26 @@ export class World {
   }
 
   spawnFrom(f, what) {
+    const pl = this.player;
     if (what === 'saber') { f.armed = false; this.projectiles.saber(f); this.audioLoop('throw', true); }
+    else if (what === 'disc') { f.armed = false; this.projectiles.saber(f, 430); }
+    else if (what === 'lob') { this.projectiles.lob(f, f.j[12], f.j[13], clamp(pl.x + pl.vx * 0.35, this.minX + 40, this.maxX - 40)); }
+    else if (what === 'embers') {
+      for (let i = -1; i <= 1; i++) this.projectiles.lob(f, f.tx, f.ty, clamp(pl.x + i * 190 + pl.vx * 0.3, this.minX + 40, this.maxX - 40), { time: 0.8 + (i + 1) * 0.12, fuse: 0.55, r: 90, dmg: 13 });
+    } else if (what === 'pillars') {
+      // A line of eruptions walking out from the hammer toward and past the player.
+      const dir = pl.x >= f.x ? 1 : -1;
+      for (let i = 0; i < 5; i++) this.projectiles.pillar(f, clamp(f.x + dir * (150 + i * 150), this.minX + 30, this.maxX - 30), 0.75 + i * 0.16);
+    } else if (what === 'waveFwd') {
+      this.projectiles.wave(f, f.tx, f.facing, { dmg: 13 }); this.sfx('shockwave', f.tx);
+    }
     else if (what === 'bolt') {
       const ang = Math.atan2(f.ty - f.by, f.tx - f.bx);
       this.projectiles.bolt(f, f.tx, f.ty, ang);
       this.fx.flash(f.tx, f.ty, 50, f.color, 0.1); this.fx.spark(f.tx, f.ty, ang, 0.5, 6, 420, f.color);
       this.sfx('bolt', f.x);
     } else if (what === 'waves') {
-      const x = f.move?.id === 'p_slam' ? f.x : f.tx;
+      const x = f.move?.hits[0]?.shape === 'circle' ? f.x : f.tx;
       this.projectiles.wave(f, x, 1, { dmg: 13 }); this.projectiles.wave(f, x, -1, { dmg: 13 });
       this.fx.ring(x, -2, 14, 220, 0.4, f.color, 0.22, 6);
       this.sfx('shockwave', x); this.sfx('slam', x);
@@ -163,7 +202,7 @@ export class World {
   }
 
   chargeFx(f, dt) {
-    if (Math.random() < dt * 60) {
+    if (rng() < dt * 60) {
       const a = rand(0, 6.28), r = rand(40, 80);
       this.fx.spark(f.tx + Math.cos(a) * r, f.ty + Math.sin(a) * r, a + Math.PI, 0.1, 1, 260, f.color, { grav: 0, life: 0.22, drag: 0 });
     }
@@ -236,10 +275,11 @@ export class World {
     fx.flash(cx, cy, 100, '#ffffff', 0.16);
     if (cut >= 0) { fx.ember(cx, cy, 14, '#ffb060'); this.sfx('sever', cx); }
     this.sfx('kill', cx); this.stop(0.14); this.shake(0.5); this.punch(0.03);
+    if (B.elite === 'volatile') this.projectiles.mine(B, B.x, { color: '#ff7a2e', fuse: 0.8, r: 125, dmg: 16 });
     this.gainFocus(12); this.style.bonus(6);
     const pl = this.player;
     if (pl && !pl.dead) pl.hp = Math.min(pl.maxHp, pl.hp + 2 + Math.min(this.rally, 6));
-    const left = this.enemies.length;
+    const left = this.countEnemies();
     if (left === 0 && !this.training) this.slow(0.2, 0.9);
     this.events.push({ type: 'kill', kind: B.def.kind, left, boss: !!B.def.boss });
     if (B.def.boss) { this.flashScreen('#ffffff', 0.6); this.slow(0.12, 2.2); fx.ring(cx, cy, 20, 700, 0.9, '#ffffff', 1, 8); }
@@ -284,10 +324,10 @@ export class World {
     const fs = this.fighters, k = Math.min(1, dt * 14);
     for (let a = 0; a < fs.length; a++) {
       const A = fs[a];
-      if (A.rag || !A.onGround || A.state === 'dash' || A.stepping && Math.abs(A.vx) > 700) continue;
+      if (A.rag || A.phantom || !A.onGround || A.state === 'dash' || A.stepping && Math.abs(A.vx) > 700) continue;
       for (let b = a + 1; b < fs.length; b++) {
         const B = fs[b];
-        if (B.rag || !B.onGround || B.state === 'dash' || B.stepping && Math.abs(B.vx) > 700) continue;
+        if (B.rag || B.phantom || !B.onGround || B.state === 'dash' || B.stepping && Math.abs(B.vx) > 700) continue;
         const min = 38 * (A.scale + B.scale) / 2, dx = B.x - A.x;
         if (Math.abs(dx) >= min) continue;
         const push = (min - Math.abs(dx)) * 0.5 * k * (dx >= 0 ? 1 : -1);
@@ -304,7 +344,7 @@ export class World {
     c.t += dt;
     let tx = p.x + p.facing * 40, spread = 0, n = 0, ex = 0;
     for (const e of this.fighters) {
-      if (e.team !== 1 || e.dead || e.y < -700) continue;
+      if (e.team !== 1 || e.dead || e.phantom || e.y < -700) continue;
       const d = Math.abs(e.x - p.x);
       if (d < 760) { ex += e.x; n++; if (d > spread) spread = d; }
     }

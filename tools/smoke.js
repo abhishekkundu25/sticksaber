@@ -46,28 +46,25 @@ try {
     await tap('KeyK'); await sleep(260); await shot('07-spike');
     await sleep(900);
     // Spawn the whole roster for a silhouette line-up.
-    await ev(() => { const g = window.__game; g.world.clearEnemies(); g.world.lockInput = true; const p = g.world.player; p.x = -520; ['initiate', 'bulwark', 'duelist', 'marksman', 'brute', 'proctor'].forEach((k, i) => { const f = g.world.spawnEnemy(k, -300 + i * 170, false); f.def = { ...f.def, ctrl: null }; f.facing = -1; }); });
+    await ev(() => { const g = window.__game; g.world.clearEnemies(); g.world.lockInput = true; const p = g.world.player; p.x = -520; g.world.cam.zoom = 0.9; ['initiate', 'bulwark', 'duelist', 'marksman', 'lancer', 'wraith', 'drone', 'brute', 'forgemaster', 'proctor'].forEach((k, i) => { const f = g.world.spawnEnemy(k, -380 + i * 130, false); f.def = { ...f.def, ctrl: null }; f.facing = -1; }); });
     await sleep(900);
     await shot('08-roster');
     await ev(() => { const g = window.__game; g.world.clearEnemies(); g.world.lockInput = false; });
   }
   if (scenario === 'all' || scenario === 'run') {
-    await ev(() => window.__game.startRun());
-    await sleep(3400);
-    await shot('10-stage1');
-    await ev(() => { const g = window.__game; g.director.startRun(1); });
-    await sleep(4200);
-    await shot('11-stage2');
-    await ev(() => { const g = window.__game; g.director.startRun(2); });
-    await sleep(4600);
-    await shot('12-boss');
+    // One screenshot a few seconds into each of the ten floors.
+    for (let f = 1; f <= 10; f++) {
+      await ev((n) => window.__game.startRun(n, 4242), f);
+      await sleep(f === 5 || f === 10 ? 4600 : 5200);
+      await shot(`floor-${String(f).padStart(2, '0')}`);
+    }
   }
   if (scenario === 'all' || scenario === 'boss') {
     // Let the scripted player fight the boss at a fixed timestep and grab each signature moment once.
     const shots = await ev(async () => {
       const { BotInput } = await import('/src/game/bot.js');
       const g = window.__game, w = g.world;
-      g.app.manual = true; g.startRun(); g.director.startRun(2);
+      g.app.manual = true; g.startRun(10, 99);
       const real = w.input; w.input = new BotInput(w, 0.85);
       const cv = document.getElementById('game'), out = {}, pending = {};
       const want = {
@@ -95,7 +92,7 @@ try {
   }
   if (scenario === 'all' || scenario === 'perf') {
     // Busy scene: every enemy type fighting, measure rAF cadence and render cost.
-    await ev(() => { const g = window.__game; g.startTraining(); ['Digit1', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].forEach((k) => g.director.trainingKey(k)); });
+    await ev(() => { const g = window.__game; g.startTraining(); ['Digit1', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8'].forEach((k) => g.director.trainingKey(k)); });
     await tap('KeyL'); // a real key press, so the page is allowed to start audio
     await sleep(1500);
     const perf = await ev(() => new Promise((res) => {

@@ -1,25 +1,23 @@
 // HUD, banners and menus, drawn on the game canvas in logical (720-high) units.
 import { clamp, TAU } from '../core/math.js';
 import { RANK_NAMES, famLabel } from '../game/world.js';
-import { STAGES } from '../game/encounters.js';
+import { FLOORS, roman, seedLabel } from '../game/gen.js';
 
 const FONT = '"Avenir Next Condensed", "Bahnschrift", "DIN Condensed", "Roboto Condensed", "Arial Narrow", sans-serif';
 const RANK_COL = ['#8fa3b8', '#8fa3b8', '#9fe8ff', '#7dffb0', '#ffd36b', '#ff6bd6'];
-const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 
-export const MENU = ['ASCEND', 'TRAINING ROOM', 'CONTROLS'];
 const MOVELIST = [
   ['MOVE', 'A / D  or  ← / →'], ['JUMP  ·  DOUBLE JUMP', 'SPACE / W'], ['DASH  (brief invulnerability)', 'SHIFT'],
   ['LIGHT STRING', 'J  J  J  J'], ['HEAVY  ·  hold to charge', 'K'], ['GUARD  ·  tap on impact to PARRY', 'L'],
   ['RIPOSTE  (after a parry)', 'J or K'], ['LAUNCHER', 'S + K   or   J J K'], ['BREAKER  ·  COMET', 'J K   ·   J J J K'],
   ['AIR STRING  ·  SPIKE', 'J J J   ·   K'], ['PLUNGE  (in the air)', 'S + K'], ['DASH CUT', 'SHIFT then J'],
-  ['SABER THROW  (1 focus)', 'I'], ['RECOVER  (as you hit the floor)', 'SHIFT'], ['PAUSE', 'ESC'],
+  ['SABER THROW  (1 focus)', 'I'], ['RECOVER  (as you hit the floor)', 'SHIFT'], ['PAUSE  ·  GRAPHICS QUALITY', 'ESC   ·   G'],
 ];
 
 export class Hud {
   constructor() {
     this.hpLag = 1; this.comboShown = 0; this.comboPop = 0; this.bossLag = 1; this.t = 0;
-    this.vig = null; this.bars = 0;
+    this.vig = null; this.bars = 0; this.hpGrad = null; this.menuGrad = null; this.menuH = 0;
   }
 
   text(ctx, s, x, y, size, color, align = 'left', weight = 600, spacing = 0) {
@@ -47,7 +45,7 @@ export class Hud {
       if (world.boss && !world.boss.remove && world.boss.y > -2000) this.boss(ctx, W, H, world, world.boss, dt);
       if (!dir.training) {
         const s = dir.stageDef;
-        this.text(ctx, `FLOOR ${ROMAN[dir.stage]}   ·   ${s.boss ? 'EXAMINATION' : `WAVE ${dir.wave + 1} / ${dir.waveCount}`}`, W - 36, 34, 14, '#ffffffaa', 'right', 600, 3);
+        this.text(ctx, `FLOOR ${roman(dir.stage + 1)} / ${roman(FLOORS)}   ·   ${s.boss ? 'EXAMINER' : `WAVE ${dir.wave + 1} / ${dir.waveCount}`}`, W - 36, 34, 14, '#ffffffaa', 'right', 600, 3);
       } else this.text(ctx, 'TRAINING ROOM', W - 36, 34, 14, '#ffffffaa', 'right', 600, 3);
       if (dir.hint && dir.hintT > 0) {
         const a = Math.min(1, dir.hintT, dir.training ? 1 : (11 - dir.hintT) * 2);
@@ -73,7 +71,8 @@ export class Hud {
     if (dir.fade > 0) { ctx.globalAlpha = dir.fade; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
     if (app.state === 'menu') this.menu(ctx, W, H, app);
     if (app.state === 'controls') this.controls(ctx, W, H, 'ENTER or ESC to return');
-    if (app.state === 'pause') this.controls(ctx, W, H, 'ESC resume      ·      Q quit to menu', 'PAUSED');
+    if (app.state === 'pause') this.controls(ctx, W, H, `ESC resume      ·      Q quit to menu${dir.training ? '' : `      ·      SEED ${seedLabel(dir.seed)}`}`, 'PAUSED');
+    if (app.toast) { ctx.globalAlpha = Math.min(1, app.toast.t * 3); this.text(ctx, app.toast.text, W / 2, 96, 16, '#56e9ff', 'center', 700, 5); ctx.globalAlpha = 1; }
     if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
   }
 
@@ -97,9 +96,8 @@ export class Hud {
     ctx.fillStyle = '#ffffff'; ctx.fillRect(x, y, w * this.hpLag, 10);
     const rally = Math.min(world.rally / p.maxHp, 1 - hp);
     if (rally > 0) { ctx.fillStyle = '#ff9a2e'; ctx.globalAlpha = 0.6 + Math.sin(this.t * 10) * 0.2; ctx.fillRect(x + w * hp, y, w * rally, 10); ctx.globalAlpha = 1; }
-    const gr = ctx.createLinearGradient(x, 0, x + w, 0);
-    gr.addColorStop(0, '#2bb8e0'); gr.addColorStop(1, '#a8f4ff');
-    ctx.fillStyle = hp < 0.32 ? '#ff5060' : gr; ctx.fillRect(x, y, w * hp, 10);
+    if (!this.hpGrad) { this.hpGrad = ctx.createLinearGradient(x, 0, x + w, 0); this.hpGrad.addColorStop(0, '#2bb8e0'); this.hpGrad.addColorStop(1, '#a8f4ff'); }
+    ctx.fillStyle = hp < 0.32 ? '#ff5060' : this.hpGrad; ctx.fillRect(x, y, w * hp, 10);
     // Guard posture: fills as you block.
     const po = p.posture / p.maxPosture;
     if (po > 0.01) { ctx.fillStyle = '#00000088'; ctx.fillRect(x, y + 13, w * 0.6, 4); ctx.fillStyle = po > 0.75 ? '#ff6b4a' : '#ffd36b'; ctx.fillRect(x, y + 13, w * 0.6 * po, 4); }
@@ -148,7 +146,8 @@ export class Hud {
     const hp = clamp(b.hp / b.maxHp, 0, 1);
     this.bossLag += (hp - this.bossLag) * Math.min(1, dt * (hp < this.bossLag ? 1.8 : 20));
     this.text(ctx, b.def.name, x, y - 16, 18, '#ffffff', 'left', 700, 5);
-    this.text(ctx, b.double ? 'PHASE II' : b.def.title.toUpperCase(), x + w, y - 15, 11, b.double ? b.color : '#ffffff88', 'right', 600, 3);
+    const phase = b.ai.p3 ? 'PHASE III' : b.ai.phase >= 2 ? 'PHASE II' : null;
+    this.text(ctx, phase || b.def.title.toUpperCase(), x + w, y - 15, 11, phase ? b.color : '#ffffff88', 'right', 600, 3);
     ctx.fillStyle = '#000000aa'; ctx.fillRect(x - 2, y - 2, w + 4, 14);
     ctx.fillStyle = '#ffffff18'; ctx.fillRect(x, y, w, 10);
     ctx.fillStyle = '#ffffff'; ctx.fillRect(x, y, w * this.bossLag, 10);
@@ -160,7 +159,9 @@ export class Hud {
       ctx.fillStyle = '#7dffb0'; ctx.fillRect(x, y - 6, w * world.bossChannel, 2);
       this.text(ctx, 'RECALIBRATING   ·   INTERRUPT IT', W / 2, y - 16, 13, '#7dffb0', 'center', 700, 3);
     }
-    ctx.fillStyle = '#ffffff55'; ctx.fillRect(x + w * 0.6, y - 2, 1.5, 14);
+    // Tick marks where the fight changes.
+    ctx.fillStyle = '#ffffff55';
+    for (const m of b.def.kind === 'proctor' ? [0.6, 0.25] : [0.5]) ctx.fillRect(x + w * m, y - 2, 1.5, 14);
     const po = clamp(b.posture / b.maxPosture, 0, 1);
     ctx.fillStyle = '#ffffff18'; ctx.fillRect(x + w * 0.2, y + 15, w * 0.6, 3);
     ctx.fillStyle = b.broken ? '#ffffff' : '#ffd36b'; ctx.fillRect(W / 2 - w * 0.3 * po, y + 15, w * 0.6 * po, 3);
@@ -168,6 +169,8 @@ export class Hud {
       const a = 0.75 + Math.sin(this.t * 9) * 0.25;
       ctx.globalAlpha = a; this.text(ctx, `IT HAS READ YOUR ${famLabel(b.reads)}   ·   CHANGE ATTACK`, W / 2, y + 32, 12, '#ff6b6b', 'center', 700, 2); ctx.globalAlpha = 1;
     } else if (b.broken) this.text(ctx, 'POSTURE BROKEN', W / 2, y + 32, 12, '#ffd36b', 'center', 700, 3);
+    else if (b.vent > 0) { ctx.globalAlpha = 0.7 + Math.sin(this.t * 14) * 0.3; this.text(ctx, 'VENTING   ·   STRIKE NOW', W / 2, y + 32, 12, '#bfe6ff', 'center', 700, 3); ctx.globalAlpha = 1; }
+    else if (b.heat >= 3) this.text(ctx, 'WHITE HOT   ·   CANNOT BE PARRIED', W / 2, y + 32, 12, '#ff6b6b', 'center', 700, 2);
   }
 
   banner(ctx, W, b) {
@@ -194,6 +197,7 @@ export class Hud {
     ctx.globalAlpha = a * 0.72; ctx.fillStyle = '#05060a'; ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = a;
     this.text(ctx, 'EXAMINATION PASSED', W / 2, 170, 58, '#ffe2a0', 'center', 800, 14);
+    this.text(ctx, `RUN SEED  ${seedLabel(dir.seed)}`, W / 2, H - 56, 12, '#ffffff77', 'center', 600, 4);
     ctx.fillStyle = '#ffe2a0'; ctx.fillRect(W / 2 - 220, 212, 440, 1.5);
     const m = Math.floor(dir.runTime / 60), s = Math.floor(dir.runTime % 60);
     const rows = [['TIME', `${m}:${String(s).padStart(2, '0')}`], ['FALLS', dir.deaths], ['BEST COMBO', world.style.best], ['PARRIES', world.stats.parries], ['PERFECT DODGES', world.stats.dodges],
@@ -208,9 +212,11 @@ export class Hud {
   }
 
   menu(ctx, W, H, app) {
-    const gr = ctx.createLinearGradient(0, 0, 0, H);
-    gr.addColorStop(0, '#04060be0'); gr.addColorStop(0.42, '#04060b70'); gr.addColorStop(0.7, '#04060b30'); gr.addColorStop(0.84, '#04060bb0'); gr.addColorStop(1, '#04060bf0');
-    ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+    if (!this.menuGrad || this.menuH !== H) {
+      const gr = this.menuGrad = ctx.createLinearGradient(0, 0, 0, H); this.menuH = H;
+      gr.addColorStop(0, '#04060be0'); gr.addColorStop(0.42, '#04060b70'); gr.addColorStop(0.7, '#04060b30'); gr.addColorStop(0.84, '#04060bb0'); gr.addColorStop(1, '#04060bf0');
+    }
+    ctx.fillStyle = this.menuGrad; ctx.fillRect(0, 0, W, H);
     const cx = W / 2, ty = 150;
     this.text(ctx, 'STICKSABER', cx, ty, 112, '#ffffff', 'center', 800, 18);
     // A lit blade under the title.
@@ -222,13 +228,14 @@ export class Hud {
     ctx.fillStyle = '#aeb9c8'; ctx.fillRect(cx - bw / 2 - 46, ty + 67, 46, 6);
     this.text(ctx, 'A S C E N D   T H E   S P I R E', cx, ty + 104, 14, '#ffffff99', 'center', 600, 4);
     // Menu runs along the bottom so the sparring match behind it stays visible.
-    MENU.forEach((m, i) => {
-      const x = cx + (i - (MENU.length - 1) / 2) * 290, y = H - 96, sel = i === app.idx;
-      this.text(ctx, m, x, y, sel ? 28 : 22, sel ? '#56e9ff' : '#ffffffaa', 'center', sel ? 700 : 600, 7);
-      if (sel) { ctx.fillStyle = '#56e9ff'; ctx.fillRect(x - 110, y + 20, 220, 1.5); }
+    const n = app.menu.length, gap = Math.min(300, (W - 120) / n);
+    app.menu.forEach((m, i) => {
+      const x = cx + (i - (n - 1) / 2) * gap, y = H - 96, sel = i === app.idx;
+      this.text(ctx, m.label, x, y, sel ? 24 : 19, sel ? '#56e9ff' : '#ffffffaa', 'center', sel ? 700 : 600, 5);
+      if (sel) { ctx.fillStyle = '#56e9ff'; ctx.fillRect(x - 100, y + 19, 200, 1.5); }
     });
-    this.text(ctx, 'A / D  select        ENTER  confirm        F  fullscreen        M  mute', cx, H - 36, 13, '#ffffff77', 'center', 600, 3);
-    this.text(ctx, `${STAGES.length} FLOORS  ·  COMBAT PROTOTYPE`, cx, ty + 128, 11, '#ffffff55', 'center', 600, 4);
+    this.text(ctx, 'A / D  select      ENTER  confirm      F  fullscreen      M  mute      G  graphics', cx, H - 36, 13, '#ffffff77', 'center', 600, 3);
+    this.text(ctx, `${FLOORS} FLOORS  ·  EVERY RUN DIFFERENT`, cx, ty + 128, 11, '#ffffff55', 'center', 600, 4);
   }
 
   controls(ctx, W, H, foot, title = 'CONTROLS') {

@@ -1,11 +1,13 @@
 {
   "name": "sticksaber",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Side-view stick-figure energy-sword action game. Zero-dependency ES modules, Canvas 2D + WebAudio.",
   "scripts": {
     "start": "node tools/serve.js",
+    "test": "node --test tests/ && node tools/bench.js",
+    "bench": "node tools/bench.js --report",
     "fuzz": "node tools/fuzz.js",
     "smoke": "node tools/smoke.js"
   },

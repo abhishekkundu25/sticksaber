@@ -4,9 +4,30 @@ export const TAU = Math.PI * 2;
 export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 export const lerp = (a, b, t) => a + (b - a) * t;
 export const sign = (v) => (v < 0 ? -1 : 1);
-export const rand = (a = 1, b) => (b === undefined ? Math.random() * a : a + Math.random() * (b - a));
-export const randSign = () => (Math.random() < 0.5 ? -1 : 1);
-export const pick = (arr) => arr[(Math.random() * arr.length) | 0];
+// All simulation randomness flows through one seedable generator (mulberry32), so a run can be
+// replayed from its seed and tests are deterministic.
+let state = (Date.now() ^ 0x9e3779b9) >>> 0;
+export function seedRng(seed) { state = (seed >>> 0) || 1; }
+export function rng() {
+  state = (state + 0x6d2b79f5) | 0;
+  let t = Math.imul(state ^ (state >>> 15), 1 | state);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+// An independent generator, for content generation that must not disturb the simulation stream.
+export function makeRng(seed) {
+  let s = (seed >>> 0) || 1;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+export const hash32 = (a, b) => { let h = Math.imul(a ^ 0x85ebca6b, 0xc2b2ae35) ^ Math.imul(b + 0x27d4eb2f, 0x165667b1); h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); return (h ^ (h >>> 13)) >>> 0; };
+export const rand = (a = 1, b) => (b === undefined ? rng() * a : a + rng() * (b - a));
+export const randSign = () => (rng() < 0.5 ? -1 : 1);
+export const pick = (arr) => arr[(rng() * arr.length) | 0];
 export const approach = (v, target, step) => (v < target ? Math.min(v + step, target) : Math.max(v - step, target));
 
 export const EASE = {

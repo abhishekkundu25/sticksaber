@@ -1,6 +1,6 @@
 // A Fighter is the shared body for the player and every enemy: kinematic root physics, a spring-driven
 // pose solved to 11 joints, a move/state machine, and a ragdoll it can drop into and blend back out of.
-import { clamp, approach, wrapNear, ik2, TAU, EASE } from '../core/math.js';
+import { clamp, approach, wrapNear, ik2, TAU, EASE, rng } from '../core/math.js';
 import { MOVES, sampleMove, fillStance, makeStance, N, C } from './moves.js';
 import { Ragdoll, BONES, G } from './ragdoll.js';
 
@@ -21,7 +21,7 @@ export class Fighter {
     this.facing = team === 0 ? 1 : -1; this.onGround = true;
     this.hp = this.maxHp = def.hp;
     this.posture = 0; this.maxPosture = def.posture; this.postureDelay = 0;
-    this.state = 'free'; this.st = 0; this.stDur = 0; this.t = Math.random() * 10;
+    this.state = 'free'; this.st = 0; this.stDur = 0; this.t = rng() * 10;
     this.move = null; this.mt = 0; this.hitIdx = -1; this.hitSet = new Set(); this.activeHit = null;
     this.hitLanded = false; this.charging = false; this.chargeT = 0; this.charged = false;
     this.stance = makeStance(def.stance);
@@ -45,6 +45,9 @@ export class Fighter {
     this.ai = {}; this.adapt = {}; this.reads = null;
     this.dead = false; this.deadT = 0; this.remove = false; this.fade = 1;
     this.barT = 0; // seconds the floating health bar stays visible
+    this.rate = 1;        // personal time scale (elite "swift", slowed states)
+    this.phantom = false; // an afterimage: attacks, but cannot be hit or targeted
+    this.dmgMul = 1; this.heat = 0; this.vent = 0; this.elite = null; this.temper = null;
     const s = def.scale;
     this.lens = [DIM.neck * s, DIM.torso * s, DIM.upper * s, DIM.fore * s, DIM.upper * s, DIM.fore * s, DIM.thigh * s, DIM.shin * s, DIM.thigh * s, DIM.shin * s];
     this.computeJoints();
@@ -87,7 +90,9 @@ export class Fighter {
 
   update(world, dt) {
     if (dt <= 0) return;
+    dt *= this.rate;
     this.t += dt; this.st += dt;
+    if (this.vent > 0) this.vent -= dt;
     if (this.invuln > 0) this.invuln -= dt;
     if (this.flash > 0) this.flash -= dt;
     if (this.tele > 0) this.tele -= dt;
@@ -122,7 +127,7 @@ export class Fighter {
       case 'stagger': fric = 2200; if (this.st >= this.stDur) { this.setState('free'); this.broken = false; this.posture = 0; } break;
       case 'getup': if (this.st >= this.stDur) this.setState('free'); break;
       case 'guard': fric = 3200; break;
-      case 'custom': fric = 2000; if (this.stDur > 0 && this.st >= this.stDur) this.setState('free'); break;
+      case 'custom': fric = 2000; if (this.def.flying) grav = 0; if (this.stDur > 0 && this.st >= this.stDur) this.setState('free'); break;
     }
 
     // Root physics.
@@ -170,6 +175,8 @@ export class Fighter {
       }
     }
     this.armorNow = !!m.armor && mt >= m.armor[0] && mt <= m.armor[1];
+    // "Armored" elites shrug off hits through every wind-up.
+    if (this.elite === 'armored' && m.hits.length && mt <= m.hits[m.hits.length - 1].t1) this.armorNow = true;
     if (m.invuln && mt >= m.invuln[0] && mt <= m.invuln[1]) this.invuln = Math.max(this.invuln, 0.03);
     let grav = 1;
     if (m.plunge) {
@@ -187,6 +194,14 @@ export class Fighter {
     if (type === 'sfx') world.sfx(arg, this.x, this.isPlayer ? 1 : 0.8);
     else if (type === 'tele') { this.tele = 0.42; this.teleRed = !!arg; world.sfx(arg ? 'telegraphRed' : 'telegraph', this.x); }
     else if (type === 'leap') { this.vx = arg[0] * this.facing; this.vy = arg[1]; this.onGround = false; this.y -= 1; }
+    else if (type === 'leapAt') {
+      // Jump so as to land on the opponent: arg = [vy, max horizontal speed].
+      const tgt = world.player, air = (2 * -arg[0]) / G;
+      this.face(tgt.x);
+      this.vx = clamp((tgt.x - this.x - this.facing * 40) / air, -arg[1], arg[1]); this.vy = arg[0]; this.onGround = false; this.y -= 1;
+    }
+    else if (type === 'heat') { this.heat = arg; this.color = this.def.heatColors[arg]; if (arg > 0) world.sfx('heatUp', this.x, 0.8, 0.85 + arg * 0.15); }
+    else if (type === 'vent') { this.vent = 1.7; this.heat = 0; this.color = this.def.heatColors[0]; world.sfx('vent', this.x); }
     else if (type === 'fx') world.moveFx(this, arg);
     else if (type === 'spawn') world.spawnFrom(this, arg);
   }
@@ -195,6 +210,7 @@ export class Fighter {
     this.pv[PY] -= clamp(this.vy * 0.35, 80, 420);
     world.onLand(this, this.vy);
     if (this.move?.plunge) { this.startMove('PLUNGE_LAND'); world.moveFx(this, 'plunge'); }
+    else if (this.move?.landMove) { this.startMove(this.move.landMove); world.sfx('slam', this.x); }
   }
 
   updatePose(dt) {
@@ -210,7 +226,7 @@ export class Fighter {
       case 'attack': sampleMove(this.move, this.mt, t); w = 58; z = 0.92;
         if (this.move.run && this.mt > this.move.run) { const bl = t[BL], ha = t[HA], hr = t[HR]; this.runPose(t); t[BL] = bl; t[HA] = ha; t[HR] = hr; t[LEAN] = 0.6; }
         if (this.charging) { t[BL] += Math.sin(this.t * 60) * 0.03; t[PY] -= this.chargeT * 5; }
-        if (this.move.aim && this.mt < this.move.aim[1] + 0.12 && this.aimLocal !== undefined) { t[BL] = this.aimLocal; t[HA] = this.aimLocal * 0.7; }
+        if (this.move.aim && this.aimLocal !== undefined) { const hold = this.mt < this.move.dur - 0.5; if (hold) { t[BL] = this.aimLocal; t[HA] = this.aimLocal * 0.7; } }
         break;
       case 'dash': t[LEAN] = 0.95; t[PY] = 34; t[F1X] = -4; t[F1Y] = 8; t[F2X] = -36; t[F2Y] = 16; t[HA] = -2.7; t[HR] = 0.9; t[BL] = 3.25; t[UA] = -2.9; t[LA] = -2.9; w = 44; z = 0.9; break;
       case 'guard':
@@ -372,7 +388,7 @@ export class Fighter {
   }
 
   die(vx, vy, spin) {
-    this.dead = true; this.hp = 0; this.activeHit = null; this.tele = 0;
+    this.dead = true; this.hp = 0; this.activeHit = null; this.tele = 0; this.fade = 1;
     if (this.rag) this.rag.kick(vx, vy, spin); else this.toRagdoll(vx, vy, spin);
     this.rag.gravScale = 1;
   }

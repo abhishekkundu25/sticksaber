@@ -1,8 +1,9 @@
 // Transient effects. The sim only pushes plain records here (so it stays headless-testable);
 // the draw methods are called by the renderer with the context already in world space.
-import { rand, TAU } from '../core/math.js';
+import { rand, TAU, rng } from '../core/math.js';
 
 const MAX_SPARKS = 520;
+const NONE = Object.freeze({});
 const sprites = new Map();
 
 // Soft radial blob in a given colour, cached. Used for flashes, floor light pools and blade bloom.
@@ -20,17 +21,21 @@ export function glowSprite(color) {
 
 export class Fx {
   constructor() {
+    this.pool = []; // recycled spark records, so a long fight does not feed the garbage collector
     this.sparks = []; this.flashes = []; this.rings = []; this.slashes = []; this.dusts = [];
     this.texts = []; this.ghosts = []; this.beams = []; this.embers = [];
   }
 
   clear() { for (const k of ['sparks', 'flashes', 'rings', 'slashes', 'dusts', 'texts', 'ghosts', 'beams', 'embers']) this[k].length = 0; }
 
-  spark(x, y, ang, spread, n, speed, color, o = {}) {
+  spark(x, y, ang, spread, n, speed, color, o = NONE) {
     for (let i = 0; i < n && this.sparks.length < MAX_SPARKS; i++) {
       const a = ang + rand(-spread, spread), v = speed * rand(0.35, 1);
       const life = (o.life ?? 0.42) * rand(0.5, 1);
-      this.sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life, max: life, color: Math.random() < (o.white ?? 0.3) ? '#ffffff' : color, size: (o.size ?? 2.2) * rand(0.6, 1.3), grav: o.grav ?? 1500, drag: o.drag ?? 2.2 });
+      const s = this.pool.pop() || {};
+      s.x = x; s.y = y; s.vx = Math.cos(a) * v; s.vy = Math.sin(a) * v; s.life = life; s.max = life;
+      s.color = rng() < (o.white ?? 0.3) ? '#ffffff' : color; s.size = (o.size ?? 2.2) * rand(0.6, 1.3); s.grav = o.grav ?? 1500; s.drag = o.drag ?? 2.2;
+      this.sparks.push(s);
     }
   }
   flash(x, y, r, color, life = 0.14) { this.flashes.push({ x, y, r, color, life, max: life }); }
@@ -61,7 +66,7 @@ export class Fx {
     for (let i = a.length - 1; i >= 0; i--) {
       const s = a[i];
       s.life -= dt;
-      if (s.life <= 0) { a[i] = a[a.length - 1]; a.pop(); continue; }
+      if (s.life <= 0) { a[i] = a[a.length - 1]; a.pop(); this.pool.push(s); continue; }
       const d = Math.max(0, 1 - s.drag * dt);
       s.vx *= d; s.vy = s.vy * d + s.grav * dt;
       s.x += s.vx * dt; s.y += s.vy * dt;
@@ -137,11 +142,10 @@ export class Fx {
       }
     }
     for (const b of this.beams) {
-      const k = b.life / b.max, w = 26 * k + 2;
+      // A stretched blob reads as a soft-edged column and needs no per-frame gradient.
+      const k = b.life / b.max, w = 40 * k + 4;
       g.globalAlpha = k * 0.8;
-      const grd = g.createLinearGradient(b.x - w, 0, b.x + w, 0);
-      grd.addColorStop(0, b.color + '00'); grd.addColorStop(0.5, b.color); grd.addColorStop(1, b.color + '00');
-      g.fillStyle = grd; g.fillRect(b.x - w, -900, w * 2, 900);
+      g.drawImage(glowSprite(b.color), b.x - w, -1500, w * 2, 2100);
     }
     g.globalAlpha = 1;
   }

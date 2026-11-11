@@ -1,8 +1,8 @@
 # STICKSABER
 
-A side-view action game for the browser. You are a stick figure with an energy sword, climbing a tower one arena at a time.
+A side-view action game for the browser. You are a stick figure with an energy sword, climbing a ten-floor tower one arena at a time.
 
-This is the combat prototype. It has the full player moveset, five enemy types, one boss, three arenas and a training room. The plan for the full game is in [docs/DESIGN.md](docs/DESIGN.md).
+The game has the full player moveset, eight enemy types, two bosses, three arena families with seeded variants, and a training room. Every run is generated from a seed, so no two climbs are the same. The design notes are in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Run it
 
@@ -12,7 +12,9 @@ npm start
 
 Then open http://localhost:5173. The game uses ES modules, so it needs a local server. Opening `index.html` from disk does not work. There is no build step, and the game has no runtime dependencies.
 
-Start in the training room if you want to judge the movement before fighting anything that hits back. Keys 1 to 6 spawn each enemy type there.
+Start in the training room if you want to judge the movement before fighting anything that hits back. The number keys spawn each enemy type there.
+
+Your progress is the highest floor you have reached. It is saved in the browser, and the menu offers CONTINUE from that floor. Add `?seed=ABC123` to the address to replay or share a specific run. The seed of the current run is shown on the pause and results screens.
 
 ## Controls
 
@@ -27,7 +29,7 @@ Start in the training room if you want to judge the movement before fighting any
 | Throw saber (costs 1 focus) | I | LB |
 | Pause | Esc | Start |
 
-Fullscreen is F. Mute is M.
+Fullscreen is F. Mute is M. G cycles graphics quality between auto, high and low.
 
 ## Moves
 
@@ -46,32 +48,56 @@ Fullscreen is F. Mute is M.
 | Riposte | J or K after a parry | Pass-through cut. Kills an Initiate outright. |
 | Recover | Shift as you hit the floor | Skips the knockdown. |
 
+## The ten floors
+
+| Floor | Arena | Introduces |
+| --- | --- | --- |
+| I | Spire Causeway | Initiate |
+| II | Rain Gallery | Marksman |
+| III | Signal Bridge | Bulwark |
+| IV | Foundry Nine | Duelist, Brute |
+| V | The Anvil | Boss: the Forgemaster |
+| VI | Slag Works | Lancer |
+| VII | Hall of Echoes | Wraith |
+| VIII | The Long Gallery | Drone, elite enemies |
+| IX | Antechamber | Four generated waves of everything |
+| X | Examination Hall | Boss: the Proctor |
+
+The first wave that introduces an enemy is fixed and comes with a hint. Every other wave is generated from the run's seed.
+
 ## What to look for
 
 - Every hit freezes the game for a few frames, shakes the camera a little, and throws sparks along the blade's path.
 - A white flash on an enemy means the attack can be parried. A red flash means it cannot be blocked, so dash through it.
-- Using the same move repeatedly lowers its damage. Duelists and the boss go further: they read a repeated move family, show ADAPTED, then turn the next one aside and counter.
+- Using the same move repeatedly lowers its damage. Duelists and the Proctor go further: they read a repeated move family, show ADAPTED, then turn the next one aside and counter.
 - After you take damage, part of it stays orange on your health bar for three seconds. Landing hits wins it back.
-- The boss kneels to heal at 45% and 20% health. Any hit interrupts it and breaks its posture. The saber throw reaches it from across the room.
+- Enemies learn extra attacks on higher floors, and each one rolls a temperament when it spawns: aggressive, cautious, or a flanker that vaults over you.
+- From floor VIII some enemies are elites with a coloured ring at their feet. Gold is fast, blue does not flinch during wind-ups, orange bursts a second after it dies.
+- The Forgemaster's hammer heats through each string. You can parry it until it glows white. When it vents steam, hit it.
+- The Proctor kneels to heal at 45% and 20% health. Any hit interrupts it and breaks its posture. The saber throw reaches it from across the room.
 
-## Tools
+## Tests and tools
 
-| Command | What it does |
-| --- | --- |
-| `npm run fuzz` | Runs the simulation headless at 120 Hz with random input and with scripted players of different skill. Fails on any exception or non-finite value, and prints clear times per floor. |
-| `npm run smoke` | Drives the real game in headless Chrome, reports runtime errors and frame times, and writes screenshots to `tools/out/`. |
-| `node tools/strip.js [name]` | Writes frame-by-frame contact sheets of moves to `tools/out/`. |
-| `node tools/audio-test.js` | Measures every sound in headless Chrome and fails on silence, clipping or errors. With `npm start` running, http://localhost:5173/tools/audio-test.html is a soundboard with a button per sound. |
-| `node tools/arena-shot.js` | Screenshots each arena at several camera positions. Needs `node tools/serve.js 5182` running. |
+| Command | What it does | Time |
+| --- | --- | --- |
+| `npm test` | Runs the simulation tests, then the benchmark. Fails on a broken rule or a missed performance budget. | about 6 s |
+| `node --test tests/` | Simulation tests only: seeded replays are identical, generated waves obey the rules across 300 seeds, move data is well formed, both bosses can be beaten. | under 1 s |
+| `npm run bench` | The benchmark alone, in report mode (prints, never fails). | about 5 s |
+| `npm run fuzz` | Long soak: random input on every floor, then scripted players of four skill levels climb the whole tower. Prints clear times and falls per floor. | minutes |
+| `npm run smoke` | Drives the real game in headless Chrome, reports runtime errors and frame times, and writes screenshots to `tools/out/`. | about 2 min |
+| `node tools/strip.js [name]` | Writes frame-by-frame contact sheets of moves to `tools/out/`. | seconds each |
+| `node tools/audio-test.js` | Measures every sound in headless Chrome and fails on silence, clipping or errors. With `npm start` running, http://localhost:5173/tools/audio-test.html is a soundboard. | |
+| `node tools/arena-shot.js` | Screenshots each arena at several camera positions and seeds. Needs `node tools/serve.js 5182` running. | |
 
-The smoke and strip tools need Chrome and `npm install` (for `puppeteer-core`).
+The benchmark renders in headless Chrome with GPU acceleration turned off, which stands in for a weak machine. It checks milliseconds per frame, and also draw calls and megapixels drawn per frame, which do not depend on the machine. The browser tools need Chrome and `npm install` (for `puppeteer-core`). Without them the benchmark runs its simulation half and skips the rest.
 
 ## Layout
 
 | Path | Contents |
 | --- | --- |
-| `src/game/` | Simulation. It has no DOM access, so it runs in Node. `fighter.js` is the shared body, `moves.js` holds every attack as data, `combat.js` resolves hits, `enemies.js` holds the roster and AI. |
+| `src/game/` | Simulation. It has no DOM access, so it runs in Node. `fighter.js` is the shared body, `moves.js` holds every attack as data, `combat.js` resolves hits, `enemies.js` holds the roster and AI, `gen.js` generates a run from a seed. |
 | `src/render/` | Canvas 2D renderer, effects, and the baked arenas. |
 | `src/audio/` | Web Audio synthesis. The game ships no audio files. |
 | `src/ui/` | HUD and menus. |
-| `tools/` | Dev server and test tools. |
+| `tests/` | Fast simulation tests. |
+| `tools/` | Dev server, benchmark and review tools. |

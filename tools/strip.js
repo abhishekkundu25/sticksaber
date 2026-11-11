@@ -33,6 +33,11 @@ const SCRIPTS = {
   kill: { enemy: 'initiate', dist: 120, hp: 30, passive: true, keys: [...J(4), ...J(22), ...J(40), ...J(60)], from: 60, frames: 84, every: 4, crop: [640, 400], dx: 120, dy: -60 },
   parry: { enemy: 'initiate', dist: 105, force: 'i_slash', keys: [[26, 'guard', 1], [44, 'guard', 0], ...J(42)], from: 30, frames: 48, every: 3, crop: [760, 340], dx: 120 },
   throw: { enemy: 'dummy', dist: 380, keys: [[4, 'special', 1], [8, 'special', 0]], from: 6, frames: 96, every: 4, crop: [760, 300], dx: 220 },
+  forge: { enemy: 'forgemaster', dist: 250, force: 'fm_string', keys: [], from: 20, frames: 130, every: 10, crop: [760, 440], dx: 130, dy: -50 },
+  erupt: { enemy: 'forgemaster', dist: 300, force: 'fm_erupt', keys: [], from: 20, frames: 110, every: 10, crop: [1100, 560], dx: 300, dy: -160 },
+  wraith: { enemy: 'wraith', dist: 380, live: true, keys: [], from: 60, frames: 150, every: 10, crop: [900, 360], dx: 60 },
+  drone: { enemy: 'drone', dist: 300, live: true, keys: [], from: 150, frames: 220, every: 11, crop: [900, 520], dy: -150 },
+  lancer: { enemy: 'lancer', dist: 300, live: true, keys: [], from: 40, frames: 150, every: 10, crop: [820, 360], dx: 130 },
   plunge: { enemy: 'dummy', dist: 90, keys: [[2, 'jump', 1], [20, 'jump', 0], [24, 'down', 1], [24, 'heavy', 1], [30, 'heavy', 0], [60, 'down', 0]], from: 20, frames: 72, every: 3, crop: [560, 520], dy: -130 },
 };
 
@@ -58,6 +63,7 @@ async function run(name) {
     let shot = 0;
     for (let f = 0; f < sc.from + sc.frames; f++) {
       for (const [kf, action, down] of sc.keys) if (kf === f) g.input.set(action, 'strip', !!down);
+      if (sc.live) p.hp = 100;
       g.tick(1 / 60);
       if (f >= sc.from && (f - sc.from) % sc.every === 0) {
         const c = g.renderer.cam, k = g.renderer.k, v = g.renderer.view;
