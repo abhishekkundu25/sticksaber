@@ -84,7 +84,7 @@ export function echoDef(def) {
 }
 
 const TEMPER = { aggressive: { cd: 0.6, guard: 0.5, range: -10 }, cautious: { cd: 1.35, guard: 1.6, range: 40 }, flank: { cd: 0.9, guard: 1, range: 0 } };
-const mercy = (pl) => pl.rag || pl.state === 'getup';
+export const mercy = (pl) => pl.rag || pl.state === 'getup';
 
 function tickAdapt(f, dt) {
   const at = f.def.adaptAt;
@@ -93,7 +93,7 @@ function tickAdapt(f, dt) {
   if (f.reads && f.adapt[f.reads] < at) f.reads = null;
 }
 
-function weighted(opts, last) {
+export function weighted(opts, last) {
   const pool = opts.length > 1 ? opts.filter((o) => o.id !== last) : opts;
   let total = 0;
   for (const o of pool) total += o.w;
@@ -114,7 +114,7 @@ function tickGuard(f, world, counterAfter) {
   return true;
 }
 
-function initAi(f, extra) {
+export function initAi(f, extra) {
   const t = TEMPER[f.temper] || { cd: 1, guard: 1, range: 0 };
   // `cdK` is the floor's pace: deeper floors and higher difficulties leave shorter gaps between attacks.
   Object.assign(f.ai, { cd: rand(0.9, 1.6), spread: rand(0, 110), turn: 0, seenAtk: 0, guardT: 0, blocks: 0, retreat: 0, last: null, init: true, flankCd: rand(1.5, 4),
@@ -132,7 +132,7 @@ function aimMove(f, pl) {
   return true;
 }
 
-function meleeCtrl(f, world, dt) {
+export function meleeCtrl(f, world, dt) {
   const ai = f.ai, P = f.def.ai, pl = world.player;
   // New arrivals take a moment before their first swing, longer on the first floor.
   if (!ai.init) { initAi(f); if (world.floor === 1) ai.cd += 0.8; }
@@ -281,7 +281,7 @@ function blink(f, world, mode) {
 // ───────────── Drone ─────────────
 const DIVE_HIT = { t0: 0, t1: 9, dmg: 9, post: 18, kx: 260, ky: 0, kind: 'flinch', stop: 0.06, shake: 0.22, stun: 0.3, shape: 'circle', ox: 0, oy: -65, r: 44 };
 
-function droneCtrl(f, world, dt) {
+export function droneCtrl(f, world, dt) {
   const ai = f.ai, pl = world.player;
   if (!ai.init) initAi(f, { cd: rand(1.2, 2.4), script: null, side: rng() < 0.5 ? -1 : 1, hover: rand(180, 280), alt: rand(200, 265) });
   f.gravMul = 0;

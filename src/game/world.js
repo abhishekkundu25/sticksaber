@@ -9,6 +9,8 @@ import { PLAYER } from './player.js';
 import { ENEMIES, echoDef } from './enemies.js';
 import { baseMods, buildMods } from './augments.js';
 import { POWERS } from './powers.js';
+import { Beast } from './beasts.js';
+import { FORMS } from './forms.js';
 
 const RANKS = [0, 18, 42, 72, 108, 150];
 export const RANK_NAMES = ['', 'D', 'C', 'B', 'A', 'S'];
@@ -90,6 +92,9 @@ export class World {
     this.build = {}; this.mods = baseMods(); // drafted augments and the modifiers they add up to
     this.powers = ['throw']; this.powerIdx = 0; this.powerT = 0;
     this.bonusHp = 0;                      // health earned by beating sector keepers
+    this.formId = 'saber'; this.form = FORMS.saber;
+    this.platforms = []; this.hazards = []; // terrain of the current floor
+    this.bonds = [];                       // links between enemies: packs, tethers, riders
     this.orbs = []; this.mirror = null; this.stasis = 0;
     this.windUsed = false; this.freeCast = false; this.odShield = 0; this.odMax = OVERDRIVE_TIME; this.hitCount = 0;
   }
@@ -103,23 +108,47 @@ export class World {
     if (p && !p.dead) {
       const up = PLAYER.hp + this.mods.maxHp + this.bonusHp - p.maxHp;
       p.maxHp += up; p.hp = Math.min(p.maxHp, p.hp + Math.max(0, up));
-      p.speedMul = this.mods.speed;
-      if (this.overdrive <= 0) p.bladeLen = this.baseBlade(p);
+      this.applyForm(p);
     }
   }
-  baseBlade(f) { return f.def.blade.len * f.scale * (f.isPlayer ? this.mods.blade : 1); }
+  baseBlade(f) { return f.blade.len * f.scale * (f.isPlayer ? this.mods.blade : 1); }
+  // The weapon form chosen for the run: its own blade and its own move list.
+  setForm(id) {
+    this.formId = FORMS[id] ? id : 'saber'; this.form = FORMS[this.formId];
+    const p = this.player;
+    if (p && !p.dead) this.applyForm(p);
+  }
+  applyForm(p) {
+    const F = this.form;
+    p.blade = F.blade; p.double = !!F.blade.double; p.twin = !!F.blade.twin; p.dmgMul = F.dmg ?? 1;
+    p.speedMul = this.mods.speed * (F.speed ?? 1);
+    if (this.overdrive <= 0) p.bladeLen = this.baseBlade(p);
+  }
+  // A form names its own move for each of the player's slots (L1, H1, LAUNCH and so on).
+  moveId(id) { return this.form.moves[id] || id; }
+  // Height of the ground under a falling body: the floor, or a platform it is landing on.
+  groundAt(x, y, vy, dt, f) {
+    const P = this.platforms;
+    if (!P.length || vy < 0 || f.dropT > 0) return 0;
+    for (const p of P) {
+      if (!p.solid || x < p.x - p.w / 2 || x > p.x + p.w / 2) continue;
+      // One-way: only a body that was above the top a moment ago lands on it.
+      if (y >= p.y - 1 && y - vy * dt <= p.y + 6) return p.y;
+    }
+    return 0;
+  }
   spawnPlayer(x = 0) {
     const p = new Fighter(PLAYER, x, 0);
     this.player = p; this.fighters.push(p);
     this.cam.x = x; this.overdrive = 0; this.mirror = null; this.stasis = 0; this.orbs.length = 0;
-    p.hp = p.maxHp = PLAYER.hp + this.mods.maxHp + this.bonusHp; p.speedMul = this.mods.speed; p.bladeLen = this.baseBlade(p);
+    p.hp = p.maxHp = PLAYER.hp + this.mods.maxHp + this.bonusHp; this.applyForm(p);
     return p;
   }
   def(kind) { return this.roster?.[kind] || ENEMIES[kind]; }
   // opts: { elite: 'swift' | 'armored' | 'volatile', temper: 'aggressive' | 'cautious' | 'flank' }
   spawnEnemy(kind, x, drop = true, opts = null) {
     const def = this.def(kind);
-    const f = new Fighter(def, clamp(x, this.minX + 60, this.maxX - 60), 1);
+    const f = new (def.beast ? Beast : Fighter)(def, clamp(x, this.minX + 60, this.maxX - 60), 1);
     if (def.hitWall) f.hitWall = (w) => def.hitWall(f, w);
     f.face(this.player ? this.player.x : 0);
     if (opts?.temper) f.temper = opts.temper;
@@ -153,7 +182,8 @@ export class World {
   // The Mirror power: an image of the player that stands at their back and repeats their attacks.
   spawnMirror(src, life) {
     const f = new Fighter(MIRROR, src.x - src.facing * 64, 0);
-    f.phantom = true; f.fade = 0.6; f.color = '#b9f6ff'; f.dmgMul = 0.5; f.facing = src.facing; f.gravMul = 0;
+    f.phantom = true; f.fade = 0.6; f.color = '#b9f6ff'; f.dmgMul = 0.5 * src.dmgMul; f.facing = src.facing; f.gravMul = 0;
+    f.blade = src.blade; f.double = src.double; f.twin = src.twin;
     f.bladeLen = src.bladeLen; f.ai.life = life; f.ai.serial = src.atkSerial || 0; f.ai.queue = null;
     f.computeJoints();
     this.fighters.push(f); this.mirror = f;

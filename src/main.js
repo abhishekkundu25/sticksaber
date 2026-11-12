@@ -218,7 +218,7 @@ function sound(dt) {
   let n = 0;
   if (playing) {
     for (const f of world.fighters) {
-      if (n >= 3 || f.team !== 1 || f.dead || f.phantom || !f.armed || f.def.blade.gun || f.bladeOn < 0.5 || f.fade < 0.5) continue;
+      if (n >= 3 || f.team !== 1 || f.dead || f.phantom || !f.armed || f.blade.gun || f.bladeOn < 0.5 || f.fade < 0.5) continue;
       audio.hum('e' + n++, { pan: pan(f.x), speed: speed(f), pitch: f.def.boss ? 0.7 : f.scale > 1.3 ? 0.6 : 0.85, vol: 0.55 });
     }
   }

@@ -152,8 +152,9 @@ function tryAttack(f, world, inp, ax, cur) {
     if (t && !t.dead) f.face(t.x); else autoFace(f, world, ax);
     world.slow(0.45, 0.22);
   } else autoFace(f, world, ax);
-  f.startMove(id);
-  if (air && MOVES[id].air && !MOVES[id].plunge && f.vy > 0) f.vy *= 0.3;
+  const mid = world.moveId(id); // the weapon form's own move for this slot
+  f.startMove(mid);
+  if (air && MOVES[mid].air && !MOVES[mid].plunge && f.vy > 0) f.vy *= 0.3;
   return true;
 }
 

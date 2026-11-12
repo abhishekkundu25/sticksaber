@@ -9,6 +9,7 @@ import { TAU, clamp } from '../core/math.js';
 import { glowSprite } from './fx.js';
 import { TRAIL_STRIDE } from '../game/fighter.js';
 import { BONES } from '../game/ragdoll.js';
+import { drawBeastBody, drawBeastGlow } from './beastdraw.js';
 
 const BODY = '#06080c';
 const AURA = { swift: '#ffe45c', armored: '#6fb6ff', volatile: '#ff7a2e' };
@@ -133,7 +134,7 @@ export class Renderer {
     wt();
     ctx.globalCompositeOperation = 'lighter';
     for (const f of fs) {
-      if (!f.armed || f.bladeOn < 0.05 || f.def.blade.gun) continue;
+      if (!f.armed || f.bladeOn < 0.05 || f.blade.gun) continue;
       const mx = (f.bx + f.tx) / 2, hgt = Math.max(0, -(f.by + f.ty) / 2);
       const Rr = 190 * f.scale, a = 0.34 * f.bladeOn * f.fade / (1 + hgt / 160);
       ctx.globalAlpha = a;
@@ -252,7 +253,8 @@ export class Renderer {
   // ───────────── glow pass ─────────────
   glowFighter(g, f, world) {
     if (f.def.deco === 'drone') return this.glowDrone(g, f, world);
-    const s = f.scale, j = f.j, t = world.time, bd = f.def.blade;
+    if (f.def.beast) drawBeastGlow(g, f, world);
+    const s = f.scale, j = f.j, t = world.time, bd = f.blade;
     const lit = f.armed && f.bladeOn > 0.02 && !bd.gun;
     if (lit) {
       const on = f.bladeOn * f.fade, wide = bd.wide ? 1.7 : bd.thin ? 0.72 : 1;
@@ -266,6 +268,11 @@ export class Renderer {
       g.globalAlpha = 0.42 * on; g.lineWidth = 7.5 * wide * fl * hw; line(g, x0, y0, f.tx, f.ty);
       g.globalAlpha = 0.95 * on; g.lineWidth = 3.8 * wide * hw; line(g, x0, y0, f.tx, f.ty);
       g.lineCap = 'round';
+      if (f.twin && !f.rag) {
+        g.globalAlpha = 0.16 * on; g.lineWidth = 15 * wide * fl; line(g, f.b3x, f.b3y, f.t3x, f.t3y);
+        g.globalAlpha = 0.42 * on; g.lineWidth = 7.5 * wide * fl; line(g, f.b3x, f.b3y, f.t3x, f.t3y);
+        g.globalAlpha = 0.95 * on; g.lineWidth = 3.8 * wide; line(g, f.b3x, f.b3y, f.t3x, f.t3y);
+      }
       const mx = (x0 + f.tx) / 2, my = (y0 + f.ty) / 2, R = 78 * s * (bd.wide ? 1.7 : 1) * (1 + f.heat * 0.18);
       g.globalAlpha = 0.2 * on; g.drawImage(glowSprite(f.color), mx - R, my - R, R * 2, R * 2);
       if (f.charging || f.charged && f.state === 'attack') {
@@ -526,6 +533,8 @@ export class Renderer {
       ctx.globalAlpha = alpha * rimA; ctx.strokeStyle = rim; ctx.lineWidth = lw + 2.6; ctx.stroke();
       ctx.globalAlpha = alpha; ctx.strokeStyle = body; ctx.lineWidth = lw; ctx.stroke();
     };
+    // Animal bodies draw themselves from the same joints; a limp one falls through to the bone loop below.
+    if (d.beast && !rg) { drawBeastBody(ctx, f, world, rim, body, alpha); ctx.restore(); return; }
     group(FAR, 0.5);                     // far arm and leg, dimmer rim for depth
     const belly = d.belly ?? (d.deco === 'bulwark' ? 10 : d.deco === 'forge' ? 15 : d.deco === 'horns' ? 13 : 0);
     if (belly) {
@@ -541,16 +550,16 @@ export class Renderer {
     // Hilt, shaft or rifle, then the weapon arm on top.
     if (f.armed) {
       const dx = f.tx - f.bx, dy = f.ty - f.by, dl = Math.hypot(dx, dy) || 1, ux = dx / dl, uy = dy / dl;
-      if (d.blade.gun) {
+      if (f.blade.gun) {
         ctx.beginPath(); ctx.moveTo(f.bx - ux * 12, f.by - uy * 12); ctx.lineTo(f.tx, f.ty);
         ctx.strokeStyle = rim; ctx.lineWidth = 7; ctx.stroke(); ctx.strokeStyle = body; ctx.lineWidth = 4.6; ctx.stroke();
-      } else if (d.blade.hammer) {
+      } else if (f.blade.hammer) {
         ctx.beginPath(); ctx.moveTo(f.bx - ux * 16, f.by - uy * 16); ctx.lineTo(f.bx + dx * 0.76, f.by + dy * 0.76);
         ctx.strokeStyle = rim; ctx.lineWidth = 8; ctx.stroke(); ctx.strokeStyle = body; ctx.lineWidth = 5.4; ctx.stroke();
       } else {
-        const hl = f.double ? 9 : d.blade.thin ? 16 : 7;
-        ctx.beginPath(); ctx.moveTo(f.bx - ux * hl, f.by - uy * hl); ctx.lineTo(f.bx + ux * hl * (d.blade.thin ? 0.4 : 1), f.by + uy * hl * (d.blade.thin ? 0.4 : 1));
-        ctx.strokeStyle = '#aeb9c8'; ctx.lineWidth = 4.2 * (d.blade.wide ? 1.5 : 1); ctx.stroke();
+        const hl = f.double ? 9 : f.blade.thin ? 16 : 7;
+        ctx.beginPath(); ctx.moveTo(f.bx - ux * hl, f.by - uy * hl); ctx.lineTo(f.bx + ux * hl * (f.blade.thin ? 0.4 : 1), f.by + uy * hl * (f.blade.thin ? 0.4 : 1));
+        ctx.strokeStyle = '#aeb9c8'; ctx.lineWidth = 4.2 * (f.blade.wide ? 1.5 : 1); ctx.stroke();
       }
     }
     group(ARM, 1);
@@ -646,13 +655,14 @@ export class Renderer {
   }
 
   coreFighter(ctx, f) {
-    const bd = f.def.blade;
+    const bd = f.blade;
     if (!f.armed || f.bladeOn < 0.05 || bd.gun) return;
     let x0 = f.double ? f.t2x : f.bx, y0 = f.double ? f.t2y : f.by;
     if (bd.hammer) { x0 = f.bx + (f.tx - f.bx) * 0.8; y0 = f.by + (f.ty - f.by) * 0.8; ctx.lineCap = 'butt'; }
     ctx.globalAlpha = Math.min(1, f.bladeOn * 1.2) * f.fade * (bd.hammer ? 0.35 + f.heat * 0.2 : 1);
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.2 * (bd.hammer ? 5 : bd.wide ? 1.7 : bd.thin ? 0.8 : 1);
     line(ctx, x0, y0, f.tx, f.ty);
+    if (f.twin && !f.rag) line(ctx, f.b3x, f.b3y, f.t3x, f.t3y);
     ctx.lineCap = 'round';
   }
 

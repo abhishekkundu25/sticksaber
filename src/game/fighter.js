@@ -33,8 +33,12 @@ export class Fighter {
     this.bx = 0; this.by = 0; this.tx = 0; this.ty = 0; this.t2x = 0; this.t2y = 0;
     this.pbx = 0; this.pby = 0; this.ptx = 0; this.pty = 0; this.pt2x = 0; this.pt2y = 0;
     this.pcx = x; this.pcy = -60; // previous chest point, for pass-through hits
+    this.blade = def.blade; // weapon style. The player's is replaced by the weapon form chosen for the run.
     this.bladeLen = def.blade.len * def.scale;
     this.bladeOn = def.blade.gun ? 0 : 1; this.armed = true; this.double = !!def.blade.double;
+    this.twin = !!def.blade.twin; // a second blade in the off hand
+    this.b3x = 0; this.b3y = 0; this.t3x = 0; this.t3y = 0; this.pt3x = 0; this.pt3y = 0;
+    this.riding = null; // the beast this fighter sits on, if any
     this.color = def.color;
     this.rag = null; this.juggle = 0;
     this.invuln = 0; this.flash = 0; this.tele = 0; this.teleRed = false; this.blockT = 0; this.parryT = 0;
@@ -112,6 +116,7 @@ export class Fighter {
     else if (this.posture > 0 && this.state !== 'stagger') this.posture = Math.max(0, this.posture - this.def.postureRegen * dt);
 
     this.pbx = this.bx; this.pby = this.by; this.ptx = this.tx; this.pty = this.ty; this.pt2x = this.t2x; this.pt2y = this.t2y;
+    this.pt3x = this.t3x; this.pt3y = this.t3y;
     this.pcx = this.cx; this.pcy = this.cy;
 
     this.moveX = 0; this.stepping = false;
@@ -143,12 +148,19 @@ export class Fighter {
     } else if (this.onGround && this.state !== 'dash' && !this.stepping) {
       this.vx = approach(this.vx, 0, fric * dt);
     }
-    if (!this.onGround) this.vy += G * grav * (this.gravMul ?? 1) * world.gravK * dt;
-    this.x += this.vx * dt; this.y += this.vy * dt;
-    if (this.y >= 0 && this.vy >= 0) {
-      if (!this.onGround) this.land(world);
-      this.y = 0; this.vy = 0; this.onGround = true;
-    } else if (this.y < 0) this.onGround = false;
+    const mt = this.riding;
+    if (mt) {
+      // A rider goes where its mount goes and counts as standing.
+      this.x = mt.saddleX; this.y = mt.saddleY; this.vx = 0; this.vy = 0; this.onGround = true;
+    } else {
+      if (!this.onGround) this.vy += G * grav * (this.gravMul ?? 1) * world.gravK * dt;
+      this.x += this.vx * dt; this.y += this.vy * dt;
+      const gy = world.groundAt(this.x, this.y, this.vy, dt, this);
+      if (this.y >= gy && this.vy >= 0) {
+        if (!this.onGround) this.land(world);
+        this.y = gy; this.vy = 0; this.onGround = true;
+      } else if (this.y < gy) this.onGround = false;
+    }
     const pad = 26 * this.scale;
     if (this.x < world.minX + pad) { this.x = world.minX + pad; this.hitWall?.(world); }
     if (this.x > world.maxX - pad) { this.x = world.maxX - pad; this.hitWall?.(world); }
@@ -215,7 +227,7 @@ export class Fighter {
   land(world) {
     this.pv[PY] -= clamp(this.vy * 0.35, 80, 420);
     world.onLand(this, this.vy);
-    if (this.move?.plunge) { this.startMove('PLUNGE_LAND'); world.moveFx(this, 'plunge'); }
+    if (this.move?.plunge) { this.startMove(this.move.land || 'PLUNGE_LAND'); world.moveFx(this, 'plunge'); }
     else if (this.move?.landMove) { this.startMove(this.move.landMove); world.sfx('slam', this.x); }
   }
 
@@ -309,6 +321,12 @@ export class Fighter {
     this.bx = j[8]; this.by = j[9];
     this.tx = this.x + L[22] * f; this.ty = this.y - L[23];
     this.t2x = this.x + L[24] * f; this.t2y = this.y - L[25];
+    if (this.twin) {
+      // The off-hand blade runs on from the forearm, turned by the form's own angle.
+      const a = p[LA] + (this.blade.twinAngle ?? 0.35) + r, len = bl * (this.blade.twinLen ?? 0.9);
+      this.b3x = j[12]; this.b3y = j[13];
+      this.t3x = j[12] + Math.cos(a) * len * f; this.t3y = j[13] - Math.sin(a) * len;
+    }
   }
 
   sampleTrail(time) {

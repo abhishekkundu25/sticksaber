@@ -4,6 +4,7 @@ import { distPointSeg, rand, rng } from '../core/math.js';
 
 const hc = new Float32Array(12);
 export function hurtCircles(f, out = hc) {
+  if (f.hurt) return f.hurt(out); // animal bodies supply their own four circles
   const j = f.j, s = f.scale;
   out[0] = j[0]; out[1] = j[1]; out[2] = 11 * s;
   out[3] = (j[2] + j[4]) / 2; out[4] = (j[3] + j[5]) / 2; out[5] = 15 * s;
@@ -32,6 +33,7 @@ function weaponTouches(A, h, c, B) {
     if (distPointSeg(x, y, A.ptx, A.pty, A.tx, A.ty) < r) return i;
     if (distPointSeg(x, y, pmx, pmy, mx, my) < r) return i;
     if (A.double && (distPointSeg(x, y, sx, sy, A.t2x, A.t2y) < r || distPointSeg(x, y, A.pt2x, A.pt2y, A.t2x, A.t2y) < r)) return i;
+    if (A.twin && (distPointSeg(x, y, A.b3x, A.b3y, A.t3x, A.t3y) < r || distPointSeg(x, y, A.pt3x, A.pt3y, A.t3x, A.t3y) < r)) return i;
     if (h.sweepBody && distPointSeg(x, y, A.pcx, A.pcy, A.cx, A.cy) < r + 16) return i;
   }
   return -1;
