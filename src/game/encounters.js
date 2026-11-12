@@ -150,7 +150,7 @@ export class Director {
       if (this.t > 1.2) { const x = p.x; w.fighters = w.fighters.filter((f) => f !== p); w.spawnPlayer(x); this.state = 'fight'; }
       return;
     }
-    if (!p.dead) { p.hp = Math.min(p.maxHp, p.hp + 12 * dt); w.focus = Math.min(w.maxFocus, w.focus + 25 * dt); }
+    if (!p.dead) { p.hp = Math.min(p.maxHp, p.hp + 12 * dt); if (w.overdrive <= 0) w.focus = Math.min(w.maxFocus, w.focus + 25 * dt); }
     if (!w.fighters.some((f) => f.team === 1)) w.spawnEnemy('dummy', clamp(p.x + p.facing * 260, w.minX + 100, w.maxX - 100), true);
   }
 }
