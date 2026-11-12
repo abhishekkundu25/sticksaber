@@ -5,9 +5,10 @@ import { generateRun, FLOORS, PER, roman, ANOMALIES } from './gen.js';
 import { newStats } from './world.js';
 import { draftAugments, AUG } from './augments.js';
 import { draftPowers, POWER_IDS, POWERS } from './powers.js';
+import { FORMS, FORM_IDS } from './forms.js';
 
 const TRAIN_KEYS = { Digit1: 'initiate', Digit2: 'bulwark', Digit3: 'duelist', Digit4: 'marksman', Digit5: 'brute', Digit6: 'lancer', Digit7: 'wraith', Digit8: 'drone', Digit9: 'forgemaster', Digit0: 'proctor', Equal: 'dummy' };
-const TRAIN_HINT = '1-8 enemies   9 Forgemaster   0 Proctor   [ strain   ] champion   \\ sector boss   - clear   = target   U switch power';
+const TRAIN_HINT = '1-8 enemies   9 Forgemaster   0 Proctor   [ strain   ] champion   \\ sector boss   B beast   - clear   = target   U power   Y weapon';
 
 export class Director {
   // hooks.setArena(id, seed, hue) must return the arena's playable width. hooks.onFloor(state) is told
@@ -48,7 +49,13 @@ export class Director {
     }
     w.powerIdx = clamp(saved?.powerIdx || 0, 0, w.powers.length - 1);
     w.setBuild(this.build);
+    // A saved run keeps its weapon form. A new run played by a person chooses one before the first floor.
+    if (saved?.form) w.setForm(saved.form);
     this.enterStage(stage, 0, true);
+    if (!saved && !this.hooks.auto && FORM_IDS.length > 1) {
+      this.draft = { type: 'form', title: 'CHOOSE YOUR BLADE', sub: 'You keep it for the whole run', options: [...FORM_IDS], idx: Math.max(0, FORM_IDS.indexOf(w.formId)) };
+      this.state = 'draft'; this.t = 0; w.bannerMsg = null;
+    }
   }
 
   startTraining() {
@@ -56,10 +63,13 @@ export class Director {
     this.training = true; w.training = true; this.draft = null;
     w.fighters.length = 0; w.projectiles.clear(); w.fx.clear();
     w.setArena(this.hooks.setArena('causeway', 0, 0));
+    w.bonds.length = 0; w.finisher = null; w.lessonOn = false; this.lesson = null;
+    w.setTerrain({ plats: [{ fx: 0.45, y: -150, w: 260 }], vents: [], walls: false });
     this.run = generateRun((Math.random() * 0xffffffff) >>> 0 || 1); this.floors = this.run.floors;
     w.roster = this.run.roster.defs;
     w.hpMul = 1; w.rateMul = 1; w.cdMul = 1; w.gravK = 1; w.anom = null; w.freeCast = false; w.windUsed = false;
     this.build = {}; w.bonusHp = 0; w.setBuild(this.build); w.powers = [...POWER_IDS]; w.powerIdx = 0;
+    if (!FORMS[w.formId]) w.setForm('saber');
     w.spawnPlayer(-200); w.enemyDmg = 1; w.maxAttackers = 2; w.focus = w.maxFocus; w.floor = FLOORS;
     w.spawnEnemy('dummy', 160, false);
     this.state = 'fight'; this.pending.length = 0; this.music = 'combat';
@@ -71,8 +81,11 @@ export class Director {
     if (!this.training) return;
     const w = this.world, R = this.run.roster;
     if (code === 'Minus') { w.clearEnemies(); return; }
+    // Y tries the next weapon form.
+    if (code === 'KeyY') { w.setForm(FORM_IDS[(FORM_IDS.indexOf(w.formId) + 1) % FORM_IDS.length]); w.banner(w.form.name, w.form.text, 1.6); return; }
     const any = (list) => list[(Math.random() * list.length) | 0];
-    const kind = code === 'BracketLeft' ? any(R.strains.flat()) : code === 'BracketRight' ? any(R.champions) : code === 'Backslash' ? any(R.wardens) : TRAIN_KEYS[code];
+    const beasts = R.beasts.filter(Boolean);
+    const kind = code === 'BracketLeft' ? any(R.strains.flat()) : code === 'BracketRight' ? any(R.champions) : code === 'Backslash' ? any(R.wardens) : code === 'KeyB' && beasts.length ? any(beasts) : TRAIN_KEYS[code];
     if (!kind) return;
     if (w.def(kind).boss && w.boss && !w.boss.dead) return;
     const p = w.player;
@@ -83,7 +96,9 @@ export class Director {
     const w = this.world, def = this.floors[stage];
     this.stage = stage; this.wave = wave;
     w.fighters.length = 0; w.projectiles.clear(); w.fx.clear(); w.boss = null; w.marker = null; w.bossChannel = 0;
+    w.bonds.length = 0; w.finisher = null; w.lessonOn = false; this.lesson = null; this.groups = {};
     w.setArena(this.hooks.setArena(def.arena, def.arenaSeed, def.hue));
+    w.setTerrain(def.terrain);
     const hp = fresh || !this.keepHp ? null : this.keepHp;
     // Every keeper beaten is worth ten points of health for the rest of the run.
     w.bonusHp = def.sector * 10;
@@ -100,13 +115,24 @@ export class Director {
     if (def.pos === 1 && wave === 0) { w.banner(`SECTOR ${roman(def.sector + 1)}`, `${this.sector.name}  ·  ${def.title}`, 3.2); w.bannerMsg.sector = def.sector; if (def.sector > 0) w.sfx('sectorUp', p.x); }
     else w.banner(def.title, def.sub, 2.6);
     if (def.anomaly) w.sfx('anomaly', p.x);
-    this.hooks.onFloor?.({ seed: this.seed, diff: this.diff, floor: def.n, build: { ...this.build }, powers: [...w.powers], powerIdx: w.powerIdx, time: this.runTime, deaths: this.deaths });
+    this.save();
+  }
+  save() {
+    const w = this.world;
+    this.hooks.onFloor?.({ seed: this.seed, diff: this.diff, floor: this.stageDef.n, build: { ...this.build }, powers: [...w.powers], powerIdx: w.powerIdx, form: w.formId, time: this.runTime, deaths: this.deaths });
   }
 
   spawnWave() {
     const w = this.world, wave = this.stageDef.waves[this.wave];
     this.pending = wave.spawns.map((s) => ({ ...s }));
+    this.groups = {}; this.lesson = null; w.lessonOn = false;
     this.hint = wave.hint || ''; this.hintT = wave.hint ? 11 : 0;
+    // The parry lesson, for a player who has not passed it: one instructor that cannot be hurt until it is parried.
+    if (wave.lesson && this.hooks.lesson?.()) {
+      this.lesson = { t: 0, base: w.stats.parries };
+      w.lessonOn = true; this.hintT = 1e9;
+      this.pending.forEach((s, i) => { if (i) s.t += 1000; else s.lesson = true; });
+    }
     w.maxAttackers = wave.attackers; w.freeCast = !!w.mods.freeCast;
     this.state = 'fight'; this.t = 0;
     if (this.wave > 0) w.banner(`WAVE ${this.wave + 1} / ${this.waveCount}`, '', 1.4);
@@ -142,6 +168,7 @@ export class Director {
   take(d, i, quiet = false) {
     const w = this.world, id = d.options[i];
     if (d.type === 'power') { w.powers.push(id); if (!quiet) w.powerIdx = w.powers.length - 1; }
+    else if (d.type === 'form') w.setForm(id);
     else { this.build[id] = (this.build[id] || 0) + 1; w.setBuild(this.build); }
     return id;
   }
@@ -149,10 +176,17 @@ export class Director {
   choose(i) {
     const d = this.draft;
     if (!d || this.state !== 'draft' || i < 0 || i >= d.options.length) return;
-    const id = this.take(d, i);
-    this.world.sfx('draftPick', this.world.player.x);
-    this.picked = { name: d.type === 'power' ? POWERS[id].name : AUG[id].name.toUpperCase(), t: 1.6 };
+    const id = this.take(d, i), w = this.world;
+    w.sfx('draftPick', w.player.x);
     this.draft = null;
+    if (d.type === 'form') {
+      // The blade is chosen before the first wave: carry on with the floor's introduction.
+      const def = this.stageDef;
+      this.state = 'intro'; this.t = 0; this.save();
+      w.banner(def.pos === 1 ? `SECTOR ${roman(def.sector + 1)}` : def.title, def.pos === 1 ? `${this.sector.name}  ·  ${def.title}` : def.sub, 3); if (def.pos === 1) w.bannerMsg.sector = def.sector;
+      return;
+    }
+    this.picked = { name: d.type === 'power' ? POWERS[id].name : AUG[id].name.toUpperCase(), t: 1.6 };
     this.advance();
   }
   advance() {
@@ -182,8 +216,24 @@ export class Director {
         for (let i = this.pending.length - 1; i >= 0; i--) {
           const s = this.pending[i];
           if ((s.t -= dt) > 0) continue;
-          w.spawnEnemy(s.kind, w.player.x + s.dx, true, s);
+          const f = w.spawnEnemy(s.kind, w.player.x + s.dx, true, s);
           this.pending.splice(i, 1);
+          // Members of a bonded group arrive together; the bond is made when the last one lands in the list.
+          if (s.g !== undefined) {
+            const G = this.stageDef.waves[this.wave].groups[s.g], list = (this.groups[s.g] ||= []);
+            list[s.role] = f;
+            if (list.filter(Boolean).length === G.n) w.bind(G.type, list);
+          }
+        }
+        if (this.lesson) {
+          const L = this.lesson;
+          L.t += dt;
+          if (w.stats.parries > L.base || L.t > 45) {
+            const passed = w.stats.parries > L.base;
+            this.lesson = null; w.lessonOn = false; this.hintT = 3;
+            for (const s of this.pending) s.t = Math.max(0.8, s.t - 1000);
+            if (passed) { w.banner('LESSON PASSED', 'Now strike: a hit after a parry is a riposte', 2.4); w.sfx('tutorialDone', w.player.x); this.hooks.lessonDone?.(); }
+          }
         }
         if (!this.pending.length && w.countEnemies() === 0 && this.t > 0.5) {
           const last = this.wave + 1 >= this.waveCount, def = this.stageDef;

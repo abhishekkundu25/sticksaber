@@ -172,6 +172,7 @@ export class Renderer {
       ctx.beginPath(); ctx.ellipse(f.rag ? (f.j[2] + f.j[4]) / 2 : f.x, 1, sw2, sw2 * 0.16, 0, 0, TAU); ctx.fill();
     }
     ctx.globalAlpha = 1;
+    this.terrain(ctx, world);
     world.fx.drawSolid(ctx, arena ? arena.palette.fog : '#8a93a8');
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const f of fs) if (f.dead) this.bodyFighter(ctx, f, world);
@@ -193,7 +194,7 @@ export class Renderer {
     for (const f of fs) this.coreFighter(ctx, f);
     for (const p of world.projectiles.list) if (p.type === 'saber') this.saberCore(ctx, p);
     ctx.globalAlpha = 1;
-    for (const f of fs) if (f.team === 1 && !f.dead && !f.def.boss && !f.phantom && f.barT > 0) this.enemyBar(ctx, f);
+    for (const f of fs) if (f.team === 1 && !f.dead && !f.def.boss && !f.phantom && (f.barT > 0 || f.tag)) this.enemyBar(ctx, f);
     world.fx.drawText(ctx);
 
     // ── 7. foreground ──
@@ -230,6 +231,7 @@ export class Renderer {
       else add(p.x, -p.h * 0.5, p.h + 90);
     }
     if (world.marker) { add(world.marker.x, 0, 150); add(world.marker.x, -900, 20); }
+    if (world.flood) { add(world.minX, 0, 30); add(world.maxX, 0, 30); }
     const fx = world.fx;
     for (const s of fx.sparks) add(s.x, s.y, 14);
     for (const s of fx.embers) add(s.x, s.y, 6);
@@ -327,6 +329,7 @@ export class Renderer {
       g.globalAlpha = 0.95; g.lineWidth = 6; g.beginPath(); g.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + world.bossChannel * TAU); g.stroke();
       g.globalAlpha = 0.25 + Math.sin(t * 10) * 0.1; g.drawImage(glowSprite('#7dffb0'), cx - 150, cy - 150, 300, 300);
     }
+    if (f.enraged) { g.globalAlpha = 0.3 + Math.sin(t * 14 + f.t) * 0.1; g.drawImage(glowSprite('#ff8a30'), f.cx - 60 * s, f.cy - 80 * s, 120 * s, 150 * s); }
     if (f.burnT > 0) { g.globalAlpha = 0.35 + Math.sin(t * 30 + f.t) * 0.12; g.drawImage(glowSprite('#ff8a30'), f.cx - 44 * s, f.cy - 60 * s, 88 * s, 110 * s); }
     if (f.vent > 0) {
       // Venting hammer: a cold blue-white bloom marks the opening.
@@ -495,6 +498,20 @@ export class Renderer {
         g.globalAlpha *= 0.5; g.lineWidth = 1.5; line(g, f.bx, f.by, x1, f.by);
       }
     }
+    // Bonds the player can break are drawn as a thread between the two.
+    for (const b of world.bonds) {
+      if (!b.line || b.a.dead || b.b.dead) continue;
+      const ax = b.a.cx, ay = b.a.cy, bx = b.b.cx, by = b.b.cy, u = (t * 0.9 + b.t) % 1;
+      g.strokeStyle = b.color; g.globalAlpha = 0.22 + Math.sin(t * 5 + b.t) * 0.08; g.lineWidth = 2; line(g, ax, ay, bx, by);
+      g.globalAlpha = 0.8; g.fillStyle = b.color; g.fillRect(ax + (bx - ax) * u - 2, ay + (by - ay) * u - 2, 4, 4);
+    }
+    // The Cartographer's last trick: the whole floor is marked, then burns.
+    const fl = world.flood;
+    if (fl) {
+      const kq = Math.min(1, fl.t / fl.arm);
+      if (!fl.fired) { g.strokeStyle = '#ff2038'; g.globalAlpha = (0.3 + kq * 0.6) * (0.75 + Math.sin(t * (20 + kq * 40)) * 0.25); g.lineWidth = 3 + kq * 7; line(g, world.minX, -3, world.maxX, -3); }
+      else { g.strokeStyle = '#ffb060'; g.globalAlpha = 0.95; g.lineWidth = 22; line(g, world.minX, -8, world.maxX, -8); g.strokeStyle = '#ffffff'; g.lineWidth = 8; line(g, world.minX, -6, world.maxX, -6); }
+    }
     const mk2 = world.marker;
     if (mk2) {
       const pulse = mk2.lock ? 0.75 + Math.sin(t * 40) * 0.25 : 0.45 + Math.sin(t * 9) * 0.12;
@@ -504,6 +521,46 @@ export class Renderer {
       g.globalAlpha = pulse * 0.5; g.drawImage(glowSprite('#ff2038'), mk2.x - 130, -24, 260, 48);
     }
     g.globalAlpha = 1;
+  }
+
+  // Light bridges, vents and charged walls. They are drawn straight onto the frame, not through the
+  // bloom layer, so a floor with terrain does not widen the area the bloom has to cover.
+  terrain(ctx, world) {
+    const t = world.time, P = world.platforms, Hz = world.hazards;
+    if (!P.length && !Hz.length && !world.walls) return;
+    for (const h of Hz) {
+      ctx.globalAlpha = 1; ctx.fillStyle = '#15100c'; ctx.fillRect(h.x - h.w, -4, h.w * 2, 6);
+      ctx.fillStyle = '#ff7a2e'; ctx.globalAlpha = 0.3 + (h.armed ? 0.4 : Math.sin(t * 2 + h.x) * 0.08);
+      for (let i = -2; i <= 2; i++) ctx.fillRect(h.x + i * h.w * 0.4 - 2, -3, 4, 3);
+    }
+    for (const p of P) {
+      const x0 = p.x - p.w / 2;
+      if (!p.solid) {
+        // Out: a ghost of the bridge, and a bar that fills as it comes back.
+        ctx.globalAlpha = 0.25; ctx.fillStyle = '#9fe8ff'; ctx.fillRect(x0, p.y, p.w, 1);
+        ctx.globalAlpha = 0.6; ctx.fillRect(x0, p.y + 3, p.w * (1 - p.off / 4.5), 1.5);
+        continue;
+      }
+      const hot = p.load > 2 ? 0.55 + Math.sin(t * 40) * 0.4 : p.life !== undefined && p.life < 1 ? 0.5 + Math.sin(t * 30) * 0.4 : 1;
+      ctx.globalAlpha = 0.9; ctx.fillStyle = '#070a10'; ctx.fillRect(x0, p.y, p.w, 9);
+      ctx.globalAlpha = hot; ctx.fillStyle = p.load > 2 ? '#ffd36b' : '#bfe6ff'; ctx.fillRect(x0, p.y, p.w, 2.5);
+      ctx.globalAlpha = 0.5 * hot; ctx.fillRect(x0, p.y + 8, p.w, 1);
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.3 * hot;
+      ctx.drawImage(glowSprite('#56e9ff'), x0 - 24, p.y - 16, p.w + 48, 34);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    if (world.walls) {
+      ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = '#9fe8ff'; ctx.lineWidth = 2;
+      for (const x of [world.minX, world.maxX]) {
+        ctx.globalAlpha = 0.28 + Math.sin(t * 9 + x) * 0.1;
+        ctx.beginPath(); ctx.moveTo(x, 0);
+        for (let y = -40; y >= -440; y -= 40) ctx.lineTo(x + Math.sin(t * 13 + y * 0.7 + x) * 5, y);
+        ctx.stroke();
+        ctx.globalAlpha = 0.16; ctx.drawImage(glowSprite('#56e9ff'), x - 26, -460, 52, 470);
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.globalAlpha = 1;
   }
 
   // ───────────── solid pass ─────────────
@@ -519,7 +576,7 @@ export class Renderer {
     if (ox || oy) ctx.translate(ox, oy);
     ctx.globalAlpha = alpha;
     const body = f.flash > 0 ? '#ffffff' : BODY;
-    const rim = f.tele > 0.2 ? (f.teleRed ? '#ff5060' : '#ffffff') : f.broken ? '#ffd36b' : f.elite ? AURA[f.elite] : f.phantom ? f.color : d.outline;
+    const rim = f.tele > 0.2 ? (f.teleRed ? '#ff5060' : '#ffffff') : f.broken ? '#ffd36b' : f.enraged ? '#ff8a30' : f.elite ? AURA[f.elite] : f.phantom ? f.color : d.outline;
 
     if (f.ribbons.length) this.ribbon(ctx, f, 1, false);
 
@@ -674,10 +731,17 @@ export class Renderer {
 
   enemyBar(ctx, f) {
     const w = Math.max(30, 48 * f.scale), x = f.x - w / 2, y = Math.min(f.j[1], f.j[3]) - Math.max(22, 30 * f.scale);
+    if (f.barT <= 0) {
+      // No bar showing, but its role in a bond is always worth knowing.
+      ctx.globalAlpha = 0.85 * f.fade; ctx.fillStyle = f.enraged ? '#ff8a30' : '#ffd36b'; ctx.font = '700 10px ui-sans-serif, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(f.tag, f.x, y + 2);
+      ctx.globalAlpha = 1;
+      return;
+    }
     const a = Math.min(1, f.barT * 2) * f.fade;
     ctx.globalAlpha = a * 0.7; ctx.fillStyle = '#000'; ctx.fillRect(x - 1, y - 1, w + 2, 6);
     ctx.globalAlpha = a; ctx.fillStyle = f.color; ctx.fillRect(x, y, w * clamp(f.hp / f.maxHp, 0, 1), 4);
     if (f.posture > 1) { ctx.fillStyle = '#ffd36b'; ctx.fillRect(x, y + 6, w * clamp(f.posture / f.maxPosture, 0, 1), 2); }
+    if (f.tag) { ctx.fillStyle = f.enraged ? '#ff8a30' : '#ffd36b'; ctx.font = '700 10px ui-sans-serif, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(f.tag, f.x, y - 20); }
     // A strain carries its name, so the player learns which body does what.
     const name = f.def.strain ? f.def.name.toUpperCase() : null;
     const tag = f.reads ? 'READS ' + f.reads.toUpperCase() : f.elite ? (name ? `${f.elite.toUpperCase()}  ${name}` : f.elite.toUpperCase()) : name;

@@ -76,6 +76,13 @@ export function applyHit(world, A, B, h, cx, cy) {
     if (B.isPlayer && B.state === 'dash' && !B.dodged && A) world.perfectDodge(B, A);
     return 'whiff';
   }
+  // The twin that is not lit, and the instructor until the lesson is learned, shrug everything off.
+  if (B.dim || (B.lesson && world.lessonOn)) {
+    fx.spark(cx, cy, dir > 0 ? Math.PI : 0, 1, 8, 380, B.color); fx.flash(cx, cy, 40, B.color, 0.1);
+    if (world.time - (B.noteT || -9) > 0.6) { B.noteT = world.time; fx.text(cx, cy - 46, B.dim ? 'UNLIT' : 'PARRY IT', '#8fa3b8', 14, 0.7); world.sfx('block', cx, 0.6, 1.3); }
+    if (A) A.hitLanded = true;
+    return 'whiff';
+  }
   const frontal = B.facing === -dir;
 
   if (world.guarding(B) && frontal && !h.unblockable) {
@@ -121,12 +128,17 @@ export function applyHit(world, A, B, h, cx, cy) {
     if (M.execute && !B.def.boss && (B.hp - dmg) / B.maxHp < M.execute && B.hp - dmg > 0) { dmg = B.hp + 1; fx.text(cx, cy - 78, 'EXECUTED', '#ffd36b', 15, 0.8); }
   } else dmg *= world.enemyDmg * (A ? A.dmgMul : 1) * (B.isPlayer ? M.taken : 1);
   if (world.anom === 'glass') dmg *= 1.5;
+  // A warded enemy takes a third until its warder falls.
+  const warded = B.ward && !B.ward.dead;
+  if (warded) { dmg *= 0.35; post *= 0.5; }
   if (B.broken) dmg *= 1.5;
   const pm = B.move?.punish;
   if (pm && B.state === 'attack' && B.mt >= pm[0] && B.mt <= pm[1]) { post *= 1.8; dmg *= 1.25; punished = true; }
   if (B.state === 'custom' && B.ai.channel) { dmg *= 1.25; }
 
-  B.hp -= dmg; B.flash = 0.1; B.barT = 3.5; B.vib = h.stop + 0.06; B.sinceHurt = 0;
+  if (B.bondRef) { B.bondRef.pool -= dmg; B.hp = B.bondRef.pool; } else B.hp -= dmg;
+  B.flash = 0.1; B.barT = 3.5; B.vib = h.stop + 0.06; B.sinceHurt = 0;
+  if (warded && world.time - (B.noteT || -9) > 0.8) { B.noteT = world.time; fx.text(cx, cy - 46, 'WARDED', '#9fd0ff', 13, 0.6); }
   world.onDamage(A, B, dmg, h, cx, cy, dir, { fresh, punished, glance: read });
   if (crit) { fx.text(cx, cy - 94, 'CRIT', '#fff2a8', 17, 0.7); fx.ring(cx, cy, 6, 70, 0.22, '#fff2a8', 1, 3); world.sfx('crit', cx, 0.8); }
   // Second Wind refuses one killing blow per floor.
@@ -250,6 +262,14 @@ function parry(world, D, A, h, cx, cy, dir) {
   if (D.isPlayer) {
     D.riposteT = 0.85; world.gainFocus(34); world.style.bonus(14); world.stats.parries++;
     if (world.mods.parryHeal) D.hp = Math.min(D.maxHp, D.hp + world.mods.parryHeal);
+    // Mirror Guard: the blow goes back where it came from. It cannot kill, only hurt.
+    if (world.mods.reflect && A && !A.dead && !A.dim) {
+      const back = 10 + h.dmg * world.enemyDmg * 0.8;
+      if (A.bondRef) { A.bondRef.pool = Math.max(1, A.bondRef.pool - back); A.hp = A.bondRef.pool; } else A.hp = Math.max(1, A.hp - back);
+      A.flash = 0.12; A.barT = 3.5;
+      fx.slash(A.cx, A.cy, dir > 0 ? Math.PI : 0, 220, '#e0d0ff', 0.22, 6); fx.text(A.x, A.j[1] - 60 * A.scale, 'REFLECTED', '#e0d0ff', 15, 0.8);
+      world.sfx('reflect', A.x);
+    }
   }
   if (!A || A.dead) return 'parry';
   world.lastParried = A;

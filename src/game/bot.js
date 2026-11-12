@@ -56,7 +56,7 @@ export class BotInput {
     this.down.left = this.down.right = false;
 
     let tgt = null, td = 1e9;
-    for (const e of w.fighters) { if (e.team !== 1 || e.dead) continue; const d = Math.abs(e.x - p.x); if (d < td) { td = d; tgt = e; } }
+    for (const e of w.fighters) { if (e.team !== 1 || e.dead || e.dim || e.phantom) continue; const d = Math.abs(e.x - p.x); if (d < td) { td = d; tgt = e; } }
 
     // Defence first.
     for (const e of w.fighters) {
@@ -95,6 +95,17 @@ export class BotInput {
       }
     }
 
+    // The whole floor is about to burn: get onto the nearest bridge and stay there.
+    if (w.flood && !w.flood.fired && rng() < this.skill + 0.2) {
+      let best = null;
+      for (const q of w.platforms) if (q.solid && (!best || Math.abs(q.x - p.x) < Math.abs(best.x - p.x))) best = q;
+      if (best) {
+        const dx = best.x - p.x, on = p.onGround && p.y < -20;
+        if (!on) { if (Math.abs(dx) > best.w / 2 - 40) this.down[dx > 0 ? 'right' : 'left'] = true; else if (p.onGround || p.vy > 0) this.press('jump', 0.3); if (Math.abs(dx) > 300 && p.dashCd <= 0) this.press('dash'); }
+        this.script.length = 0; this.wait = 0.1;
+        return;
+      }
+    }
     if (p.state === 'ragdoll' && p.rag.y[2] > -50 && rng() < this.skill * dt * 20) this.press('dash');
     // Sometimes burst out of a beating, and open Overdrive when the meter is full and something is in reach.
     if ((p.state === 'hitstun' || p.state === 'ragdoll') && w.focus >= 200 && rng() < this.skill * dt * 3) this.press('special');

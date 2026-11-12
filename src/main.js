@@ -4,7 +4,7 @@ import { World } from './game/world.js';
 import { Director } from './game/encounters.js';
 import { Renderer } from './render/renderer.js';
 import { buildArena, ARENA_IDS } from './render/arenas.js';
-import { Hud, draftCard } from './ui/hud.js';
+import { Hud, draftCard, menuItem, pauseButton } from './ui/hud.js';
 import { Touch } from './ui/touch.js';
 import { audio } from './audio/audio.js';
 import { BotInput } from './game/bot.js';
@@ -22,19 +22,19 @@ world.input = input;
 // The run in progress (seed, difficulty, floor, build) is saved at every floor, so a hundred floors
 // do not have to be climbed in one sitting. Storage can be unavailable (private windows), so every
 // access is guarded.
-const RUN_KEY = 'sticksaber.run', PREF_KEY = 'sticksaber.diff';
+const RUN_KEY = 'sticksaber.run', PREF_KEY = 'sticksaber.diff', TAUGHT_KEY = 'sticksaber.taught';
 const store = {
   get(key) { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } },
   set(key, v) { try { if (v === null) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(v)); } catch { /* play on without saving */ } },
 };
-const loadRun = () => { const s = store.get(RUN_KEY); return s && s.seed && s.floor >= 1 && s.floor <= FLOORS && DIFFS[s.diff] && Array.isArray(s.powers) && s.build ? s : null; };
+const loadRun = () => { const s = store.get(RUN_KEY); if (!(s && s.seed && s.floor >= 1 && s.floor <= FLOORS && DIFFS[s.diff] && Array.isArray(s.powers) && s.build)) return null; s.form ||= 'saber'; return s; };
 // `?seed=ABC123` pins the run so it can be replayed or shared, `?diff=easy|normal|hard` its
 // difficulty, and `?floor=40` starts there with the picks the run would have made on the way up.
 const query = new URLSearchParams(location.search);
 const fixedSeed = parseSeed(query.get('seed') || '');
 const fixedFloor = clamp(parseInt(query.get('floor'), 10) || 0, 0, FLOORS);
 
-const app = { state: 'menu', idx: 0, muted: false, menu: [], toast: null, manual: false, touch: false, diff: DIFFS[query.get('diff')] ? query.get('diff') : DIFFS[store.get(PREF_KEY)] ? store.get(PREF_KEY) : 'normal' };
+const app = { state: 'menu', idx: 0, muted: false, menu: [], toast: null, manual: false, touch: false, hover: '', diff: DIFFS[query.get('diff')] ? query.get('diff') : DIFFS[store.get(PREF_KEY)] ? store.get(PREF_KEY) : 'normal' };
 
 // Phones and tablets: taps drive the menus, an on-screen stick and buttons drive the fight.
 const taps = [], cmds = [];
@@ -44,6 +44,20 @@ const SPAWNS = ['Digit1', 'Digit2', 'Digit3', 'BracketLeft', 'Digit4', 'Digit6',
 const DIGITS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9'];
 let spawnIdx = 0;
 const live = () => app.state === 'play' || app.state === 'pause';
+const fighting = () => app.state === 'play' && director.state !== 'draft' && director.state !== 'dead' && director.state !== 'victory';
+
+// Mouse: menus, cards, pause buttons and the power chips are all clickable, the wheel switches power,
+// and in a fight the left, right and middle buttons are light, heavy and power.
+const mouse = { x: -1, y: -1, on: false, moved: false };
+const clicks = [];
+const inRect = (r, p) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+const toView = (e) => { const r = canvas.getBoundingClientRect(); mouse.x = ((e.clientX - r.left) / r.width) * renderer.view.w; mouse.y = ((e.clientY - r.top) / r.height) * renderer.view.h; mouse.on = true; };
+const fromTouch = () => performance.now() - input.lastTouch < 900;
+addEventListener('mousemove', (e) => { if (fromTouch()) return; toView(e); mouse.moved = true; });
+addEventListener('mousedown', (e) => { if (fromTouch()) return; toView(e); clicks.push({ x: mouse.x, y: mouse.y, button: e.button }); });
+addEventListener('mouseleave', () => { mouse.on = false; });
+addEventListener('wheel', (e) => { if (fighting() && Math.abs(e.deltaY) > 2) world.cyclePower(e.deltaY > 0 ? 1 : -1); }, { passive: true });
+input.mouseGuard = () => !fighting() || hud.chips.some((c) => inRect(c, mouse));
 
 // One arena is baked at a time: each floor is its own seeded variant, so the previous one is released.
 let arenaKey = '';
@@ -59,10 +73,22 @@ const director = new Director(world, {
     return renderer.arena.width;
   },
   onFloor(state) { if (live()) store.set(RUN_KEY, state); },
+  // The parry lesson on floor 1 is given once per browser.
+  lesson: () => live() && !store.get(TAUGHT_KEY),
+  lessonDone: () => store.set(TAUGHT_KEY, 1),
 });
 
+// Controller rumble: the heavier the event, the harder the shake.
+const RUMBLE = { hitLight: [0.15, 0.3, 50], hitHeavy: [0.5, 0.5, 90], hitSpike: [0.6, 0.5, 110], hitLaunch: [0.4, 0.5, 90], parry: [0.3, 0.9, 110], hurt: [0.9, 0.6, 160], kill: [0.5, 0.7, 120],
+  slam: [0.8, 0.4, 140], explode: [0.8, 0.5, 160], guardBreak: [0.9, 0.7, 200], stagger: [0.6, 0.8, 160], finisher: [1, 1, 600], bossPhase: [0.9, 0.7, 400], powerNova: [0.9, 0.7, 220], pillar: [0.6, 0.4, 140] };
+function rumble(name) {
+  const r = RUMBLE[name];
+  if (!r || !input.usedPad || !navigator.getGamepads) return;
+  for (const pad of navigator.getGamepads()) pad?.vibrationActuator?.playEffect?.('dual-rumble', { duration: r[2], strongMagnitude: r[0], weakMagnitude: r[1] }).catch(() => {});
+}
+
 // The fight behind the title screen is silent.
-world.sfxOut = (name, x, vol, pitch) => { if (live()) audio.play(name, { vol, pitch, pan: clamp((x - world.cam.x) / 720, -1, 1) }); };
+world.sfxOut = (name, x, vol, pitch) => { if (live()) { audio.play(name, { vol, pitch, pan: clamp((x - world.cam.x) / 720, -1, 1) }); rumble(name); } };
 world.loopOut = (name, on) => audio.loop(name, on && live());
 
 function buildMenu(keep) {
@@ -158,6 +184,28 @@ function shell() {
     } else confirm = true;
   }
   taps.length = 0;
+  // Mouse: what is under the pointer, then what was clicked.
+  let hover = '';
+  if (mouse.on && !app.touch) {
+    const W = renderer.view.w, H = renderer.view.h;
+    if (app.state === 'menu') { for (let i = 0; i < app.menu.length; i++) if (inRect(menuItem(W, H, app.menu.length, i), mouse)) { hover = `m${i}`; if (mouse.moved) app.idx = i; } }
+    else if (drafting) { const n = director.draft.options.length; for (let i = 0; i < n; i++) if (inRect(draftCard(W, n, i), mouse)) { hover = `d${i}`; if (mouse.moved) director.draft.idx = i; } }
+    else if (app.state === 'pause') { for (let i = 0; i < 2; i++) if (inRect(pauseButton(W, H, i), mouse)) hover = `p${i}`; }
+    else if (app.state === 'play') { for (const c of hud.chips) if (inRect(c, mouse)) hover = `c${c.i}`; }
+    for (const c of clicks) {
+      if (c.button !== 0) continue;
+      if (hover[0] === 'm') { app.idx = +hover.slice(1); confirm = true; }
+      else if (hover[0] === 'd') { director.draft.idx = +hover.slice(1); confirm = true; }
+      else if (hover === 'p0') back = true;
+      else if (hover === 'p1') { clicks.length = 0; mouse.moved = false; toMenu(); return; }
+      else if (hover[0] === 'c') world.selectPower(+hover.slice(1));
+      else if (app.state === 'controls' || (app.state === 'play' && (director.state === 'dead' || director.state === 'victory'))) confirm = true;
+    }
+  }
+  if (hover !== app.hover) { if (hover) audio.play('uiHover', { vol: 0.6 }); app.hover = hover; }
+  const cursor = hover ? 'pointer' : fighting() ? 'crosshair' : 'default';
+  if (cursor !== app.cursor) { app.cursor = cursor; canvas.style.cursor = cursor; }
+  clicks.length = 0; mouse.moved = false;
   for (const c of cmds) {
     if (c === 'pause' && app.state === 'play') back = true;
     else if (c === 'resume' && app.state === 'pause') back = true;

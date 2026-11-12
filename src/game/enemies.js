@@ -74,6 +74,27 @@ ENEMIES.echo = { ...ENEMIES.proctor, kind: 'echo', name: 'Echo', boss: false, ri
 // What a "splitter" strain leaves behind when it dies.
 ENEMIES.shard = { ...ENEMIES.initiate, kind: 'shard', name: 'Shard', scale: 0.72, hp: 22, posture: 30, runSpeed: 280, blade: { len: 52 }, chainBreak: 0,
   ai: { ...ENEMIES.initiate.ai, cd: [0.3, 0.9], guard: 0, moves: [{ id: 'i_slash', max: 135, w: 3 }, { id: 'i_lunge', min: 140, max: 250, w: 2 }] } };
+// ───────────── Hand-made keepers that use the room ─────────────
+// Both run on the generated bosses' brain (wardenCtrl) with kits written by hand.
+const KEEPER = { ...ENEMIES.proctor, boss: true, noRagdoll: true, ctrl: wardenCtrl, guard: undefined, adaptAt: 0, counter: undefined, armor: 2, tier: 2, posture: 200, postureTaken: 0.45,
+  parryPosture: 34, parryRecoil: 0.65, breakDur: 2.8, getup: 0.9, color3: '#fff0c0', ribbons: [], ribbonJoint: undefined };
+// The Twins: two bodies, one pool of health (bonds.js), and only the lit one can be hurt. Castor is
+// quick and close; Pollux holds the range with a pike.
+ENEMIES.twinA = { ...KEEPER, kind: 'twinA', name: 'THE TWINS', title: 'Castor strikes first', scale: 1.18, hp: 500, color: '#ffb060', color2: '#ff8a50', outline: '#ffd9b0', lineW: 5, runSpeed: 270,
+  blade: { len: 72 }, deco: 'crest', marks: [0.5], stance: ENEMIES.duelist.stance, ribbons: [{ n: 8, seg: 6, color: '#ffb060', width: 3 }], ribbonJoint: 'head',
+  kit: { school: 'twin', moves: [{ id: 'p_verdict', min: 0, max: 200, w: 4, dash: true }, { id: 'd_flurry', min: 110, max: 360, w: 3 }, { id: 'd_dive', min: 200, max: 420, w: 2 }, { id: 'd_spin', min: 0, max: 160, w: 2, phase: 2 }],
+    specials: ['blink'], strikes: ['w_cross', 'w_slash'], guard: 0.2, phases: [0.5], heals: [], echo: 0, doubleAt: 0, phaseText: ['They stop taking turns'] } };
+ENEMIES.twinB = { ...KEEPER, kind: 'twinB', name: 'THE TWINS', title: 'Pollux strikes last', scale: 1.24, hp: 500, color: '#b08cff', color2: '#8c6cff', outline: '#d9c8ff', lineW: 5.6, runSpeed: 230,
+  blade: { len: 98, thin: true }, deco: 'cone', marks: [0.5], stance: ENEMIES.lancer.stance,
+  kit: { school: 'twin', moves: [{ id: 'ln_thrust', min: 135, max: 310, w: 3 }, { id: 'ln_double', min: 135, max: 300, w: 3 }, { id: 'ln_shove', min: 0, max: 130, w: 4 }, { id: 'p_lunge', min: 320, max: 900, w: 2 }, { id: 'p_crescent', min: 260, max: 900, w: 2, phase: 2 }],
+    specials: [], hold: [200, 300], guard: 0, phases: [0.5], heals: [], echo: 0, doubleAt: 0, phaseText: ['They stop taking turns'] } };
+// The Cartographer redraws the floor: strips that erupt, a wall of fire with gaps, and at the end the whole floor.
+ENEMIES.cartographer = { ...KEEPER, kind: 'cartographer', name: 'THE CARTOGRAPHER', title: 'Who Redraws the Floor', scale: 1.32, hp: 1100, color: '#ffd36b', color2: '#ff9a4a', outline: '#fff0c0', lineW: 5.4, runSpeed: 230,
+  blade: { len: 112, thin: true }, deco: 'crown', marks: [0.66, 0.33], stance: ENEMIES.lancer.stance,
+  ribbons: [{ n: 10, seg: 8, color: '#1a1420', width: 9, oy: 2, grav: 700 }, { n: 8, seg: 8, color: '#1a1420', width: 7, oy: 6, grav: 800 }],
+  kit: { school: 'carto', moves: [{ id: 'ln_thrust', min: 135, max: 310, w: 3 }, { id: 'ln_double', min: 135, max: 300, w: 3 }, { id: 'ln_shove', min: 0, max: 130, w: 4 }, { id: 'p_lunge', min: 320, max: 900, w: 2 }, { id: 'br_sweep', min: 0, max: 240, w: 2 }, { id: 'p_crescent', min: 260, max: 900, w: 2, phase: 2 }],
+    specials: ['redraw', 'redraw', 'skyfall'], hold: [200, 300], guard: 0, phases: [0.66, 0.33], heals: [], echo: 0, doubleAt: 0, phaseText: ['The lines begin to move', 'There is no floor left to stand on'] } };
+
 // An afterimage of any boss: the same definition with the brain swapped for the echo's.
 const echoDefs = new Map();
 export function echoDef(def) {
@@ -174,6 +195,13 @@ export function meleeCtrl(f, world, dt) {
     return;
   }
 
+  // Cover: stand between the player and the one being guarded.
+  const ward = ai.guardOf;
+  if (ward && !ward.dead && ai.cd > 0.15) {
+    const spot = ward.x + (pl.x >= ward.x ? 1 : -1) * Math.min(110, Math.abs(pl.x - ward.x) * 0.5);
+    if (Math.abs(spot - f.x) > 36) { f.moveX = spot > f.x ? 1 : -1; return; }
+    return;
+  }
   const rmin = P.range[0] + ai.rangeAdd, rmax = P.range[1] + ai.rangeAdd;
   let mx = 0;
   if (P.retreat && ai.retreat > 0 && ai.retreat <= P.retreat) mx = -want;
@@ -608,6 +636,7 @@ function wardenShift(f, world) {
     ai.burst = true; ai.phase = next; ai.p3 = next > 2; ai.sp = 1.2;
     g.color = next > 2 ? g.def.color3 : g.def.color2; g.rate += 0.07;
     if (K.doubleAt === next) g.double = true;
+    if (K.school === 'twin') w.maxAttackers = 2; // until now the twins took turns
     w.fx.ring(g.cx, g.cy, 20, 520, 0.6, g.color, 1, 8); w.fx.ring(g.x, -2, 20, 600, 0.6, '#ffffff', 0.2, 5);
     w.fx.flash(g.cx, g.cy, 320, g.color, 0.4); w.fx.spark(g.cx, g.cy, 0, 3.14, 50, 900, g.color, { white: 0.5 });
     w.sfx('bossPhase', g.x, 1, next > 2 ? 1.2 : 1); w.shake(0.8); w.stop(0.16, true); w.flashScreen(g.color, 0.35);
@@ -627,9 +656,10 @@ export function wardenCtrl(f, world, dt) {
   if (!ai.init) initAi(f, { cd: 1.4, phase: 1, heals: [...(K.heals || [])], script: null, hurt: proctorHurt, onBreak: proctorReset, sp: 3, called: 0, p3: false });
   tickAdapt(f, dt);
   ai.cd -= dt; ai.guardT -= dt; ai.sp -= dt;
-  world.boss = f;
+  // Of twins, the health bar follows the one that can be hurt.
+  if (!f.dim || !world.boss || world.boss.dead) world.boss = f;
   if (f.state === 'custom') { ai.script?.(f, world, dt); return; }
-  if (ai.busy) { proctorReset(f, world); f.fade = 1; } // knocked out of a set piece, a blink included
+  if (ai.busy) { proctorReset(f, world); f.fade = f.dim ? 0.5 : 1; } // knocked out of a set piece, a blink included
   if (tickGuard(f, world, 2)) return;
   if (f.state !== 'free' || !f.onGround || pl.dead) return;
 
@@ -656,6 +686,7 @@ export function wardenCtrl(f, world, dt) {
       const sp = list[(rng() * list.length) | 0];
       ai.sp = rand(6, 9) - ai.phase;
       if (sp === 'skyfall') return skyfall(f, world);
+      if (sp === 'redraw') { ai.sp = rand(5, 7) - ai.phase; return redraw(f, world); }
       if (sp === 'blink') return blink(f, world, rng() < 0.7 ? 'behind' : 'front');
       return summon(f, world, 2);
     }
@@ -670,4 +701,32 @@ export function wardenCtrl(f, world, dt) {
   if (pick.dash && dist > 170) { f.vx = want * clamp((dist - 120) * 5.5, 0, 1150); world.fx.ghost(f, f.color, 0.3); world.sfx('dash', f.x); }
   f.startMove(pick.id);
   ai.cd = m.dur + rand(0.5, 1.0) / (0.75 + ai.phase * 0.35);
+}
+
+// The Cartographer's set piece. What it draws depends on the phase: alternating strips, then a wall
+// of fire that walks across the room with two gaps in it, then the whole floor, with bridges to stand on.
+function redraw(f, world) {
+  const ai = f.ai, phase = ai.phase;
+  f.setState('custom', 1.5); ai.busy = true; f.invuln = Math.max(f.invuln, 0.3);
+  f.tele = 0.5; f.teleRed = true; world.sfx('alarm', f.x);
+  f.poseFn = (g, t) => { t[PY] = 36; t[LEAN] = 0.35; t[HEAD] = 0.3; t[HA] = -1.2; t[HR] = 0.9; t[BL] = -1.57; t[UA] = -1.5; t[LA] = -1.2; t[F1X] = 22; t[F2X] = -22; return 22; };
+  world.fx.text(f.x, f.j[1] - 70 * f.scale, phase >= 3 ? 'NO FLOOR' : 'REDRAW', f.color, 20, 1.2);
+  let done = false;
+  ai.script = (g, w) => {
+    if (done || g.st < 0.5) return;
+    done = true;
+    const span = w.maxX - w.minX;
+    w.fx.ring(g.x, -2, 20, 500, 0.6, g.color, 0.2, 6); w.shake(0.4);
+    if (phase >= 3) {
+      for (const k of [-0.52, 0, 0.52]) w.addPlatform(k * (w.maxX - 150), -150, 270, 5.2);
+      w.flood = { t: 0, arm: 1.9, dur: 0.9, hit: new Set(), fired: false };
+      w.banner('NO FLOOR', 'Get onto a bridge', 1.8);
+    } else if (phase === 2) {
+      const dir = rng() < 0.5 ? 1 : -1, n = Math.floor(span / 110), a = 2 + ((rng() * (n - 4)) | 0), b = (a + 3 + ((rng() * 3) | 0)) % n;
+      for (let i = 0; i < n; i++) if (i !== a && i !== b) w.projectiles.pillar(g, (dir > 0 ? w.minX : w.maxX) + dir * (55 + i * 110), 1.05 + i * 0.07, { w: 50, dmg: 18 });
+    } else {
+      ai.flip = !ai.flip;
+      for (let x = w.minX + 100 + (ai.flip ? 100 : 0); x < w.maxX - 40; x += 200) w.projectiles.pillar(g, x, 1.2, { w: 56, dmg: 18 });
+    }
+  };
 }

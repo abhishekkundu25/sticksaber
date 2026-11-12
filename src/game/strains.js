@@ -9,6 +9,7 @@
 import { makeRng, hash32, clamp, lerp } from '../core/math.js';
 import { ENEMIES, championCtrl, wardenCtrl } from './enemies.js';
 import { MOVES, tempoMove, chainMove, stripEvents } from './moves.js';
+import * as BEASTS from './beasts.js';
 
 const MELEE = ['initiate', 'bulwark', 'duelist', 'brute', 'lancer'];
 const CHASSIS = ['initiate', 'bulwark', 'duelist', 'marksman', 'brute', 'lancer', 'wraith', 'drone'];
@@ -246,5 +247,18 @@ export function buildRoster(seed, places) {
   }
   for (let s = 0; s < 10; s++) { const id = `c${s}`; defs[id] = makeChampion(r, id, s, places[s], names); champions.push(id); }
   for (let s = 0; s < 9; s++) { const id = `w${s}`; defs[id] = makeWarden(r, id, s, places[s], names); wardens.push(id); }
-  return { defs, strains, champions, wardens };
+  // One animal species per sector from sector II, on its own random stream so the strains above do
+  // not depend on it. A run sees every body plan before any repeats.
+  const beasts = [null], plans = BEASTS.BEAST_PLANS || [];
+  if (plans.length) {
+    const rb = makeRng(hash32(seed, 0xbea57));
+    const order = [...shuffle(rb, plans), ...shuffle(rb, plans), ...shuffle(rb, plans)];
+    for (let s = 1; s < 10; s++) {
+      const id = `b${s}`, def = BEASTS.makeBeast(rb, id, order[s - 1], s, names);
+      // More than one of a trait already on the animal adds nothing, so the generator may tune these.
+      def.kind = id; def.info = BEASTS.BEAST_INFO?.[def.beast] || {};
+      defs[id] = def; beasts.push(id);
+    }
+  }
+  return { defs, strains, champions, wardens, beasts };
 }

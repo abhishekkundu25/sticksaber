@@ -87,11 +87,21 @@ test('every generated run obeys the rules, across 60 seeds', () => {
         assert.ok(kinds.filter((k) => def(k).base === 'brute' || k === 'brute').length <= 2);
         assert.ok(w.attackers >= 1 && w.attackers <= 4);
       }
-      if (fl.boss) { assert.deepEqual(fl.waves.map((w) => w.spawns.map((sp) => sp.kind)), [[fl.boss]]); assert.ok(def(fl.boss).boss); }
+      if (fl.boss) { assert.equal(fl.waves.length, 1); assert.ok(fl.waves[0].spawns.every((sp) => def(sp.kind).boss) && fl.waves[0].spawns[0].kind === fl.boss); }
+      // Bonded groups name real members, and terrain stays inside the arena.
+      for (const w of fl.waves) for (const [g, G] of (w.groups || []).entries()) {
+        const m = w.spawns.filter((sp) => sp.g === g);
+        assert.equal(m.length, G.n, `floor ${fl.n}: group size`);
+        assert.deepEqual(m.map((sp) => sp.role).sort(), [...Array(G.n).keys()]);
+      }
+      if (fl.terrain) for (const t of [...fl.terrain.plats, ...fl.terrain.vents]) assert.ok(Math.abs(t.fx) <= 0.8, `floor ${fl.n}: terrain at ${t.fx}`);
       if (fl.boss === 'forgemaster') { forges++; assert.ok(fl.n >= 20 && fl.n <= 50); }
       assert.equal(fl.reward, fl.n === FLOORS ? null : fl.kind === 'boss' ? 'legend' : fl.kind === 'champion' ? 'power' : fl.reward);
     }
     assert.equal(forges, 1, 'the Forgemaster appears exactly once');
+    assert.equal(floors.filter((f) => f.boss === 'twinA').length, 1, 'the Twins appear exactly once');
+    assert.equal(floors.filter((f) => f.boss === 'cartographer').length, 1, 'the Cartographer appears exactly once');
+    for (let q = 1; q < 10; q++) assert.ok(roster.rules[q].length >= 1, `sector ${q + 1} has no bond`);
     assert.equal(floors[99].boss, 'proctor');
     // Enemy colours keep clear of the player's cyan.
     for (const d of Object.values(roster.defs)) {
@@ -375,6 +385,8 @@ test('clearing a floor opens a draft, and the pick carries into the next floor a
   const dir = new Director(world, { setArena: () => 2200, onFloor: (s) => saves.push(s) });
   dir.startRun(0, 99);
   let t = 0;
+  // A run played by a person opens with the choice of weapon form, when there is more than one.
+  if (dir.state === 'draft') { assert.equal(dir.draft.type, 'form'); dir.choose(0); assert.equal(dir.state, 'intro'); }
   for (; t < 200 && dir.state !== 'draft'; t += DT) { world.input.tick(DT); world.step(DT); dir.update(DT); if (world.player.hp < 50) world.player.hp = 100; }
   assert.equal(dir.state, 'draft', 'no draft after floor 1');
   assert.equal(dir.draft.options.length, 3);
@@ -417,3 +429,117 @@ test('strain traits work: splitters split, vampires feed, shards and orbs appear
   assert.equal(world.orbs.length, 0); assert.ok(p.hp >= 54);
 });
 
+
+// ───────────── bonds, terrain, techniques ─────────────
+test('bonds change which enemy to kill first', () => {
+  // Ward: the charge takes a third until the warder dies.
+  let { world, p, foes: [src, tgt] } = room(['marksman', 'brute'], 200);
+  world.bind('ward', [src, tgt]);
+  p.startMove('L1');
+  let hp = tgt.hp; applyHit(world, p, tgt, LIGHT, tgt.cx, tgt.cy);
+  const warded = hp - tgt.hp;
+  src.hp = 1; p.hitSet.clear(); applyHit(world, p, src, LIGHT, src.cx, src.cy);
+  for (let i = 0; i < 60; i++) world.step(DT);
+  assert.equal(tgt.ward, null, 'the ward should break with the warder');
+  world.style.reset(); p.hitSet.clear(); p.startMove('L1');
+  hp = tgt.hp; applyHit(world, p, tgt, LIGHT, tgt.cx, tgt.cy);
+  assert.ok(hp - tgt.hp > warded * 2, `warded ${warded}, then ${hp - tgt.hp}`);
+
+  // Sworn: the survivor enrages.
+  ({ world, p, foes: [src, tgt] } = room(['duelist', 'lancer'], 200));
+  world.bind('avenger', [src, tgt]);
+  const rate = tgt.rate;
+  applyHit(world, p, src, HEAVY, src.cx, src.cy);
+  for (let i = 0; i < 60; i++) world.step(DT);
+  assert.ok(tgt.enraged && tgt.rate > rate, 'the survivor should enrage');
+
+  // Pack: the leader's death breaks the pack's nerve.
+  let pack;
+  ({ world, p, foes: pack } = room(['duelist', 'initiate', 'initiate'], 150));
+  world.bind('pack', pack);
+  assert.ok(pack[1].rate > 1);
+  applyHit(world, p, pack[0], HEAVY, pack[0].cx, pack[0].cy);
+  for (let i = 0; i < 60; i++) world.step(DT);
+  assert.equal(pack[1].rate, 1); assert.equal(pack[1].temper, 'cautious'); assert.equal(world.bonds.length, 0);
+
+  // Rider: it sits on its mount, and a launch unseats it.
+  ({ world, p, foes: [src, tgt] } = room(['lancer', 'brute'], 300));
+  src.x = tgt.x; world.bind('rider', [src, tgt]);
+  for (let i = 0; i < 30; i++) world.step(DT);
+  assert.ok(src.y < -20 && Math.abs(src.x - tgt.x) < 40, `rider at ${src.x.toFixed(0)},${src.y.toFixed(0)}`);
+  applyHit(world, p, src, { ...HEAVY, dmg: 5 }, src.cx, src.cy);
+  for (let i = 0; i < 60; i++) world.step(DT);
+  assert.equal(src.riding, null); assert.equal(tgt.rider, null);
+
+  // Twins: one life, and only the lit one can be hurt.
+  ({ world, p } = room([]));
+  const a = world.spawnEnemy('twinA', 200, false), b = world.spawnEnemy('twinB', -200, false);
+  a.def = { ...a.def, ctrl: null }; b.def = { ...b.def, ctrl: null };
+  const bond = world.bind('twins', [a, b]);
+  assert.equal(a.hp, b.hp);
+  const pool = bond.pool;
+  p.startMove('L1'); applyHit(world, p, b, LIGHT, b.cx, b.cy);
+  assert.equal(bond.pool, pool, 'the unlit twin takes nothing');
+  p.hitSet.clear(); applyHit(world, p, a, LIGHT, a.cx, a.cy);
+  assert.ok(bond.pool < pool);
+  for (let i = 0; i < 5; i++) world.step(DT);
+  assert.equal(a.hp, b.hp);
+  p.hitSet.clear(); applyHit(world, p, a, { ...HEAVY, dmg: 99999 }, a.cx, a.cy);
+  assert.ok(a.dead && b.dead, 'both fall together');
+});
+
+test('terrain: bridges hold and overload, vents burn everyone, charged walls shock', () => {
+  const { world, p, foes: [e] } = room(['initiate'], 300);
+  world.setTerrain({ plats: [{ fx: 0, y: -150, w: 260 }], vents: [{ fx: 0.3, w: 52, period: 5, phase: 0 }], walls: true });
+  const plat = world.platforms[0];
+  p.x = plat.x; p.y = -320; p.vy = 0; p.onGround = false;
+  for (let i = 0; i < 120; i++) world.step(DT);
+  assert.ok(p.onGround && Math.abs(p.y - plat.y) < 1, `the player should land on the bridge, y=${p.y}`);
+  for (let i = 0; i < 120 * 4; i++) world.step(DT);
+  assert.ok(!plat.solid && p.y === 0, 'the bridge overloads and drops the player');
+  // The vent burns the enemy standing on it.
+  const vent = world.hazards[0];
+  e.x = vent.x; const hp = e.hp;
+  for (let i = 0; i < 120 * 6 && e.hp === hp; i++) { e.x = vent.x; world.step(DT); }
+  assert.ok(e.hp < hp, 'the vent should burn an enemy standing on it');
+  // A body thrown into a charged wall takes a shock.
+  const d = world.spawnEnemy('duelist', world.maxX - 120, false); d.def = { ...d.def, ctrl: null };
+  const hp2 = d.hp;
+  d.toRagdoll(1400, -200, 0);
+  for (let i = 0; i < 120; i++) world.step(DT);
+  assert.ok(d.hp < hp2, 'the wall should shock a thrown body');
+  assert.ok(finite(world));
+});
+
+test('techniques change what a move does', () => {
+  const { world, p, foes: [a, b] } = room(['initiate', 'initiate'], 200);
+  world.setBuild({ undertow: 1, mirrorguard: 1, razor: 1, aerial: 1, meteor: 1, nail: 1 });
+  const d0 = Math.abs(a.x - p.x);
+  world.undertow(p);
+  for (let i = 0; i < 20; i++) world.step(DT);
+  assert.ok(Math.abs(a.x - p.x) < d0 - 40, 'Undertow should drag the enemy in');
+  world.lockInput = false;
+  for (let i = 0; i < 5; i++) world.step(DT);
+  assert.equal(p.airJumps, 2, 'Aerialist gives a second air jump');
+  const hp = b.hp;
+  p.x = b.x - 60; p.facing = 1; p.setState('dash', 0.17); p.dashDir = 1; p.dashSet = null;
+  for (let i = 0; i < 24; i++) world.step(DT);
+  assert.ok(b.hp < hp, 'Razor Step should cut on the way through');
+});
+
+test('the parry lesson holds the wave until the player parries', () => {
+  const world = new World(); world.input = new BotInput(world, 0);
+  const dir = new Director(world, { setArena: () => 2200, auto: true, lesson: () => true });
+  dir.startRun(0, 99);
+  dir.wave = 1; dir.spawnWave();
+  assert.ok(dir.lesson && world.lessonOn);
+  for (let i = 0; i < 120 * 4; i++) { world.step(DT); dir.update(DT); world.player.hp = 100; }
+  const teacher = world.fighters.find((f) => f.lesson);
+  assert.ok(teacher && world.countEnemies() === 1, 'only the instructor arrives during the lesson');
+  const hp = teacher.hp; teacher.invuln = 0;
+  applyHit(world, world.player, teacher, HEAVY, teacher.cx, teacher.cy);
+  assert.equal(teacher.hp, hp, 'the instructor cannot be hurt before the parry');
+  world.stats.parries++;
+  for (let i = 0; i < 120 * 3; i++) { world.step(DT); dir.update(DT); world.player.hp = 100; }
+  assert.ok(!world.lessonOn && world.fighters.filter((f) => f.team === 1).length > 1, 'the rest of the wave arrives after the parry');
+});

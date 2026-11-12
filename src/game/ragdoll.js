@@ -33,6 +33,7 @@ export class Ragdoll {
     this.cuts = [];         // [{joint, t}] glowing cut ends
     this.handRoot = 3;      // particle the weapon hand hangs from (the elbow, until that forearm is cut)
     this.age = 0; this.wallImpact = 0;
+    this.floorY = 0;        // height of whatever the pelvis last rested on
   }
 
   get pieces() { return this.cuts.length / 2 + 1; }
@@ -110,7 +111,7 @@ export class Ragdoll {
 
   // Returns the hardest floor impact speed this step (0 if none) so the world can add dust and sound;
   // `wallImpact` holds the same for the arena walls.
-  step(dt, minX, maxX) {
+  step(dt, minX, maxX, plats) {
     if (dt <= 0) return 0;
     const { x, y, vx, vy, r, bones, len, n } = this;
     const px = Ragdoll.px, py = Ragdoll.py, pvy = Ragdoll.pvy, pvx = Ragdoll.pvx;
@@ -139,7 +140,15 @@ export class Ragdoll {
         x[i] += dx * k; y[i] += dy * k; x[j] -= dx * k; y[j] -= dy * k;
       }
       for (let i = 0; i < n; i++) {
-        if (y[i] > -r[i]) { y[i] = -r[i]; hitG[i] = 1; }
+        if (plats && plats.length && vy[i] >= 0) {
+          // One-way platforms: a falling joint that was above the top lands on it.
+          for (let q = 0; q < plats.length; q++) {
+            const P = plats[q];
+            if (!P.solid || x[i] < P.x - P.w / 2 || x[i] > P.x + P.w / 2) continue;
+            if (y[i] > P.y - r[i] && py[i] <= P.y - r[i] + 8) { y[i] = P.y - r[i]; hitG[i] = 1; if (i === 2) this.floorY = P.y; }
+          }
+        }
+        if (y[i] > -r[i]) { y[i] = -r[i]; hitG[i] = 1; if (i === 2) this.floorY = 0; }
         if (x[i] < minX + r[i]) { x[i] = minX + r[i]; hitG[i] |= 2; }
         else if (x[i] > maxX - r[i]) { x[i] = maxX - r[i]; hitG[i] |= 2; }
       }

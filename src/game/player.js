@@ -17,7 +17,7 @@ export function playerCtrl(f, world, dt) {
   const ax = inp.axisX();
   f.riposteT = (f.riposteT || 0) - dt;
   f.sinceDash = (f.sinceDash ?? 9) + dt;
-  if (f.onGround) { f.airJumps = 1; f.airDash = 1; f.coyote = 0.09; f.refunded = false; } else f.coyote -= dt;
+  if (f.onGround) { f.airJumps = 1 + world.mods.airJumps; f.airDash = 1 + world.mods.airJumps; f.coyote = 0.09; f.refunded = false; } else f.coyote -= dt;
 
   // Focus spends that are not attacks. Burst answers being hit; Overdrive is started on your own terms.
   if (BURSTABLE[f.state] && !f.dead) {
@@ -86,6 +86,8 @@ export function playerCtrl(f, world, dt) {
 
 function tryJump(f, world, inp, ax) {
   if (!inp.peek('jump', 0.12)) return false;
+  // Down and jump on a light bridge drops through it.
+  if (f.onGround && f.y < -1 && inp.held('down')) { inp.consume('jump'); f.dropT = 0.3; f.y += 4; f.onGround = false; return true; }
   if (f.onGround || f.coyote > 0) {
     inp.consume('jump');
     f.vy = -930; f.onGround = false; f.y -= 1; f.coyote = 0; f.jumping = true;
@@ -108,7 +110,7 @@ function tryDash(f, world, inp, ax) {
   inp.consume('dash');
   const dir = ax || f.facing;
   f.setState('dash', 0.17);
-  f.dashDir = dir; f.facing = dir; f.invuln = Math.max(f.invuln, 0.15); f.dashCd = 0.46 * world.mods.dashCd; f.dodged = false; f.sinceDash = 0; f.ghostT = 0;
+  f.dashDir = dir; f.facing = dir; f.invuln = Math.max(f.invuln, 0.15); f.dashCd = 0.46 * world.mods.dashCd; f.dodged = false; f.sinceDash = 0; f.ghostT = 0; f.dashSet = null;
   world.sfx('dash', f.x);
   if (f.onGround) world.fx.dust(f.x, 0, 5, -dir, 220);
   return true;
@@ -152,6 +154,7 @@ function tryAttack(f, world, inp, ax, cur) {
     if (t && !t.dead) f.face(t.x); else autoFace(f, world, ax);
     world.slow(0.45, 0.22);
   } else autoFace(f, world, ax);
+  if (id === 'LAUNCH' && world.mods.undertow) world.undertow(f);
   const mid = world.moveId(id); // the weapon form's own move for this slot
   f.startMove(mid);
   if (air && MOVES[mid].air && !MOVES[mid].plunge && f.vy > 0) f.vy *= 0.3;

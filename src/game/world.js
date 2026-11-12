@@ -11,6 +11,7 @@ import { baseMods, buildMods } from './augments.js';
 import { POWERS } from './powers.js';
 import { Beast } from './beasts.js';
 import { FORMS } from './forms.js';
+import { tickBonds, bind } from './bonds.js';
 
 const RANKS = [0, 18, 42, 72, 108, 150];
 export const RANK_NAMES = ['', 'D', 'C', 'B', 'A', 'S'];
@@ -60,6 +61,10 @@ const OD_COLOR = '#e6fdff';
 const AURA_TRAITS = ['swift', 'armored', 'volatile'];
 const STORM_HIT = { dmg: 28, post: 30, kx: 200, ky: -300, kind: 'knock', stop: 0.05, shake: 0.3, stun: 0.4, fromPlayer: true, id: 'STORM', fam: 'power', unblockable: true };
 const WIRE_HIT = { dmg: 10, post: 10, kx: 120, ky: 0, kind: 'flinch', stop: 0.02, shake: 0.1, stun: 0.3, fromPlayer: true, id: 'WIRE', fam: 'power', unblockable: true };
+const DASH_HIT = { dmg: 12, post: 14, kx: 60, ky: 0, kind: 'flinch', stop: 0.03, shake: 0.14, stun: 0.4, fromPlayer: true, id: 'RAZOR', fam: 'power', unblockable: true };
+const FLOOD_HIT = { dmg: 24, post: 30, kx: 300, ky: -520, kind: 'knock', stop: 0.08, shake: 0.5, stun: 0.5, unblockable: true, hazard: true };
+const WALL_HIT = { dmg: 16, post: 30, kx: 260, ky: -200, kind: 'flinch', stop: 0.05, shake: 0.3, stun: 0.4, unblockable: true, hazard: true };
+const NEUTRAL = { team: 2, color: '#ff7a2e' }; // owner of the room's own hazards: they burn everyone
 const BURST_HIT = { dmg: 18, post: 30, kx: 640, ky: -440, kind: 'knock', stop: 0, shake: 0, stun: 0.4, fromPlayer: true, id: 'BURST', fam: 'power', unblockable: true };
 // The mirror image: the player's body with a brain that only copies.
 const MIRROR = { ...PLAYER, name: 'Mirror', ribbons: [], ctrl: mirrorCtrl };
@@ -93,7 +98,8 @@ export class World {
     this.powers = ['throw']; this.powerIdx = 0; this.powerT = 0;
     this.bonusHp = 0;                      // health earned by beating sector keepers
     this.formId = 'saber'; this.form = FORMS.saber;
-    this.platforms = []; this.hazards = []; // terrain of the current floor
+    this.platforms = []; this.hazards = []; this.walls = false; this.flood = null; // terrain of the current floor
+    this.finisher = null; this.lessonOn = false;
     this.bonds = [];                       // links between enemies: packs, tethers, riders
     this.orbs = []; this.mirror = null; this.stasis = 0;
     this.windUsed = false; this.freeCast = false; this.odShield = 0; this.odMax = OVERDRIVE_TIME; this.hitCount = 0;
@@ -153,6 +159,7 @@ export class World {
     f.face(this.player ? this.player.x : 0);
     if (opts?.temper) f.temper = opts.temper;
     if (opts?.color) f.color = opts.color;
+    if (opts?.lesson) { f.lesson = true; f.ai.cdK = 0.6; }
     const frenzy = this.anom === 'frenzy';
     let hp = def.hp * this.hpMul * (frenzy ? 0.75 : 1);
     f.rate = this.rateMul * (frenzy ? 1.15 : 1); f.ai.cdK = this.cdMul; f.dmgMul = def.dmg ?? 1;
@@ -191,12 +198,66 @@ export class World {
   }
   clearEnemies() {
     this.fighters = this.fighters.filter((f) => f.team === 0);
-    this.projectiles.clear(); this.boss = null; this.marker = null; this.bossChannel = 0;
+    this.projectiles.clear(); this.boss = null; this.marker = null; this.bossChannel = 0; this.bonds.length = 0;
     if (this.player) this.player.armed = true;
   }
+  bind(type, members, o) { return bind(this, type, members, o); }
   get enemies() { return this.fighters.filter((f) => f.team === 1 && !f.dead && !f.phantom); }
   // Allocation-free count for per-frame callers.
   countEnemies() { let n = 0; for (const f of this.fighters) if (f.team === 1 && !f.dead && !f.phantom) n++; return n; }
+
+  // ───────────── terrain ─────────────
+  // `T` comes from the floor: { plats: [{ fx, y, w }], vents: [{ fx, w, period, phase }], walls }.
+  setTerrain(T) {
+    const half = this.maxX - 150;
+    this.platforms = (T?.plats || []).map((p) => ({ x: p.fx * half, y: p.y, w: p.w, solid: true, load: 0, off: 0 }));
+    this.hazards = (T?.vents || []).map((v) => ({ x: v.fx * half, w: v.w, period: v.period, t: v.phase + 2.5, armed: false }));
+    this.walls = !!T?.walls; this.flood = null;
+  }
+  addPlatform(x, y, w, life) { const p = { x, y, w, solid: true, load: 0, off: 0, life }; this.platforms.push(p); this.sfx('platformOn', x, 0.8); return p; }
+  tickTerrain(dt) {
+    const pl = this.player, P = this.platforms;
+    for (let i = P.length - 1; i >= 0; i--) {
+      const p = P[i];
+      if (p.life !== undefined && (p.life -= dt) <= 0) { P.splice(i, 1); this.sfx('platformOff', p.x, 0.7); continue; }
+      if (p.solid) {
+        // A bridge overloads if the player stands on it too long, so it is a breather, not a refuge.
+        const on = pl && pl.onGround && Math.abs(pl.y - p.y) < 3 && Math.abs(pl.x - p.x) <= p.w / 2;
+        p.load = on ? p.load + dt : Math.max(0, p.load - dt * 0.6);
+        if (p.load > 3.2) { p.solid = false; p.off = 4.5; p.load = 0; this.sfx('platformOff', p.x); this.fx.spark(p.x, p.y, 0, 3.14, 14, 380, '#9fe8ff'); }
+      } else if ((p.off -= dt) <= 0) { p.solid = true; this.sfx('platformOn', p.x, 0.7); }
+    }
+    for (const h of this.hazards) {
+      h.t -= dt;
+      if (!h.armed && h.t <= 0.95) { h.armed = true; this.projectiles.pillar(NEUTRAL, h.x, 0.95, { dmg: 18, w: h.w }); this.sfx('hazardArm', h.x, 0.7); }
+      if (h.t <= 0) { h.t = h.period; h.armed = false; this.sfx('hazardZap', h.x, 0.8); }
+    }
+    const F = this.flood;
+    if (F) {
+      F.t += dt;
+      if (F.t >= F.arm && !F.fired) { F.fired = true; this.sfx('hazardZap', pl.x, 1, 0.7); this.sfx('pillar', pl.x); this.shake(0.6); this.flashScreen('#ff7a2e', 0.3); }
+      if (F.fired && F.t < F.arm + F.dur) {
+        // Anything standing on the floor itself is burned once. A bridge, or the air, is safe.
+        for (const f of this.fighters) {
+          if (f.dead || f.phantom || f.def.boss || F.hit.has(f) || f.invuln > 0) continue;
+          const low = f.rag ? f.rag.y[2] > -40 : f.y > -30;
+          if (low) { F.hit.add(f); applyHit(this, null, f, { ...FLOOD_HIT, dir: f.facing }, f.cx, f.cy); }
+        }
+      } else if (F.t >= F.arm + F.dur) this.flood = null;
+    }
+  }
+  // Undertow: the launcher drags the ground around it inward first.
+  undertow(f) {
+    let any = false;
+    for (const e of this.fighters) {
+      if (e.team === f.team || e.dead || e.phantom || e.rag || e.riding || e.def.armor >= 2 || e.def.flying) continue;
+      const dx = f.x - e.x;
+      if (Math.abs(dx) > 300 || Math.abs(dx) < 50 || e.y < -60) continue;
+      e.setState('hitstun', 0.3); e.vx = Math.sign(dx) * Math.min(1400, Math.abs(dx) * 5.5); any = true;
+      this.fx.slash((e.x + f.x) / 2, e.cy, 0, Math.abs(dx), f.color, 0.2, 3);
+    }
+    if (any) { this.fx.ring(f.x, f.y - 60, 300, 30, 0.25, f.color, 1, 4); this.sfx('pullIn', f.x); }
+  }
 
   // ───────────── services used by fighters / combat ─────────────
   sfx(name, x, vol = 1, pitch = 1) { this.sfxOut?.(name, x, vol, pitch); }
@@ -448,6 +509,7 @@ export class World {
       fx.spark(f.x, -3, -Math.PI / 2, 1.4, 26, 640, f.color); fx.dust(f.x - 20, 0, 6, -1, 300); fx.dust(f.x + 20, 0, 6, 1, 300);
       fx.flash(f.x, -10, 130, f.color, 0.16);
       this.sfx('slam', f.x); this.shake(0.5);
+      if (f.isPlayer && !f.phantom && this.mods.meteor) this.projectiles.pillar(f, f.x, 0.22, { dmg: 22, w: 64, color: '#ffa060' });
     } else if (name === 'hammer') {
       const x = f.tx;
       fx.spark(x, -3, -Math.PI / 2, 1.3, 30, 760, f.color, { white: 0.4 }); fx.dust(x - 20, 0, 7, -1, 300); fx.dust(x + 20, 0, 7, 1, 300);
@@ -461,7 +523,7 @@ export class World {
 
   spawnFrom(f, what) {
     const pl = this.player;
-    if (what === 'saber') { f.armed = false; this.projectiles.saber(f, 480 * this.mods.throwRange, this.mods.throwDmg); this.audioLoop('throw', true); }
+    if (what === 'saber') { f.armed = false; this.projectiles.saber(f, 480 * this.mods.throwRange, this.mods.throwDmg, this.mods.pin ? 1.3 : 0); this.audioLoop('throw', true); }
     else if (what === 'pcrescent') {
       this.projectiles.wave(f, f.x + f.facing * 50, f.facing, { crescent: true, speed: 980, h: 96, range: 1150, dmg: 20 });
       this.fx.flash(f.tx, f.ty, 90, f.color, 0.16); this.sfx('powerCrescent', f.x);
@@ -515,6 +577,14 @@ export class World {
     const x = f.x < 0 ? this.minX : this.maxX;
     this.fx.spark(x, f.j[5], f.x < 0 ? 0 : Math.PI, 1.3, 14, 520, '#ffffff'); this.fx.flash(x, f.j[5], 90, '#ffffff', 0.14);
     this.sfx('wallSplat', x, clamp(speed / 900, 0.4, 1)); this.shake(0.3);
+    // A charged wall shocks whatever is thrown into it.
+    if (this.walls && !f.isPlayer && this.time - (f.wallT ?? -9) > 0.8) {
+      f.wallT = this.time;
+      this.fx.zap(x, f.j[5] - 90, x, f.j[5] + 40, '#9fe8ff', 0.25); this.fx.spark(x, f.j[5], f.x < 0 ? 0 : Math.PI, 1.2, 18, 620, '#9fe8ff', { white: 0.5 });
+      this.sfx('wallShock', x);
+      if (!f.dead) applyHit(this, null, f, { ...WALL_HIT, dir: f.x < 0 ? 1 : -1 }, f.cx, f.cy);
+      else if (f.deadT < 3.4) this.chop(f, f.cx, f.cy, (f.x < 0 ? 1 : -1) * 300, -200, 1);
+    }
   }
 
   onDamage(A, B, dmg, h, cx, cy, dir, info) {
@@ -576,6 +646,8 @@ export class World {
       return;
     }
     this.stats.kills++;
+    // The room did it: a kill by a vent, a wall or the floor pays extra.
+    if (h.hazard) { fx.text(cx, cy - 84, 'ENVIRONMENT', '#ff7a2e', 16, 1); this.gainFocus(20); this.style.bonus(12); }
     fx.spark(cx, cy, dir > 0 ? 0 : Math.PI, 1.5, 30, 900, B.color, { white: 0.3 });
     fx.flash(cx, cy, 100, '#ffffff', 0.16);
     this.sfx('kill', cx); this.stop(0.14); this.shake(0.5); this.punch(0.03);
@@ -592,6 +664,8 @@ export class World {
     if (pl && !pl.dead) pl.hp = Math.min(pl.maxHp, pl.hp + 2 + M.killHeal + Math.min(this.rally, 6));
     if (M.reap) this.gainFocus(M.reap);
     this.dropOrbs(B, cx, cy);
+    // Twins share one life: the other body falls too.
+    if (B.twin2 && !B.twin2.dead) { const o = B.twin2; B.twin2 = null; o.twin2 = null; o.die((o.x >= cx ? 1 : -1) * 320, -460, rand(-6, 6)); this.chop(o, o.cx, o.cy, dir * 380, -200, 3); }
     if (B.def.boss) {
       // Whatever it called in falls with it.
       for (const e of this.fighters) if (e.team === 1 && !e.dead && e !== B && !e.def.boss && !e.phantom) { e.die((e.x >= cx ? 1 : -1) * 300, -420, rand(-6, 6)); fx.spark(e.cx, e.cy, 0, 3.14, 14, 600, e.color); }
@@ -599,7 +673,12 @@ export class World {
     const left = this.countEnemies();
     if (left === 0 && !this.training) this.slow(0.2, 0.9);
     this.events.push({ type: 'kill', kind: B.def.kind, left, boss: !!B.def.boss });
-    if (B.def.boss) { this.flashScreen('#ffffff', 0.6); this.slow(0.12, 2.2); fx.ring(cx, cy, 20, 700, 0.9, '#ffffff', 1, 8); }
+    if (B.def.boss) {
+      // The finisher: time crawls, the camera closes in, and the body keeps coming apart.
+      this.flashScreen('#ffffff', 0.6); this.slow(0.12, 2.4); fx.ring(cx, cy, 20, 700, 0.9, '#ffffff', 1, 8);
+      this.finisher = { B, t: 0, cuts: 0, name: B.def.champion ? 'CHAMPION FELLED' : 'KEEPER FELLED', who: B.def.name };
+      this.sfx('finisher', cx);
+    }
   }
 
   perfectDodge(pl, by) {
@@ -631,9 +710,21 @@ export class World {
     const fs = this.fighters;
     for (let i = 0; i < fs.length; i++) fs[i].update(this, fs[i].team === 0 ? dt : dt * ets);
     this.separate(dt);
+    if (this.bonds.length) tickBonds(this, dt);
     resolveCombat(this);
     this.projectiles.update(this, dt, ets);
     if (this.orbs.length) this.tickOrbs(dt);
+    if (this.platforms.length || this.hazards.length || this.flood) this.tickTerrain(dt);
+    // Razor Step: a dash cuts whatever it passes through, once each.
+    const dp = this.player;
+    if (this.mods.dashCut && dp && dp.state === 'dash') {
+      for (const e of fs) {
+        if (e.team !== 1 || e.dead || e.phantom || Math.abs(e.x - dp.x) > 48 || Math.abs(e.cy - dp.cy) > 90 || dp.dashSet?.has(e)) continue;
+        (dp.dashSet ||= new Set()).add(e);
+        this.fx.slash(e.cx, e.cy, dp.dashDir > 0 ? -0.3 : 3.44, 150, dp.color, 0.2, 5);
+        applyHit(this, null, e, { ...DASH_HIT, dir: dp.dashDir }, e.cx, e.cy);
+      }
+    }
     this.tickStatus(dt);
     this.fx.update(dt);
     if (this.style.update(dt)) this.sfx('rankUp', this.player.x, 0.6);
@@ -653,10 +744,10 @@ export class World {
     const fs = this.fighters, k = Math.min(1, dt * 14);
     for (let a = 0; a < fs.length; a++) {
       const A = fs[a];
-      if (A.rag || A.phantom || !A.onGround || A.state === 'dash' || A.stepping && Math.abs(A.vx) > 700) continue;
+      if (A.rag || A.phantom || A.riding || !A.onGround || A.state === 'dash' || A.stepping && Math.abs(A.vx) > 700) continue;
       for (let b = a + 1; b < fs.length; b++) {
         const B = fs[b];
-        if (B.rag || B.phantom || !B.onGround || B.state === 'dash' || B.stepping && Math.abs(B.vx) > 700) continue;
+        if (B.rag || B.phantom || B.riding || !B.onGround || B.state === 'dash' || B.stepping && Math.abs(B.vx) > 700) continue;
         const min = 38 * (A.scale + B.scale) / 2, dx = B.x - A.x;
         if (Math.abs(dx) >= min) continue;
         const push = (min - Math.abs(dx)) * 0.5 * k * (dx >= 0 ? 1 : -1);
@@ -678,7 +769,21 @@ export class World {
       if (d < 760) { ex += e.x; n++; if (d > spread) spread = d; }
     }
     if (n) tx = lerp(p.x, ex / n, 0.38);
-    const zt = clamp(1.3 - spread / 1500, 0.9, 1.22);
+    let zt = clamp(1.3 - spread / 1500, 0.9, 1.22);
+    const F = this.finisher;
+    if (F) {
+      // Close in on the falling boss, and cut it again every third of a second.
+      F.t += dt;
+      const bx = F.B.rag ? F.B.rag.x[1] : F.B.x;
+      tx = lerp(p.x, bx, 0.7); zt = 1.4;
+      if (F.B.rag && F.cuts < 4 && F.t > 0.3 + F.cuts * 0.32) {
+        F.cuts++;
+        const a = rand(-0.9, 0.9) + (F.cuts % 2 ? 0 : Math.PI);
+        this.fx.slash(F.B.rag.x[1], F.B.rag.y[1], a, 340, '#ffffff', 0.3, 8);
+        this.chop(F.B, F.B.rag.x[1], F.B.rag.y[1], Math.cos(a) * 300, Math.sin(a) * 300 - 120, 1);
+      }
+      if (F.t > 2.6) this.finisher = null;
+    }
     const ty = -168 + Math.min(0, (p.rag ? p.j[5] + 50 : p.y)) * 0.5;
     const k = 1 - Math.exp(-dt * 5.5);
     c.x += (tx - c.x) * k; c.y += (ty - c.y) * (1 - Math.exp(-dt * 7)); c.zoom += (zt - c.zoom) * (1 - Math.exp(-dt * 2.2));

@@ -28,6 +28,7 @@ export class Input {
     this.padX = 0;
     this.usedPad = false;
     this.lastTouch = -1e9; // set by the touch layer
+    this.mouseGuard = null; // set by the shell: returns true when a click is not an attack
   }
 
   attach(target) {
@@ -48,12 +49,15 @@ export class Input {
     });
     target.addEventListener('mousedown', (e) => {
       if (performance.now() - this.lastTouch < 900) return; // a touch also fires a synthetic click
+      if (this.mouseGuard?.(e)) return; // the click belongs to a menu, a card or the HUD
       if (e.button === 0) this.set('light', 'm0', true);
       if (e.button === 2) this.set('heavy', 'm2', true);
+      if (e.button === 1) { e.preventDefault(); this.set('special', 'm1', true); }
     });
     target.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.set('light', 'm0', false);
       if (e.button === 2) this.set('heavy', 'm2', false);
+      if (e.button === 1) this.set('special', 'm1', false);
     });
     target.addEventListener('contextmenu', (e) => e.preventDefault());
     target.addEventListener('blur', () => { for (const a of ACTIONS) { this.src[a].clear(); this.down[a] = false; } });

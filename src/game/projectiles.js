@@ -25,9 +25,9 @@ export class Projectiles {
       parryable: !!o.crescent && owner.team !== 0, seen: new Set(), hit });
   }
   // A thrown blade that flies out and homes back to its owner. The player's saber and the Duelist's staff both use it.
-  saber(owner, range = 480, dmgK = 1) {
+  saber(owner, range = 480, dmgK = 1, stun = 0) {
     this.list.push({ type: 'saber', team: owner.team, owner, x: owner.cx + owner.facing * 30, y: owner.cy - 4, x0: owner.cx + owner.facing * 30, dir: owner.facing, range, t: 0, phase: 'out', ang: 0, life: 9,
-      color: owner.color, len: owner.double ? owner.bladeLen * 0.9 : owner.bladeLen * 0.5, cd: new Map(), hit: owner.isPlayer ? (dmgK === 1 ? SABER_HIT : { ...SABER_HIT, dmg: SABER_HIT.dmg * dmgK }) : DISC_HIT });
+      color: owner.color, len: owner.double ? owner.bladeLen * 0.9 : owner.bladeLen * 0.5, cd: new Map(), hit: owner.isPlayer ? (dmgK === 1 && !stun ? SABER_HIT : { ...SABER_HIT, dmg: SABER_HIT.dmg * dmgK, stun: stun || SABER_HIT.stun }) : DISC_HIT });
   }
   // A charge thrown in an arc. It lands, arms with a visible ring, then bursts.
   lob(owner, x, y, tx, o = {}) {
@@ -215,6 +215,7 @@ export class Projectiles {
       p.seen.add(f);
       const hit = { ...BLAST_HIT, dmg: p.dmg, ky: -520, dir: f.x >= p.x ? 1 : -1 };
       if (p.team === 0) { hit.fromPlayer = true; hit.id = 'JUDGMENT'; hit.fam = 'power'; }
+      else if (p.team === 2) hit.hazard = true;
       applyHit(world, null, f, hit, f.x, f.cy);
     }
     return false;

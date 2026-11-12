@@ -39,6 +39,8 @@ export class Fighter {
     this.twin = !!def.blade.twin; // a second blade in the off hand
     this.b3x = 0; this.b3y = 0; this.t3x = 0; this.t3y = 0; this.pt3x = 0; this.pt3y = 0;
     this.riding = null; // the beast this fighter sits on, if any
+    this.dropT = 0;     // seconds left of falling through platforms on purpose
+    this.tag = null;    // a word shown over the health bar (ALPHA, RIDER, ENRAGED)
     this.color = def.color;
     this.rag = null; this.juggle = 0;
     this.invuln = 0; this.flash = 0; this.tele = 0; this.teleRed = false; this.blockT = 0; this.parryT = 0;
@@ -111,6 +113,7 @@ export class Fighter {
     if (this.vib > 0) this.vib -= dt;
     if (this.barT > 0) this.barT -= dt;
     if (this.shieldHit > 0) this.shieldHit -= dt;
+    if (this.dropT > 0) this.dropT -= dt;
     this.sinceHurt += dt;
     if (this.postureDelay > 0) this.postureDelay -= dt;
     else if (this.posture > 0 && this.state !== 'stagger') this.posture = Math.max(0, this.posture - this.def.postureRegen * dt);
@@ -151,7 +154,7 @@ export class Fighter {
     const mt = this.riding;
     if (mt) {
       // A rider goes where its mount goes and counts as standing.
-      this.x = mt.saddleX; this.y = mt.saddleY; this.vx = 0; this.vy = 0; this.onGround = true;
+      this.x = mt.saddleX ?? mt.cx; this.y = (mt.saddleY ?? mt.cy - 16 * mt.scale) + 24 * this.scale; this.vx = 0; this.vy = 0; this.onGround = true;
     } else {
       if (!this.onGround) this.vy += G * grav * (this.gravMul ?? 1) * world.gravK * dt;
       this.x += this.vx * dt; this.y += this.vy * dt;
@@ -379,7 +382,7 @@ export class Fighter {
   updateRagdoll(world, dt) {
     const rag = this.rag, s = this.scale;
     rag.gravScale = (this.dead ? 1 : 1 + this.juggle * 0.09) * world.gravK;
-    const impact = rag.step(dt, world.minX, world.maxX);
+    const impact = rag.step(dt, world.minX, world.maxX, world.platforms);
     for (let i = 0; i < NJ; i++) { this.j[i * 2] = rag.x[i]; this.j[i * 2 + 1] = rag.y[i]; }
     this.x = rag.x[J.PELVIS]; this.y = 0;
     // The blade follows the forearm while the body is limp.
@@ -403,7 +406,7 @@ export class Fighter {
 
   getUp(dur) {
     this.jb.set(this.j);
-    this.x = this.rag.x[J.PELVIS]; this.y = 0; this.vx = 0; this.vy = 0; this.onGround = true;
+    this.x = this.rag.x[J.PELVIS]; this.y = this.rag.floorY; this.vx = 0; this.vy = 0; this.onGround = true;
     this.rag = null; this.juggle = 0;
     this.setState('getup', dur);
     this.p.set(this.stance); this.pv.fill(0);

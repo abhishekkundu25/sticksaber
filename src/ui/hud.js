@@ -4,6 +4,7 @@ import { RANK_NAMES, famLabel } from '../game/world.js';
 import { FLOORS, DIFFS, ANOMALIES, roman, seedLabel } from '../game/gen.js';
 import { AUG, AUGMENTS, RARITY, RARITY_COL } from '../game/augments.js';
 import { POWERS } from '../game/powers.js';
+import { FORMS } from '../game/forms.js';
 
 const FONT = '"Avenir Next Condensed", "Bahnschrift", "DIN Condensed", "Roboto Condensed", "Arial Narrow", sans-serif';
 const RANK_COL = ['#8fa3b8', '#8fa3b8', '#9fe8ff', '#7dffb0', '#ffd36b', '#ff6bd6'];
@@ -33,17 +34,27 @@ const TOUCH_MOVES = [
   ['RIPOSTE', 'LIGHT after a parry'], ['BURST', 'power button while being hit'], ['OVERDRIVE', 'when the meter is full'],
 ];
 
-// Where draft card `i` of `n` sits. The shell uses the same rectangles to hit-test taps.
+// Where draft card `i` of `n` sits. The shell uses the same rectangles to hit-test taps and clicks.
 export function draftCard(W, n, i) {
-  const w = Math.min(300, (W - 120) / 3 - 24), gap = 30, total = n * w + (n - 1) * gap;
-  return { x: W / 2 - total / 2 + i * (w + gap), y: 204, w, h: 318 };
+  const gap = 26, w = Math.min(300, (W - 100 - (n - 1) * gap) / Math.max(3, n)), total = n * w + (n - 1) * gap;
+  return { x: W / 2 - total / 2 + i * (w + gap), y: 198, w, h: 330 };
 }
+// Where menu item `i` of `n` sits along the bottom of the title screen.
+export function menuItem(W, H, n, i) {
+  const gap = Math.min(300, (W - 80) / n);
+  return { x: W / 2 + (i - (n - 1) / 2) * gap - gap / 2, y: H - 130, w: gap, h: 70, cx: W / 2 + (i - (n - 1) / 2) * gap };
+}
+// The two buttons on the pause screen.
+export function pauseButton(W, H, i) { return { x: W / 2 + (i ? 20 : -240), y: H - 124, w: 220, h: 40 }; }
+const POWER_GLYPH = { throw: 'loop', crescent: 'up', arc: 'bolt', mend: 'plus', nova: 'star', stasis: 'clock', mirror: 'ghost', judgment: 'bars', flash: 'chev' };
+const FORM_GLYPH = { saber: 'slash', twin: 'twin', great: 'hammer', staff: 'long' };
 
 export class Hud {
   constructor() {
     this.hpLag = 1; this.comboShown = 0; this.comboPop = 0; this.bossLag = 1; this.t = 0;
     this.vig = null; this.bars = 0; this.hpGrad = null; this.menuGrad = null; this.menuH = 0;
     this.wrapped = new Map(); this.widths = new Map();
+    this.chips = []; this.hover = ''; // power chips on screen this frame, and what the mouse is over
   }
   // Width of a short label, measured once.
   width(ctx, s, size, spacing) {
@@ -79,7 +90,7 @@ export class Hud {
   }
 
   draw(ctx, view, world, dir, app, dt) {
-    this.t += dt;
+    this.t += dt; this.hover = app.hover || '';
     const W = view.w, H = view.h;
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
     const p = world.player;
@@ -127,6 +138,15 @@ export class Hud {
     if (fl && app.state === 'play') { ctx.globalAlpha = (fl.t / fl.max) ** 2 * 0.24; ctx.fillStyle = fl.color; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
     const b = world.bannerMsg;
     if (b && app.state === 'play') this.banner(ctx, W, b);
+    const fin = world.finisher;
+    if (fin && app.state === 'play') {
+      // The finisher card, under the slow-motion bars.
+      const a = Math.min(1, fin.t * 3, (2.6 - fin.t) * 2);
+      ctx.globalAlpha = Math.max(0, a);
+      this.text(ctx, fin.name, W / 2, H - 150, 34, '#ffffff', 'center', 800, 16);
+      this.text(ctx, fin.who, W / 2, H - 116, 13, '#ffd36b', 'center', 600, 6);
+      ctx.globalAlpha = 1;
+    }
 
     if (app.state === 'play' && dir.state === 'dead') this.dead(ctx, W, H, dir, app.touch);
     if (app.state === 'play' && dir.state === 'victory') this.victory(ctx, W, H, world, dir, app.touch);
@@ -140,7 +160,7 @@ export class Hud {
     }
     if (app.state === 'menu') this.menu(ctx, W, H, app);
     if (app.state === 'controls') this.controls(ctx, W, H, app.touch ? 'TAP to return' : 'ENTER or ESC to return');
-    if (app.state === 'pause') this.pause(ctx, W, H, world, dir, app.touch);
+    if (app.state === 'pause') this.pause(ctx, W, H, world, dir, app.touch, this.hover);
     if (app.toast) { ctx.globalAlpha = Math.min(1, app.toast.t * 3); this.text(ctx, app.toast.text, W / 2, 96, 16, '#56e9ff', 'center', 700, 5); ctx.globalAlpha = 1; }
     if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
   }
@@ -159,7 +179,7 @@ export class Hud {
     const x = 36, y = 34, w = Math.min(420, 320 * Math.sqrt(p.maxHp / 100));
     const hp = Math.max(0, p.hp) / p.maxHp;
     this.hpLag += (hp - this.hpLag) * Math.min(1, dt * (hp < this.hpLag ? 2.5 : 20));
-    this.text(ctx, 'INITIATE ZERO', x, y - 12, 12, '#ffffff99', 'left', 600, 3);
+    this.text(ctx, world.formId === 'saber' ? 'INITIATE ZERO' : `INITIATE ZERO  ·  ${world.form.name}`, x, y - 12, 12, '#ffffff99', 'left', 600, 3);
     this.text(ctx, `${Math.ceil(Math.max(0, p.hp))} / ${p.maxHp}`, x + w, y - 12, 11, '#ffffff66', 'right', 600, 1);
     ctx.fillStyle = '#00000088'; ctx.fillRect(x - 2, y - 2, w + 4, 14);
     ctx.fillStyle = '#ffffff1c'; ctx.fillRect(x, y, w, 10);
@@ -189,12 +209,13 @@ export class Hud {
       const full = world.focus >= world.maxFocus;
       this.text(ctx, !p.armed ? 'SABER OUT' : full ? (touch ? 'FOCUS FULL' : 'FOCUS FULL  ·  O') : 'FOCUS', x + pw + 8, fy + 4, 11, !p.armed || full ? '#56e9ff' : '#ffffff77', 'left', full ? 700 : 600, 2);
     }
-    this.powers(ctx, world, x, fy + 26, touch);
+    this.powers(ctx, world, x, fy + 26, touch, this.hover);
   }
 
   // The powers the player owns, in slot order. The selected one is lit and shows its key and cost.
-  powers(ctx, world, x, y, touch) {
-    const list = world.powers, pips = world.focus / 100;
+  powers(ctx, world, x, y, touch, hover) {
+    const list = world.powers, pips = world.focus / 100, chips = this.chips;
+    chips.length = 0;
     let cx = x;
     for (let i = 0; i < list.length; i++) {
       const P = POWERS[list[i]], sel = i === world.powerIdx, can = pips >= P.cost && world.overdrive <= 0;
@@ -210,16 +231,20 @@ export class Hud {
         }
         this.text(ctx, label, cx + kw + 4, y + 0.5, 13, can ? P.color : '#8fa3b8', 'left', 700, 2);
         for (let k = 0; k < P.cost; k++) { ctx.fillStyle = can ? '#56e9ff' : '#3d4a58'; ctx.fillRect(cx + kw + tw + 10 + k * 9, y - 3, 6, 6); }
+        chips.push({ x: cx, y: y - 12, w, h: 24, i });
         cx += w + 8;
       } else {
         const w = tw + 20;
-        ctx.fillStyle = '#00000077'; ctx.fillRect(cx, y - 8, w, 16);
+        const over = hover === `c${i}`;
+        ctx.fillStyle = over ? '#16324099' : '#00000077'; ctx.fillRect(cx, y - 8, w, 16);
+        if (over) { ctx.fillStyle = P.color; ctx.fillRect(cx, y + 8, w, 1.5); }
+        chips.push({ x: cx, y: y - 12, w, h: 24, i });
         if (!touch) this.text(ctx, String(i + 1), cx + 4, y + 0.5, 9, '#ffffff66', 'left', 600, 0);
         this.text(ctx, label, cx + (touch ? 6 : 13), y + 0.5, 10, can ? '#ffffffaa' : '#ffffff44', 'left', 700, 1);
         cx += w + 4;
       }
     }
-    if (list.length > 1 && !touch) this.text(ctx, 'U  switch', cx + 6, y + 0.5, 10, '#ffffff66', 'left', 600, 2);
+    if (list.length > 1 && !touch) this.text(ctx, 'U  ·  wheel  ·  click', cx + 6, y + 0.5, 10, '#ffffff66', 'left', 600, 2);
   }
 
   combo(ctx, W, world, dt) {
@@ -309,7 +334,7 @@ export class Hud {
     ctx.globalAlpha = a * 0.6; ctx.fillStyle = '#12020a'; ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = a;
     this.text(ctx, 'YOU FELL', W / 2, H / 2 - 30, 70, '#ff5060', 'center', 800, 18);
-    this.text(ctx, touch ? `TAP  to retry this ${what}` : `ENTER  retry this ${what}        ESC  menu`, W / 2, H / 2 + 40, 16, '#ffffffcc', 'center', 600, 3);
+    this.text(ctx, touch ? `TAP  to retry this ${what}` : `CLICK or ENTER  retry this ${what}        ESC  menu`, W / 2, H / 2 + 40, 16, '#ffffffcc', 'center', 600, 3);
     this.text(ctx, `FLOOR ${dir.stageDef.n}  ·  your build is kept`, W / 2, H / 2 + 72, 12, '#ffffff77', 'center', 600, 3);
     ctx.globalAlpha = 1;
   }
@@ -334,7 +359,43 @@ export class Hud {
     ctx.globalAlpha = 1;
   }
 
-  // The choice between floors: three cards, one pick.
+  // A card's picture: a few strokes in the card's colour. `k` is the size.
+  glyph(ctx, kind, x, y, k, col) {
+    ctx.save(); ctx.translate(x, y); ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = Math.max(2, k * 0.09); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const L = (...p) => { ctx.beginPath(); ctx.moveTo(p[0] * k, p[1] * k); for (let q = 2; q < p.length; q += 2) ctx.lineTo(p[q] * k, p[q + 1] * k); ctx.stroke(); };
+    const O = (cx, cy, r, fill) => { ctx.beginPath(); ctx.arc(cx * k, cy * k, r * k, 0, 6.283); if (fill) ctx.fill(); else ctx.stroke(); };
+    switch (kind) {
+      case 'slash': L(-0.7, 0.7, 0.7, -0.7); L(-0.78, 0.42, -0.42, 0.78); break;
+      case 'long': L(-0.9, 0.5, 0.9, -0.5); L(-0.95, 0.25, -0.65, 0.75); L(0.55, -0.15, 0.9, -0.5, 0.6, -0.62); break;
+      case 'twin': L(-0.7, 0.6, 0.2, -0.7); L(-0.2, 0.7, 0.7, -0.6); break;
+      case 'hammer': L(-0.6, 0.75, 0.2, -0.25); ctx.lineWidth *= 2.4; L(-0.1, -0.6, 0.55, 0.05); break;
+      case 'plus': L(0, -0.7, 0, 0.7); L(-0.7, 0, 0.7, 0); break;
+      case 'bars': for (let q = -1; q <= 1; q++) { ctx.fillRect((q * 0.55 - 0.2) * k, -0.5 * k, 0.4 * k, 1.0 * k); } break;
+      case 'chev': L(-0.8, -0.5, -0.3, 0, -0.8, 0.5); L(-0.2, -0.5, 0.3, 0, -0.2, 0.5); L(0.4, -0.5, 0.9, 0, 0.4, 0.5); break;
+      case 'up': L(-0.6, 0.1, 0, -0.6, 0.6, 0.1); L(-0.6, 0.7, 0, 0, 0.6, 0.7); break;
+      case 'drop': ctx.beginPath(); ctx.moveTo(0, -0.8 * k); ctx.quadraticCurveTo(0.75 * k, 0.2 * k, 0, 0.75 * k); ctx.quadraticCurveTo(-0.75 * k, 0.2 * k, 0, -0.8 * k); ctx.stroke(); break;
+      case 'fang': L(-0.6, -0.6, -0.3, 0.6, 0, -0.3, 0.3, 0.6, 0.6, -0.6); break;
+      case 'orb': O(0, 0, 0.5); O(0, 0, 0.16, true); L(0.62, -0.62, 0.85, -0.85); L(-0.62, -0.62, -0.85, -0.85); break;
+      case 'star': L(0, -0.85, 0, 0.85); L(-0.85, 0, 0.85, 0); L(-0.45, -0.45, 0.45, 0.45); L(-0.45, 0.45, 0.45, -0.45); break;
+      case 'flame': ctx.beginPath(); ctx.moveTo(0, -0.85 * k); ctx.quadraticCurveTo(0.9 * k, 0, 0.3 * k, 0.75 * k); ctx.quadraticCurveTo(0, 0.2 * k, -0.3 * k, 0.75 * k); ctx.quadraticCurveTo(-0.9 * k, 0, 0, -0.85 * k); ctx.stroke(); break;
+      case 'bolt': L(0.25, -0.85, -0.35, 0.05, 0.15, 0.05, -0.25, 0.85); break;
+      case 'cross': L(-0.7, -0.7, 0.7, 0.7); L(0.7, -0.7, -0.7, 0.7); O(0, 0, 0.2, true); break;
+      case 'skull': O(0, -0.15, 0.55); L(-0.25, 0.4, -0.25, 0.75); L(0, 0.45, 0, 0.8); L(0.25, 0.4, 0.25, 0.75); O(-0.2, -0.2, 0.1, true); O(0.2, -0.2, 0.1, true); break;
+      case 'ghost': O(-0.35, 0, 0.3); ctx.globalAlpha *= 0.55; O(0.05, 0, 0.3); ctx.globalAlpha *= 0.5; O(0.45, 0, 0.3); break;
+      case 'shield': L(-0.6, -0.7, 0.6, -0.7, 0.6, 0.1, 0, 0.8, -0.6, 0.1, -0.6, -0.7); break;
+      case 'clock': O(0, 0, 0.72); L(0, -0.45, 0, 0, 0.32, 0.2); break;
+      case 'ring': O(0, 0, 0.35); O(0, 0, 0.78); break;
+      case 'loop': ctx.beginPath(); ctx.arc(0, 0, 0.6 * k, 0.6, 5.4); ctx.stroke(); L(0.2, -0.75, 0.52, -0.42, 0.12, -0.28); break;
+      case 'rank': L(-0.7, 0.6, -0.7, 0.2); L(-0.25, 0.6, -0.25, -0.1); L(0.2, 0.6, 0.2, -0.4); L(0.65, 0.6, 0.65, -0.75); break;
+      case 'dice': L(-0.6, -0.6, 0.6, -0.6, 0.6, 0.6, -0.6, 0.6, -0.6, -0.6); O(-0.25, -0.25, 0.1, true); O(0.25, 0.25, 0.1, true); O(0, 0, 0.1, true); break;
+      case 'wing': L(-0.85, 0.3, -0.2, -0.6, 0, 0.1, 0.2, -0.6, 0.85, 0.3); L(-0.5, 0.45, 0, 0.1, 0.5, 0.45); break;
+      case 'gate': L(-0.6, 0.75, -0.6, -0.3); L(0.6, 0.75, 0.6, -0.3); ctx.beginPath(); ctx.arc(0, -0.3 * k, 0.6 * k, Math.PI, 0); ctx.stroke(); O(0, 0.15, 0.14, true); break;
+      default: O(0, 0, 0.6);
+    }
+    ctx.restore();
+  }
+
+  // The choice between floors: a few cards, one pick. Each card wears its own colour.
   draft(ctx, W, H, world, dir, touch) {
     const d = dir.draft, n = d.options.length, a = clamp(dir.t * 2.4, 0, 1);
     ctx.globalAlpha = a * 0.82; ctx.fillStyle = '#04060b'; ctx.fillRect(0, 0, W, H);
@@ -344,38 +405,56 @@ export class Hud {
     this.text(ctx, d.sub.toUpperCase(), W / 2, 158, 13, '#ffffffaa', 'center', 600, 5);
     for (let i = 0; i < n; i++) {
       const c = draftCard(W, n, i), sel = i === d.idx, id = d.options[i];
-      const rise = (1 - clamp(dir.t * 3.2 - i * 0.35, 0, 1)) ** 2 * 60 - (sel ? 10 : 0);
-      const x = c.x, y = c.y + rise, w = c.w, h = c.h;
-      const isP = d.type === 'power', A = isP ? POWERS[id] : AUG[id];
-      const col = isP ? A.color : RARITY_COL[A.r], have = isP ? 0 : dir.build[id] || 0;
-      ctx.globalAlpha = a * clamp(dir.t * 3.2 - i * 0.35, 0, 1);
-      ctx.fillStyle = sel ? '#101826f2' : '#0a0f18e6'; ctx.fillRect(x, y, w, h);
-      ctx.fillStyle = col; ctx.fillRect(x, y, w, sel ? 4 : 2);
-      ctx.strokeStyle = sel ? col : '#ffffff22'; ctx.lineWidth = sel ? 2 : 1; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-      if (sel) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha *= 0.1 + Math.sin(this.t * 4) * 0.03; ctx.fillStyle = col; ctx.fillRect(x, y, w, h); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = a; }
-      this.text(ctx, isP ? 'FOCUS POWER' : RARITY[A.r], x + w / 2, y + 30, 11, col, 'center', 700, 5);
-      if (!touch) this.text(ctx, String(i + 1), x + 16, y + 30, 12, '#ffffff55', 'left', 600, 0);
-      const name = this.wrap(ctx, A.name.toUpperCase(), w - 36, 27, 700, 4);
-      name.forEach((l, k) => this.text(ctx, l, x + w / 2, y + 74 + k * 30, 27, '#ffffff', 'center', 700, 4));
-      const ty = y + 74 + name.length * 30 + 6;
-      ctx.fillStyle = '#ffffff22'; ctx.fillRect(x + w / 2 - 40, ty - 8, 80, 1);
-      const body = this.wrap(ctx, isP ? A.text : A.text(have + 1), w - 44, 16, 600, 0.5);
-      body.forEach((l, k) => this.text(ctx, l, x + w / 2, ty + 18 + k * 23, 16, '#dfe9f5', 'center', 600, 0.5));
-      if (isP) {
-        const px = x + w / 2 - (A.cost * 22 - 6) / 2;
-        for (let k = 0; k < A.cost; k++) { ctx.fillStyle = '#56e9ff'; ctx.fillRect(px + k * 22, y + h - 62, 16, 6); }
-        this.text(ctx, `COSTS ${A.cost} FOCUS`, x + w / 2, y + h - 36, 11, '#ffffff88', 'center', 600, 3);
+      const show = clamp(dir.t * 3.2 - i * 0.3, 0, 1);
+      const x = c.x, y = c.y + (1 - show) ** 2 * 60 - (sel ? 10 : 0), w = c.w, h = c.h, mx = x + w / 2;
+      const isP = d.type === 'power', isF = d.type === 'form';
+      const A = isP ? POWERS[id] : isF ? FORMS[id] : AUG[id];
+      const col = A.color || '#56e9ff', have = isP || isF ? 0 : dir.build[id] || 0;
+      const edge = isP || isF ? col : RARITY_COL[A.r];
+      ctx.globalAlpha = a * show;
+      ctx.fillStyle = '#0a0f18f2'; ctx.fillRect(x, y, w, h);
+      // A wash of the card's colour, strongest at the top where the picture sits.
+      ctx.fillStyle = col;
+      for (let b = 0; b < 7; b++) { ctx.globalAlpha = a * show * (sel ? 0.2 : 0.11) * (1 - b / 7) ** 1.5; ctx.fillRect(x, y + b * 24, w, 24); }
+      ctx.globalAlpha = a * show;
+      ctx.fillRect(x, y, w, sel ? 5 : 3);
+      ctx.strokeStyle = sel ? edge : `${col}55`; ctx.lineWidth = sel ? 2.5 : 1; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+      if (sel) {
+        // The chosen card glows; a legendary one shimmers.
+        ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = a * (0.08 + Math.sin(this.t * 4) * 0.03); ctx.fillStyle = col; ctx.fillRect(x, y, w, h);
+        if (A.r === 2) { const sx = ((this.t * 0.7) % 1) * (w + 80) - 40; ctx.globalAlpha = a * 0.12; ctx.fillStyle = '#ffffff'; ctx.fillRect(x + clamp(sx, 0, w - 26), y, 26, h); }
+        ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = a;
+      }
+      this.text(ctx, isP ? 'FOCUS POWER' : isF ? 'WEAPON FORM' : RARITY[A.r], mx, y + 26, 11, edge, 'center', 700, 5);
+      if (!touch) this.text(ctx, String(i + 1), x + 14, y + 26, 12, '#ffffff55', 'left', 600, 0);
+      // The picture, in a ring of the card's colour.
+      ctx.globalAlpha = a * show * 0.28; ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(mx, y + 76, 30, 0, 6.283); ctx.stroke();
+      ctx.globalAlpha = a * show;
+      this.glyph(ctx, isP ? POWER_GLYPH[id] : isF ? FORM_GLYPH[id] || 'slash' : A.glyph, mx, y + 76, sel ? 19 : 17, col);
+      const size = w < 250 ? 21 : 25;
+      const name = this.wrap(ctx, A.name.toUpperCase(), w - 30, size, 700, 3);
+      name.forEach((l, k) => this.text(ctx, l, mx, y + 134 + k * (size + 3), size, '#ffffff', 'center', 700, 3));
+      const ty = y + 134 + name.length * (size + 3) + 2;
+      ctx.fillStyle = `${col}66`; ctx.fillRect(mx - 40, ty - 9, 80, 1.5);
+      const body = this.wrap(ctx, isP || isF ? A.text : A.text(have + 1), w - 36, 15, 600, 0.5);
+      body.forEach((l, k) => this.text(ctx, l, mx, ty + 14 + k * 21, 15, '#e3edf8', 'center', 600, 0.5));
+      if (isF) {
+        (A.traits || []).slice(0, 4).forEach((tr, k) => this.text(ctx, tr.toUpperCase(), mx, ty + 26 + body.length * 21 + k * 17, 11, col, 'center', 600, 2));
+      } else if (isP) {
+        const px = mx - (A.cost * 22 - 6) / 2;
+        for (let k = 0; k < A.cost; k++) { ctx.fillStyle = '#56e9ff'; ctx.fillRect(px + k * 22, y + h - 48, 16, 6); }
+        this.text(ctx, `COSTS ${A.cost} FOCUS`, mx, y + h - 24, 11, '#ffffff88', 'center', 600, 3);
       } else {
-        const px = x + w / 2 - (A.max * 14 - 4) / 2;
-        for (let k = 0; k < A.max; k++) { ctx.fillStyle = k < have ? '#ffffffaa' : k === have ? col : '#ffffff22'; ctx.fillRect(px + k * 14, y + h - 60, 10, 4); }
-        this.text(ctx, A.max === 1 ? 'ONE OF A KIND' : have ? `LEVEL ${have + 1} OF ${A.max}` : 'NEW', x + w / 2, y + h - 36, 11, '#ffffff88', 'center', 600, 3);
+        const px = mx - (A.max * 14 - 4) / 2;
+        for (let k = 0; k < A.max; k++) { ctx.fillStyle = k < have ? '#ffffffaa' : k === have ? col : '#ffffff22'; ctx.fillRect(px + k * 14, y + h - 46, 10, 4); }
+        this.text(ctx, A.max === 1 ? 'ONE OF A KIND' : have ? `LEVEL ${have + 1} OF ${A.max}` : 'NEW', mx, y + h - 24, 11, '#ffffff88', 'center', 600, 3);
       }
     }
     ctx.globalAlpha = a;
-    this.text(ctx, touch ? 'TAP a card to take it' : 'A / D  choose        ENTER  take        or press  1  2  3', W / 2, H - 112, 14, '#ffffffcc', 'center', 600, 3);
+    this.text(ctx, touch ? 'TAP a card to take it' : `CLICK a card        or  A / D  and  ENTER        or press  ${Array.from({ length: n }, (_, k) => k + 1).join('  ')}`, W / 2, H - 112, 14, '#ffffffcc', 'center', 600, 3);
     // What the build already holds.
     const own = AUGMENTS.filter((g) => dir.build[g.id]).map((g) => `${g.name}${dir.build[g.id] > 1 ? ` ${roman(dir.build[g.id])}` : ''}`);
-    const lines = this.wrap(ctx, own.length ? own.join('   ·   ') : 'Your build is empty', W - 220, 12, 600, 1).slice(0, 3);
+    const lines = this.wrap(ctx, own.length ? own.join('   ·   ') : d.type === 'form' ? 'You keep this blade for the whole run' : 'Your build is empty', W - 220, 12, 600, 1).slice(0, 3);
     lines.forEach((l, k) => this.text(ctx, l.toUpperCase(), W / 2, H - 78 + k * 17, 12, '#ffffff66', 'center', 600, 1));
     ctx.globalAlpha = 1;
   }
@@ -405,7 +484,7 @@ export class Hud {
       if (sel) { ctx.fillStyle = '#56e9ff'; ctx.fillRect(x - 100, y + 19, 200, 1.5); }
       if (sel && m.note) this.text(ctx, m.note.toUpperCase(), x, y - 28, 11, '#ffffffaa', 'center', 600, 2);
     });
-    this.text(ctx, app.touch ? 'TAP  to choose' : 'A / D  select      ENTER  confirm      F  fullscreen      M  mute      G  graphics', cx, H - 36, 13, '#ffffff77', 'center', 600, 3);
+    this.text(ctx, app.touch ? 'TAP  to choose' : 'CLICK  or  A / D  and  ENTER      F  fullscreen      M  mute      G  graphics', cx, H - 36, 13, '#ffffff77', 'center', 600, 3);
     this.text(ctx, `${FLOORS} FLOORS  ·  TEN SECTORS  ·  EVERY RUN DIFFERENT`, cx, ty + 128, 11, '#ffffff55', 'center', 600, 4);
   }
 
@@ -423,7 +502,7 @@ export class Hud {
   }
 
   // Pause: the move list on the left, the build on the right.
-  pause(ctx, W, H, world, dir, touch) {
+  pause(ctx, W, H, world, dir, touch, hover) {
     ctx.fillStyle = '#04060be6'; ctx.fillRect(0, 0, W, H);
     this.text(ctx, 'PAUSED', W / 2, 62, 38, '#ffffff', 'center', 700, 14);
     ctx.fillStyle = '#56e9ff'; ctx.fillRect(W / 2 - 110, 90, 220, 1.5);
@@ -453,5 +532,13 @@ export class Hud {
     const tail = dir.training ? '' : `FLOOR ${dir.stageDef.n}      ·      ${DIFFS[dir.diff].name}      ·      SEED ${seedLabel(dir.seed)}`;
     this.text(ctx, `${touch ? '' : 'ESC resume      ·      Q quit to menu      ·      '}${tail}`, W / 2, H - 44, 13, '#ffffffcc', 'center', 600, 3);
     if (!dir.training && !touch) this.text(ctx, 'Your run is saved at the start of every floor', W / 2, H - 70, 11, '#ffffff66', 'center', 600, 2);
+    if (!touch) {
+      ['RESUME', 'QUIT TO MENU'].forEach((label, i) => {
+        const b = pauseButton(W, H, i), over = hover === `p${i}`;
+        ctx.fillStyle = over ? '#163240' : '#0a0f18'; ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.strokeStyle = over ? '#56e9ff' : '#ffffff33'; ctx.lineWidth = over ? 2 : 1; ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+        this.text(ctx, label, b.x + b.w / 2, b.y + b.h / 2 + 1, 15, over ? '#56e9ff' : '#ffffffcc', 'center', 700, 4);
+      });
+    }
   }
 }
