@@ -14,6 +14,21 @@ const MOVELIST = [
   ['SABER THROW  (1 focus)', 'I'], ['BURST  (1 focus, while hit or down)', 'I'], ['OVERDRIVE  (full focus)', 'O'], ['RECOVER  (as you hit the floor)', 'SHIFT'], ['PAUSE  ·  GRAPHICS QUALITY', 'ESC   ·   G'],
 ];
 
+// Rewrites a keyboard prompt in terms of the on-screen buttons.
+const TOUCH_WORDS = [[/^J light.*?dash\s+/, ''], [/Chain lights, then finish with a heavy/, 'Chain LIGHT hits, then finish with HEAVY'], [/Hold L to guard/, 'Hold GUARD'], [/Tap it just/, 'Tap it just'],
+  [/Hold K to charge/, 'Hold HEAVY to charge'], [/S \+ K launches/, 'Stick down + HEAVY launches'], [/then K to spike/, 'then HEAVY to spike'],
+  [/I throws your saber/, 'THROW sends your saber'], [/\. I while you are being hit/, '. THROW while you are being hit'], [/O with a full meter/, 'the glowing button with a full meter']];
+function touchHint(s, training) {
+  if (training) return 'SPAWN adds an enemy. Nothing here can end your run';
+  for (const [re, to] of TOUCH_WORDS) s = s.replace(re, to);
+  return s;
+}
+
+const TOUCH_MOVES = [
+  ['LIGHT STRING', 'LIGHT  ×4'], ['LAUNCHER', 'stick down + HEAVY'], ['CHARGED HEAVY', 'hold HEAVY'], ['PARRY', 'tap GUARD on impact'],
+  ['RIPOSTE', 'LIGHT after a parry'], ['PLUNGE', 'stick down + HEAVY in the air'], ['BURST', 'THROW while being hit'], ['OVERDRIVE', 'when the meter is full'],
+];
+
 export class Hud {
   constructor() {
     this.hpLag = 1; this.comboShown = 0; this.comboPop = 0; this.bossLag = 1; this.t = 0;
@@ -43,19 +58,22 @@ export class Hud {
     if (app.state === 'play' || app.state === 'pause') {
       if (p) this.player(ctx, world, p, dt);
       this.combo(ctx, W, world, dt);
-      if (world.boss && !world.boss.remove && world.boss.y > -2000) this.boss(ctx, W, H, world, world.boss, dt);
+      if (world.boss && !world.boss.remove && world.boss.y > -2000) this.boss(ctx, W, H, world, world.boss, dt, app.touch);
       if (!dir.training) {
         const s = dir.stageDef;
         this.text(ctx, `FLOOR ${roman(dir.stage + 1)} / ${roman(FLOORS)}   ·   ${s.boss ? 'EXAMINER' : `WAVE ${dir.wave + 1} / ${dir.waveCount}`}`, W - 36, 34, 14, '#ffffffaa', 'right', 600, 3);
       } else this.text(ctx, 'TRAINING ROOM', W - 36, 34, 14, '#ffffffaa', 'right', 600, 3);
-      if (dir.hint && dir.hintT > 0) {
+      if (dir.hint && dir.hintT > 0 && app.state === 'play') {
         const a = Math.min(1, dir.hintT, dir.training ? 1 : (11 - dir.hintT) * 2);
         ctx.globalAlpha = a * 0.55; ctx.fillStyle = '#000';
-        const y = world.boss && !world.boss.dead ? H - 118 : H - 44;
+        const bossUp = world.boss && !world.boss.dead;
+        // On a phone the bottom of the screen belongs to the thumbs, so prompts move to the top.
+        const y = app.touch ? (bossUp ? 186 : 108) : bossUp ? H - 118 : H - 44;
+        const hint = app.touch ? touchHint(dir.hint, dir.training) : dir.hint;
         ctx.font = `600 15px ${FONT}`; if ('letterSpacing' in ctx) ctx.letterSpacing = '1px';
-        const tw = ctx.measureText(dir.hint).width + 44;
+        const tw = ctx.measureText(hint).width + 44;
         ctx.fillRect(W / 2 - tw / 2, y - 15, tw, 30);
-        ctx.globalAlpha = a; this.text(ctx, dir.hint, W / 2, y + 1, 15, '#dff6ff', 'center', 600, 1);
+        ctx.globalAlpha = a; this.text(ctx, hint, W / 2, y + 1, 15, '#dff6ff', 'center', 600, 1);
         ctx.globalAlpha = 1;
       }
       // Low health pulse.
@@ -67,12 +85,12 @@ export class Hud {
     const b = world.bannerMsg;
     if (b && app.state === 'play') this.banner(ctx, W, b);
 
-    if (app.state === 'play' && dir.state === 'dead') this.dead(ctx, W, H, dir);
-    if (app.state === 'play' && dir.state === 'victory') this.victory(ctx, W, H, world, dir);
+    if (app.state === 'play' && dir.state === 'dead') this.dead(ctx, W, H, dir, app.touch);
+    if (app.state === 'play' && dir.state === 'victory') this.victory(ctx, W, H, world, dir, app.touch);
     if (dir.fade > 0) { ctx.globalAlpha = dir.fade; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
     if (app.state === 'menu') this.menu(ctx, W, H, app);
-    if (app.state === 'controls') this.controls(ctx, W, H, 'ENTER or ESC to return');
-    if (app.state === 'pause') this.controls(ctx, W, H, `ESC resume      ·      Q quit to menu${dir.training ? '' : `      ·      SEED ${seedLabel(dir.seed)}`}`, 'PAUSED');
+    if (app.state === 'controls') this.controls(ctx, W, H, app.touch ? 'TAP to return' : 'ENTER or ESC to return');
+    if (app.state === 'pause') this.controls(ctx, W, H, `${app.touch ? '' : 'ESC resume      ·      Q quit to menu      ·      '}${dir.training ? '' : `SEED ${seedLabel(dir.seed)}`}`, 'PAUSED', app.touch);
     if (app.toast) { ctx.globalAlpha = Math.min(1, app.toast.t * 3); this.text(ctx, app.toast.text, W / 2, 96, 16, '#56e9ff', 'center', 700, 5); ctx.globalAlpha = 1; }
     if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
   }
@@ -151,8 +169,8 @@ export class Hud {
     }
   }
 
-  boss(ctx, W, H, world, b, dt) {
-    const w = Math.min(680, W - 240), x = W / 2 - w / 2, y = H - 64;
+  boss(ctx, W, H, world, b, dt, touch) {
+    const w = Math.min(680, W - 240), x = W / 2 - w / 2, y = touch ? 122 : H - 64;
     const hp = clamp(b.hp / b.maxHp, 0, 1);
     this.bossLag += (hp - this.bossLag) * Math.min(1, dt * (hp < this.bossLag ? 1.8 : 20));
     this.text(ctx, b.def.name, x, y - 16, 18, '#ffffff', 'left', 700, 5);
@@ -193,16 +211,16 @@ export class Hud {
     ctx.globalAlpha = 1;
   }
 
-  dead(ctx, W, H, dir) {
+  dead(ctx, W, H, dir, touch) {
     const a = clamp(dir.t - 0.6, 0, 1);
     ctx.globalAlpha = a * 0.6; ctx.fillStyle = '#12020a'; ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = a;
     this.text(ctx, 'YOU FELL', W / 2, H / 2 - 30, 70, '#ff5060', 'center', 800, 18);
-    this.text(ctx, 'ENTER  retry this wave        ESC  menu', W / 2, H / 2 + 40, 16, '#ffffffcc', 'center', 600, 3);
+    this.text(ctx, touch ? 'TAP  to retry this wave' : 'ENTER  retry this wave        ESC  menu', W / 2, H / 2 + 40, 16, '#ffffffcc', 'center', 600, 3);
     ctx.globalAlpha = 1;
   }
 
-  victory(ctx, W, H, world, dir) {
+  victory(ctx, W, H, world, dir, touch) {
     const a = clamp(dir.t, 0, 1);
     ctx.globalAlpha = a * 0.72; ctx.fillStyle = '#05060a'; ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = a;
@@ -217,7 +235,7 @@ export class Hud {
       this.text(ctx, k, W / 2 - 20, y, 16, '#ffffff99', 'right', 600, 4);
       this.text(ctx, String(v), W / 2 + 20, y, 22, '#ffffff', 'left', 700, 2);
     });
-    this.text(ctx, 'ENTER  return to menu', W / 2, H - 90, 15, '#ffffffcc', 'center', 600, 3);
+    this.text(ctx, touch ? 'TAP  to return to the menu' : 'ENTER  return to menu', W / 2, H - 90, 15, '#ffffffcc', 'center', 600, 3);
     ctx.globalAlpha = 1;
   }
 
@@ -245,20 +263,21 @@ export class Hud {
       this.text(ctx, m.label, x, y, sel ? 24 : 19, sel ? '#56e9ff' : '#ffffffaa', 'center', sel ? 700 : 600, 5);
       if (sel) { ctx.fillStyle = '#56e9ff'; ctx.fillRect(x - 100, y + 19, 200, 1.5); }
     });
-    this.text(ctx, 'A / D  select      ENTER  confirm      F  fullscreen      M  mute      G  graphics', cx, H - 36, 13, '#ffffff77', 'center', 600, 3);
+    this.text(ctx, app.touch ? 'TAP  to choose' : 'A / D  select      ENTER  confirm      F  fullscreen      M  mute      G  graphics', cx, H - 36, 13, '#ffffff77', 'center', 600, 3);
     this.text(ctx, `${FLOORS} FLOORS  ·  EVERY RUN DIFFERENT`, cx, ty + 128, 11, '#ffffff55', 'center', 600, 4);
   }
 
-  controls(ctx, W, H, foot, title = 'CONTROLS') {
+  controls(ctx, W, H, foot, title = 'CONTROLS', compact = false) {
     ctx.fillStyle = '#04060be0'; ctx.fillRect(0, 0, W, H);
     this.text(ctx, title, W / 2, 74, 40, '#ffffff', 'center', 700, 14);
     ctx.fillStyle = '#56e9ff'; ctx.fillRect(W / 2 - 120, 104, 240, 1.5);
-    MOVELIST.forEach(([k, v], i) => {
+    // On a phone the pause screen keeps its lower half clear for the RESUME and QUIT buttons.
+    (compact ? TOUCH_MOVES : MOVELIST).forEach(([k, v], i) => {
       const y = 142 + i * 29;
       this.text(ctx, k, W / 2 - 24, y, 15, '#ffffffaa', 'right', 600, 3);
       this.text(ctx, v, W / 2 + 24, y, 17, '#56e9ff', 'left', 700, 3);
     });
-    this.text(ctx, 'Gamepad:  A jump   X light   Y heavy   B dash   RB guard   LB throw / burst   stick click overdrive', W / 2, H - 78, 13, '#ffffff77', 'center', 600, 2);
+    if (!compact) this.text(ctx, 'Gamepad:  A jump   X light   Y heavy   B dash   RB guard   LB throw / burst   stick click overdrive', W / 2, H - 78, 13, '#ffffff77', 'center', 600, 2);
     this.text(ctx, foot, W / 2, H - 46, 14, '#ffffffcc', 'center', 600, 3);
   }
 }

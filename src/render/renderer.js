@@ -23,6 +23,7 @@ export class Renderer {
     this.k = 1;                 // device pixels per logical unit
     this.quality = 1;           // dynamic resolution scale
     this.tier = 2;              // 2: everything at full resolution. 1: backdrop at half resolution.
+    this.touch = false;         // set once a touch device is detected
     this.mode = 'auto';         // 'auto' adapts tier and quality to frame time; 'high' and 'low' pin them
     this.glow = mk(2, 2); this.g = this.glow.getContext('2d');
     this.b = [mk(2, 2), mk(2, 2), mk(2, 2)]; this.bc = this.b.map((c) => c.getContext('2d'));
@@ -42,7 +43,8 @@ export class Renderer {
     let w = cw, h = cw / aspect;
     if (h > ch) { h = ch; w = ch * aspect; }
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.k = Math.min((h * dpr) / 720, 1.5) * this.quality;
+    // Phones have dense screens and modest GPUs: cap them at 720p internally.
+    this.k = Math.min((h * dpr) / 720, this.touch ? 1 : 1.5) * this.quality;
     this.view.w = Math.round(720 * aspect); this.view.h = 720;
     const c = this.canvas;
     c.width = Math.round(this.view.w * this.k); c.height = Math.round(720 * this.k);

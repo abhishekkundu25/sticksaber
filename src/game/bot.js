@@ -27,6 +27,7 @@ export class BotInput {
     for (const a of ACTIONS) { this.down[a] = false; this.pressedAt[a] = -9; this.hold[a] = 0; }
     this.script = []; this.wait = 0; this.seen = new Map(); this.repeat = null;
     this.show = false; // title-screen mode: flashier strings and free use of Focus
+    this.odWait = 0;   // title-screen mode keeps Overdrive occasional
   }
   held(a) { return this.down[a]; }
   axisX() { return (this.down.right ? 1 : 0) - (this.down.left ? 1 : 0); }
@@ -73,7 +74,8 @@ export class BotInput {
     if (p.state === 'ragdoll' && p.rag.y[2] > -50 && rng() < this.skill * dt * 20) this.press('dash');
     // Sometimes burst out of a beating, and open Overdrive when the meter is full and something is in reach.
     if ((p.state === 'hitstun' || p.state === 'ragdoll') && w.focus >= 200 && rng() < this.skill * dt * 3) this.press('special');
-    if (w.focus >= w.maxFocus && tgt && td < 320 && p.state === 'free' && rng() < this.skill * dt * 6) this.press('overdrive');
+    this.odWait -= dt;
+    if (w.focus >= w.maxFocus && tgt && td < 320 && p.state === 'free' && this.odWait <= 0 && rng() < this.skill * dt * 6) { this.press('overdrive'); if (this.show) this.odWait = 34; }
     if (this.show) {
       // Never take a beating quietly, and send the saber through anything lined up ahead, bodies included.
       if (BURSTABLE[p.state] && w.focus >= 100 && rng() < dt * 12) this.press('special');

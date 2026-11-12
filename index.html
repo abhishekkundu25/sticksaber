@@ -2,18 +2,47 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>STICKSABER</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2306080c'/%3E%3Cpath d='M7 25 25 7' stroke='%2356e9ff' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M7 25 25 7' stroke='%23fff' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-  body { display: flex; align-items: center; justify-content: center; }
-  canvas { display: block; outline: none; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
+  body { display: flex; align-items: center; justify-content: center; position: fixed; inset: 0; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  canvas { display: block; outline: none; touch-action: none; }
+
+  /* Touch controls. Created by src/ui/touch.js on the first touch; never shown on a desktop. */
+  #touch { position: fixed; inset: 0; z-index: 5; display: none; touch-action: none; font-family: "Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", sans-serif; }
+  #touch[data-mode="play"], #touch[data-mode="train"], #touch[data-mode="pause"] { display: block; }
+  #touch .pad { position: absolute; left: 0; top: 16%; bottom: 0; width: 44%; }
+  #touch .base { position: absolute; left: 19vh; top: calc(100% - 24vh); width: 26vh; height: 26vh; margin: -13vh 0 0 -13vh; border-radius: 50%; border: 1.5px solid #56e9ff44; background: #56e9ff0d; pointer-events: none; }
+  #touch .base.live { border-color: #56e9ffaa; background: #56e9ff1a; }
+  #touch .knob { position: absolute; left: 50%; top: 50%; width: 11vh; height: 11vh; margin: -5.5vh 0 0 -5.5vh; border-radius: 50%; background: #56e9ff55; border: 1.5px solid #a8f4ff; }
+  #touch button { position: absolute; padding: 0; margin: 0; border-radius: 50%; border: 1.5px solid #ffffff4d; background: #0a101873; color: #ffffffcc; font-weight: 700; font-size: 2.5vh; line-height: 1.1; font-family: inherit; letter-spacing: 0.14em; -webkit-tap-highlight-color: transparent; outline: none; touch-action: none; }
+  #touch button.on { background: #56e9ff59; border-color: #56e9ff; color: #fff; }
+  #touch button[data-a="light"] { border-color: #56e9ff99; font-size: 3vh; }
+  #touch button[data-a="overdrive"] { font-size: 1.9vh; opacity: 0.45; }
+  #touch button[data-a="overdrive"].ready { opacity: 1; border-color: #e6fdff; color: #e6fdff; box-shadow: 0 0 3vh #56e9ffaa; }
+  #touch button[data-a="special"] { font-size: 2.1vh; }
+  #touch .sys { border-radius: 1vh; height: 8vh; font-size: 2.3vh; }
+  #touch .pause { top: 3vh; left: 50%; width: 9vh; margin-left: -4.5vh; }
+  #touch .spawn { top: 3vh; left: 50%; width: 20vh; margin-left: 7vh; display: none; }
+  #touch .resume, #touch .quit { top: auto; bottom: 16vh; width: 30vh; height: 11vh; font-size: 3vh; display: none; }
+  #touch .resume { left: 50%; margin-left: -33vh; border-color: #56e9ff; color: #56e9ff; }
+  #touch .quit { left: 50%; margin-left: 3vh; }
+  #touch[data-mode="train"] .spawn { display: block; }
+  #touch[data-mode="pause"] .act, #touch[data-mode="pause"] .pad, #touch[data-mode="pause"] .base, #touch[data-mode="pause"] .pause { display: none; }
+  #touch[data-mode="pause"] .resume, #touch[data-mode="pause"] .quit { display: block; }
+  #rotate { position: fixed; inset: 0; z-index: 9; display: none; align-items: center; justify-content: center; background: #04060b; color: #56e9ff; font: 700 5vw "Avenir Next Condensed", "Arial Narrow", sans-serif; letter-spacing: 0.2em; text-align: center; }
+  @media (orientation: portrait) and (pointer: coarse) { #rotate { display: flex; } }
   #err { position: fixed; left: 12px; bottom: 12px; right: 12px; color: #ff8a8a; font: 13px ui-monospace, monospace; white-space: pre-wrap; pointer-events: none; }
 </style>
 </head>
 <body>
 <canvas id="game" tabindex="0"></canvas>
+<div id="rotate">ROTATE YOUR PHONE<br>TO LANDSCAPE</div>
 <div id="err"></div>
 <script>
   // Opening the file directly cannot load ES modules; say so instead of showing a black page.

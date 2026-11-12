@@ -26,6 +26,7 @@ export class Input {
     this.keysHit = []; // raw key codes pressed this frame (menus, training-room spawns)
     this.padX = 0;
     this.usedPad = false;
+    this.lastTouch = -1e9; // set by the touch layer
   }
 
   attach(target) {
@@ -45,6 +46,7 @@ export class Input {
       if (e.code === 'Space') this.set('confirm', 'kSpace', false);
     });
     target.addEventListener('mousedown', (e) => {
+      if (performance.now() - this.lastTouch < 900) return; // a touch also fires a synthetic click
       if (e.button === 0) this.set('light', 'm0', true);
       if (e.button === 2) this.set('heavy', 'm2', true);
     });

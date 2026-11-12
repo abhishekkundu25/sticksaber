@@ -5,6 +5,7 @@ import { Director } from './game/encounters.js';
 import { Renderer } from './render/renderer.js';
 import { buildArena } from './render/arenas.js';
 import { Hud } from './ui/hud.js';
+import { Touch } from './ui/touch.js';
 import { audio } from './audio/audio.js';
 import { BotInput } from './game/bot.js';
 import { clamp, pick } from './core/math.js';
@@ -25,7 +26,13 @@ const saveFloor = (n) => { try { if (n > loadFloor()) localStorage.setItem(SAVE_
 // `?seed=ABC123` pins the run so it can be replayed or shared; otherwise every run is new.
 const fixedSeed = parseSeed(new URLSearchParams(location.search).get('seed') || '');
 
-const app = { state: 'menu', idx: 0, muted: false, menu: [], toast: null, manual: false };
+const app = { state: 'menu', idx: 0, muted: false, menu: [], toast: null, manual: false, touch: false };
+
+// Phones and tablets: taps drive the menus, an on-screen stick and buttons drive the fight.
+const taps = [], cmds = [];
+const touch = new Touch(input, canvas, renderer.view, { tap: (x, y) => taps.push({ x, y }), cmd: (name) => cmds.push(name) });
+const SPAWNS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit6', 'Digit7', 'Digit8', 'Digit5'];
+let spawnIdx = 0;
 const live = () => app.state === 'play' || app.state === 'pause';
 
 // One arena is baked at a time: each floor is its own seeded variant, so the previous one is released.
@@ -105,7 +112,8 @@ function startTraining() { world.input = input; app.state = 'play'; director.sta
 const toast = (text) => { app.toast = { text, t: 1.8 }; };
 
 addEventListener('resize', () => renderer.resize());
-for (const ev of ['keydown', 'mousedown', 'touchstart']) addEventListener(ev, () => audio.init(), { passive: true });
+// Browsers only let sound start from a user gesture; phones count the end of a touch, not its start.
+for (const ev of ['keydown', 'mousedown', 'touchstart', 'touchend', 'click']) addEventListener(ev, () => audio.init(), { passive: true });
 
 const MODES = ['auto', 'high', 'low'];
 function shell() {
@@ -113,8 +121,29 @@ function shell() {
   if (hit('KeyF')) { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.().catch(() => {}); }
   if (hit('KeyM')) { app.muted = !app.muted; audio.setVolumes({ master: app.muted ? 0 : 1 }); toast(app.muted ? 'SOUND OFF' : 'SOUND ON'); }
   if (hit('KeyG')) { const m = MODES[(MODES.indexOf(renderer.mode) + 1) % MODES.length]; renderer.setMode(m); toast(`GRAPHICS  ${m.toUpperCase()}`); }
-  const confirm = hit('Enter', 'NumpadEnter', 'Space') || (input.usedPad && app.state !== 'play' && input.consume('jump', 0.1));
-  const back = hit('Escape');
+  let confirm = hit('Enter', 'NumpadEnter', 'Space') || (input.usedPad && app.state !== 'play' && input.consume('jump', 0.1));
+  let back = hit('Escape');
+  if (touch.enabled && !app.touch) { app.touch = true; renderer.touch = true; renderer.resize(); }
+  // Touch: a tap on a menu item picks it; a tap anywhere dismisses a screen that only needs acknowledging.
+  for (const t of taps) {
+    if (app.state === 'menu') {
+      const n = app.menu.length, W = renderer.view.w, gap = Math.min(300, (W - 120) / n);
+      const i = Math.round((t.x - W / 2) / gap + (n - 1) / 2);
+      if (i >= 0 && i < n && t.y > renderer.view.h - 170) {
+        app.idx = i; confirm = true;
+        // Phones: take the whole screen and hold landscape where the browser allows it.
+        document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {});
+      }
+    } else confirm = true;
+  }
+  taps.length = 0;
+  for (const c of cmds) {
+    if (c === 'pause' && app.state === 'play') back = true;
+    else if (c === 'resume' && app.state === 'pause') back = true;
+    else if (c === 'quit' && app.state === 'pause') { cmds.length = 0; toMenu(); return; }
+    else if (c === 'spawn') director.trainingKey(SPAWNS[spawnIdx++ % SPAWNS.length]);
+  }
+  cmds.length = 0;
   switch (app.state) {
     case 'menu': {
       const n = app.menu.length;
@@ -184,6 +213,11 @@ function advance(dt, now) {
     const n = Math.max(1, Math.ceil(dt * 120 - 0.01));
     for (let i = 0; i < n; i++) world.step(dt / n);
     director.update(dt);
+  }
+  if (touch.enabled) {
+    const fighting = app.state === 'play' && director.state !== 'dead' && director.state !== 'victory';
+    touch.setMode(fighting ? (director.training ? 'train' : 'play') : app.state === 'pause' ? 'pause' : 'off');
+    touch.setReady(world.focus >= world.maxFocus && world.overdrive <= 0);
   }
   sound(dt);
   const t0 = performance.now();
