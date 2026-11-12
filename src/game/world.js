@@ -51,6 +51,7 @@ class Style {
 }
 
 export const OVERDRIVE_TIME = 6;
+const STOP_BANK = 0.3; // seconds of hit-stop that can be held in reserve
 const OD_COLOR = '#e6fdff';
 export const newStats = () => ({ parries: 0, reads: 0, interrupts: 0, kills: 0, dodges: 0, hitsTaken: 0, cuts: 0, bursts: 0, overdrives: 0 });
 
@@ -65,7 +66,7 @@ export class World {
     this.sfxOut = null; this.loopOut = null;
     this.fighters = []; this.player = null;
     this.minX = -1100; this.maxX = 1100;
-    this.time = 0; this.hitstop = 0; this.slowK = 1; this.slowT = 0; this.witch = 0; this.timeScale = 1;
+    this.time = 0; this.hitstop = 0; this.stopBank = STOP_BANK; this.slowK = 1; this.slowT = 0; this.witch = 0; this.timeScale = 1;
     this.focus = 100; this.maxFocus = 300; this.rally = 0; this.rallyT = 0;
     this.enemyDmg = 1; this.maxAttackers = 1; this.lastAtkT = -9; this.atkGap = 0.32;
     this.stats = newStats();
@@ -125,7 +126,14 @@ export class World {
   // ───────────── services used by fighters / combat ─────────────
   sfx(name, x, vol = 1, pitch = 1) { this.sfxOut?.(name, x, vol, pitch); }
   audioLoop(name, on) { this.loopOut?.(name, on); }
-  stop(t) { if (t > this.hitstop) this.hitstop = t; }
+  // Hit-stop freezes the whole world, so it is rationed: freezes draw on a small bank of time that
+  // refills while the game runs. In a duel the bank never empties and every hit lands with its full
+  // freeze. In a crowd, where something is hit every few frames, the freezes shrink instead of
+  // stacking up until the game crawls. `strong` moments (parry, burst, phase changes) may overdraw a little.
+  stop(t, strong = false) {
+    t = Math.min(t, this.stopBank + (strong ? 0.08 : 0));
+    if (t > this.hitstop) this.hitstop = t;
+  }
   slow(k, t) { if (this.slowT <= 0 || k <= this.slowK) { this.slowK = k; this.slowT = Math.max(this.slowT, t); } }
   shake(a) { this.cam.trauma = Math.min(1, Math.max(this.cam.trauma, a * 0.6) + a * 0.25); }
   punch(k) { this.cam.punchK = Math.max(this.cam.punchK, k); }
@@ -189,7 +197,7 @@ export class World {
     for (let i = 0; i < 3; i++) fx.ghost(f, '#ffffff', 0.3 + i * 0.07);
     fx.text(cx, cy - 80, 'BURST', f.color, 24, 0.9);
     this.sfx('shockwave', cx, 1, 1.3); this.sfx('parry', cx, 0.7, 0.7);
-    this.stop(0.13); this.slow(0.4, 0.26); this.shake(0.65); this.punch(0.035); this.flashScreen(f.color, 0.18);
+    this.stop(0.13, true); this.slow(0.4, 0.26); this.shake(0.65); this.punch(0.035); this.flashScreen(f.color, 0.18);
     return true;
   }
 
@@ -214,7 +222,7 @@ export class World {
     for (let i = 0; i < 5; i++) fx.ghost(f, '#56e9ff', 0.3 + i * 0.08);
     fx.text(f.x, f.j[1] - 60, 'OVERDRIVE', OD_COLOR, 28, 1.2);
     this.sfx('bossPhase', f.x, 0.8, 1.7); this.sfx('ignite', f.x, 1, 1.3); this.sfx('rankUp', f.x, 0.8);
-    this.stop(0.16); this.slow(0.35, 0.4); this.shake(0.5); this.punch(0.04); this.flashScreen('#56e9ff', 0.3);
+    this.stop(0.16, true); this.slow(0.35, 0.4); this.shake(0.5); this.punch(0.04); this.flashScreen('#56e9ff', 0.3);
     return true;
   }
   endOverdrive(broken) {
@@ -370,7 +378,7 @@ export class World {
   onKill(A, B, h, cx, cy, dir, cuts) {
     const fx = this.fx;
     if (B.isPlayer) {
-      this.stop(0.2); this.slow(0.25, 1.6); this.shake(0.7); this.sfx('death', B.x);
+      this.stop(0.2, true); this.slow(0.25, 1.6); this.shake(0.7); this.sfx('death', B.x);
       this.events.push({ type: 'playerDead' });
       return;
     }
@@ -403,7 +411,9 @@ export class World {
     this.updateCamera(dtReal);
     if (this.screenFlash && (this.screenFlash.t -= dtReal) <= 0) this.screenFlash = null;
     if (this.bannerMsg && (this.bannerMsg.t -= dtReal) <= 0) this.bannerMsg = null;
-    if (this.hitstop > 0) { this.hitstop -= dtReal; this.fx.update(dtReal * 0.12); return; }
+    if (this.hitstop > 0) { this.hitstop -= dtReal; this.stopBank -= dtReal; this.fx.update(dtReal * 0.12); return; }
+    // The bank refills faster in small fights (up to a quarter of the time frozen) than in crowds (about a tenth).
+    this.stopBank = Math.min(STOP_BANK, this.stopBank + clamp(0.36 - 0.012 * this.countEnemies(), 0.1, 0.33) * dtReal);
     let ts = 1;
     if (this.slowT > 0) { this.slowT -= dtReal; ts = this.slowT < 0.15 ? lerp(1, this.slowK, Math.max(0, this.slowT) / 0.15) : this.slowK; if (this.slowT <= 0) this.slowK = 1; }
     let ets = 1;

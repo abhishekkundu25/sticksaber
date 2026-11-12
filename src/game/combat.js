@@ -218,7 +218,7 @@ export function breakPosture(world, B) {
   world.fx.text(B.x, B.j[1] - 34 * B.scale, 'BROKEN', '#ffd36b', 22, 1.1);
   world.fx.ring(B.cx, B.cy, 10, 120 * B.scale, 0.4, '#ffd36b', 1, 5);
   world.fx.spark(B.cx, B.cy, 0, 3.14, 18, 520, '#ffd36b');
-  world.sfx('stagger', B.x); world.stop(0.12); world.shake(0.45);
+  world.sfx('stagger', B.x); world.stop(0.12, true); world.shake(0.45);
 }
 
 function parry(world, D, A, h, cx, cy, dir) {
@@ -227,7 +227,7 @@ function parry(world, D, A, h, cx, cy, dir) {
   fx.spark(px, py, dir > 0 ? 0 : Math.PI, 1.3, 26, 760, D.color, { white: 0.6 });
   fx.flash(px, py, 70, '#ffffff', 0.12); fx.ring(px, py, 8, 110, 0.3, '#ffffff', 1, 4);
   fx.text(D.x, D.j[1] - 40, 'PARRY', '#ffffff', 22, 0.8);
-  world.sfx('parry', D.x); world.stop(0.12); world.slow(0.4, 0.28); world.shake(0.4); world.punch(0.035);
+  world.sfx('parry', D.x); world.stop(0.12, true); world.slow(0.4, 0.28); world.shake(0.4); world.punch(0.035);
   D.parryT = 0.2; D.posture = Math.max(0, D.posture - 20); D.blockT = 0.1; D.pv[7] += 9; D.pv[3] -= 3;
   if (D.isPlayer) { D.riposteT = 0.85; world.gainFocus(34); world.style.bonus(14); world.stats.parries++; }
   if (!A || A.dead) return 'parry';

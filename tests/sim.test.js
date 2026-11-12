@@ -200,3 +200,28 @@ test('overdrive runs out after six seconds', () => {
   assert.equal(world.overdrive, 0);
   assert.equal(p.rate, 1);
 });
+
+test('hit-stop is rationed: a crowd fight still runs at close to full speed', () => {
+  const speed = (n) => {
+    seedRng(7);
+    const world = new World(); world.input = new BotInput(world, 0.9);
+    const dir = new Director(world, { setArena: () => 2200 });
+    dir.startTraining(); world.clearEnemies();
+    const keys = ['Digit1', 'Digit1', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit6', 'Digit7', 'Digit8'];
+    for (let i = 0; i < n; i++) dir.trainingKey(keys[i % keys.length]);
+    for (let i = 0; i < 240; i++) { world.input.tick(DT); world.step(DT); dir.update(DT); }
+    const t0 = world.time; let real = 0, lowest = 1;
+    for (let i = 0; i < 120 * 20; i++) {
+      world.input.tick(DT); world.step(DT); dir.update(DT); real += DT;
+      if (world.player.hp < 60) world.player.hp = 100;
+      if (world.countEnemies() < n && i % 30 === 0) dir.trainingKey(keys[i % keys.length]);
+      lowest = Math.min(lowest, world.stopBank);
+    }
+    assert.ok(lowest > -0.1, `hit-stop bank overdrawn to ${lowest}`);
+    return (world.time - t0) / real;
+  };
+  const duel = speed(3), crowd = speed(60);
+  assert.ok(crowd > 0.8, `a 60-enemy fight ran at ${(crowd * 100).toFixed(0)}% speed`);
+  // A small fight keeps its full freezes: it is frozen a good fifth of the time, as designed.
+  assert.ok(duel > 0.65 && duel < 0.85, `a 3-enemy fight ran at ${(duel * 100).toFixed(0)}% speed`);
+});

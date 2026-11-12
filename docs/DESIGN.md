@@ -14,7 +14,7 @@ The premise exists to justify one mechanic: stronger enemies learn your habits. 
 
 | Element | How it works |
 | --- | --- |
-| Hit stop | A hit freezes the simulation for 30 to 160 ms, scaled by the move. The struck body shakes during the freeze. |
+| Hit stop | A hit freezes the simulation for 30 to 160 ms, scaled by the move. The struck body shakes during the freeze. Freezes are rationed from a 0.3 s bank that refills as the game runs, so in a crowd they shrink instead of stacking up. Against three enemies the game is frozen up to 23% of the time, as before. Against sixty it is frozen 9% of the time, where it used to be 53%. |
 | Camera | Shake is trauma-based and capped at 10 px. Heavy hits add a zoom kick of at most 3.5%. There is no rotation. |
 | Slow motion | A parry, a perfect dodge, the last kill of a wave and a boss kill slow time. Black bars slide in while time is slowed. |
 | Blade hits | The hit test sweeps the blade that is drawn, so a swing that visibly passes through a body connects. |

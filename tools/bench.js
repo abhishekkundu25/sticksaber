@@ -20,6 +20,7 @@ import { BotInput } from '../src/game/bot.js';
 // the machine; the counts are tight, because they do not.
 export const BUDGET = {
   simMicrosPerStep: 150,
+  crowdMicrosPerStep: 1500, // 120 enemies at once in the training room
   high: { ms: 24, drawImage: 60, megapixels: 4.3 },
   low: { ms: 22, drawImage: 16, megapixels: 2.6 },
 };
@@ -52,6 +53,24 @@ const check = (label, value, limit, unit) => {
   const us = ((performance.now() - t0) * 1000) / steps;
   console.log(`simulation: floor 9, ${steps} steps, up to ${peak} fighters`);
   check('microseconds per step', +us.toFixed(1), BUDGET.simMicrosPerStep, 'µs');
+}
+
+{
+  const world = new World();
+  world.input = new BotInput(world, 0.9);
+  const dir = new Director(world, { setArena: () => 2200 });
+  dir.startTraining(); world.clearEnemies();
+  const keys = ['Digit1', 'Digit1', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit6', 'Digit7', 'Digit8', 'Digit5'];
+  for (let i = 0; i < 120; i++) dir.trainingKey(keys[i % keys.length]);
+  const dt = 1 / 120, steps = 1800;
+  for (let i = 0; i < 240; i++) { world.input.tick(dt); world.step(dt); dir.update(dt); }
+  const t0 = performance.now(), g0 = world.time;
+  for (let i = 0; i < steps; i++) { world.input.tick(dt); world.step(dt); dir.update(dt); if (world.player.hp < 60) world.player.hp = 100; }
+  const us = ((performance.now() - t0) * 1000) / steps;
+  console.log(`simulation: crowd of 120 enemies, ${steps} steps`);
+  check('microseconds per step', +us.toFixed(1), BUDGET.crowdMicrosPerStep, 'µs');
+  // Hit-stop must not stack up until the fight crawls: the game clock should keep close to real time.
+  check('percent of real time lost to freezes', +(100 - ((world.time - g0) / (steps * dt)) * 100).toFixed(0), 25, '%');
 }
 
 // ── 2. rendering ──
