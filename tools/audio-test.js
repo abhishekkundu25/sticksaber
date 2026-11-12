@@ -23,6 +23,12 @@ const GROUPS = {
   'Pickups & draft': ['pickupHealth', 'pickupFocus', 'draftOpen', 'draftPick', 'powerSwap'],
   'Focus powers': ['powerNova', 'powerStasis', 'powerMend', 'powerArc', 'powerFlash', 'powerFlashEnd', 'powerMirror', 'powerJudgment', 'powerCrescent'],
   'Run events': ['crit', 'burn', 'summon', 'championIntro', 'sectorUp', 'secondWind', 'anomaly'],
+  Animals: ['beastGrowl', 'beastBite', 'beastRoar', 'beastScreech', 'beastHoof', 'beastWing', 'beastHiss', 'beastStomp'],
+  'Weapon forms': ['swingTwin', 'swingGreat', 'swingStaff'],
+  Terrain: ['platformOn', 'platformOff', 'hazardArm', 'hazardZap', 'wallShock'],
+  Bonds: ['tetherSnap', 'enrage', 'dismount', 'packHowl', 'nerveBreak'],
+  'Bosses & polish': ['alarm', 'twinSwap', 'finisher', 'uiHover', 'tutorialDone'],
+  Techniques: ['pullIn', 'pin', 'reflect'],
 };
 const LOOP_NAMES = ['heal', 'throw', 'rain'];
 const TRACK_NAMES = ['menu', 'combat', 'boss', 'boss2'];
@@ -43,6 +49,12 @@ const LIMIT = {
   powerNova: 0.9, powerStasis: 1.2, powerMend: 0.9, powerArc: 0.25, powerFlash: 0.15, powerFlashEnd: 0.7,
   powerMirror: 0.7, powerJudgment: 0.6, powerCrescent: 0.5, crit: 0.4, burn: 0.35, summon: 1.0,
   championIntro: 1.3, sectorUp: 1.9, secondWind: 1.1, anomaly: 0.7,
+  beastGrowl: 0.7, beastBite: 0.2, beastRoar: 1.2, beastScreech: 0.6, beastHoof: 0.12, beastWing: 0.22, beastHiss: 0.7, beastStomp: 0.6,
+  swingTwin: 0.16, swingGreat: 0.6, swingStaff: 0.5,
+  platformOn: 0.45, platformOff: 0.45, hazardArm: 1.0, hazardZap: 0.5, wallShock: 0.45,
+  tetherSnap: 0.45, enrage: 0.7, dismount: 0.45, packHowl: 1.2, nerveBreak: 0.8,
+  alarm: 0.8, twinSwap: 0.45, finisher: 2.0, uiHover: 0.06, tutorialDone: 0.7,
+  pullIn: 0.5, pin: 0.45, reflect: 0.45,
 };
 // Sequences the game plays; the soundboard has a button for each.
 const SEQUENCES = {
@@ -55,6 +67,12 @@ const SEQUENCES = {
   'judgment + pillar': [[0, 'powerJudgment'], [0.5, 'pillar'], [0.56, 'pillar', { pan: 0.6 }]],
   'hit + crit': [[0, 'hitHeavy'], [0, 'crit']],
   'powerSwap slots': [1, 1.125, 1.25, 1.375, 1.5].map((p, i) => [i * 0.25, 'powerSwap', { pitch: p }]),
+  'gallop 2 s': Array.from({ length: 10 }, (_, i) => [i * 0.2, 'beastHoof', { pitch: i % 2 ? 0.9 : 1.05 }]),
+  'flap 2 s': Array.from({ length: 8 }, (_, i) => [i * 0.25, 'beastWing']),
+  'growl big / small': [[0, 'beastGrowl', { pitch: 0.7 }], [0.7, 'beastGrowl', { pitch: 1.4 }]],
+  'swingTwin x8': Array.from({ length: 8 }, (_, i) => [i * 0.125, 'swingTwin', { pitch: 0.9 + (i % 3) * 0.1 }]),
+  'hazard arm + zap': [[0, 'hazardArm'], [0.8, 'hazardZap']],
+  'boss finisher': [[0, 'hitHeavy'], [0, 'finisher']],
 };
 const SILENCE = 0.001; // -60 dBFS
 const WARM = 0.5;
@@ -444,6 +462,75 @@ async function runPage() {
         res.filled === 24 && res.important === 3 && res.frequent === 0 && res.dropped === 4, JSON.stringify(res));
       check('impact scale: powerFlashEnd lands harder than one powerFlash cut', by.powerFlashEnd.loud > by.powerFlash.loud,
         `loudest 50 ms: ${fmtDb(by.powerFlash.loud)} vs ${fmtDb(by.powerFlashEnd.loud)} dB`);
+    }
+
+    // Animals, weapon forms, terrain, bonds, bosses and techniques.
+    {
+      const by = Object.fromEntries(R.sounds.map((s) => [s.name, s]));
+      const bright = async (name, o) => {
+        const r = await audioDev.render({ seconds: 2, dry: true, script: (a) => a.play(name, o) });
+        return (analyze(r.buffer).hf * r.buffer.sampleRate) / (2 * Math.PI);
+      };
+      const frequent = ['beastHoof', 'beastWing', 'uiHover', 'swingTwin'];
+      const loudest = Math.max(...frequent.map((n) => by[n].loud));
+      check('frequent sounds (beastHoof, beastWing, uiHover, swingTwin) sit at least 8 dB under a light hit', db(loudest) < db(by.hitLight.loud) - 8,
+        `loudest 50 ms: ${frequent.map((n) => `${n} ${fmtDb(by[n].loud)}`).join(', ')}, hitLight ${fmtDb(by.hitLight.loud)} dB`);
+      check('uiHover is quieter than uiMove', by.uiHover.loud < by.uiMove.loud && by.uiHover.dryPeak < by.uiMove.dryPeak,
+        `loudest 50 ms ${fmtDb(by.uiHover.loud)} vs ${fmtDb(by.uiMove.loud)} dB, peak ${fmtDb(by.uiHover.dryPeak)} vs ${fmtDb(by.uiMove.dryPeak)} dBFS`);
+      const g07 = await bright('beastGrowl', { pitch: 0.7 }), g14 = await bright('beastGrowl', { pitch: 1.4 });
+      check('beastGrowl: pitch 0.7 is clearly lower than pitch 1.4', g14 > g07 * 1.5, `brightness ~${g07.toFixed(0)} vs ~${g14.toFixed(0)} Hz`);
+      // Each new weapon form differs from every other swing by 25% in length or brightness.
+      const swings = ['swingLight', 'swingHeavy', 'swingSpin', 'swingTwin', 'swingGreat', 'swingStaff'];
+      const sw = {};
+      for (const n of swings) sw[n] = { dur: by[n].dryDur, hz: await bright(n) };
+      const apart = (a, b) => Math.max(sw[a].dur / sw[b].dur, sw[b].dur / sw[a].dur, sw[a].hz / sw[b].hz, sw[b].hz / sw[a].hz);
+      const close = [];
+      for (const a of ['swingTwin', 'swingGreat', 'swingStaff']) for (const b of swings) if (a !== b && apart(a, b) < 1.25) close.push(`${a}~${b} ${apart(a, b).toFixed(2)}`);
+      check('weapon forms: twin, great and staff each differ from every swing in length or brightness', !close.length,
+        (close.length ? `too close: ${close.join(', ')}; ` : '') + swings.map((n) => `${n} ${sw[n].dur.toFixed(2)} s ~${sw[n].hz.toFixed(0)} Hz`).join(', '));
+      // Repeated sounds through the full chain: no clip, nothing dropped, and the master
+      // compressor barely moves (it would pump the music if it did). A fresh context's
+      // compressor reads several dB of reduction that releases over about 2 s, so these renders
+      // wait SETTLE seconds first. A stack of four heavy impacts is the control that shows the meter
+      // reads.
+      const SETTLE = 3;
+      const reduction = async (plays, secs) => {
+        let red = 0;
+        const r = await audioDev.render({ seconds: SETTLE + secs, fps: 20, script: (a, t, i, e) => {
+          const k = i - SETTLE * 20;
+          if (k >= 0) {
+            plays(a, k);
+            red = Math.min(red, e.comp.reduction, e.lim.reduction);
+          }
+        } });
+        return { red, peak: analyze(r.buffer, SETTLE).peak, stats: r.engine.stats };
+      };
+      const ctl = await reduction((a, k) => k === 0 && ['hitHeavy', 'hitSpike', 'slam', 'kill'].forEach((n) => a.play(n)), 1);
+      for (const [label, name, every, n] of [['gallop: beastHoof five a second for two seconds', 'beastHoof', 4, 10], ['flap: beastWing four a second for two seconds', 'beastWing', 5, 8]]) {
+        const g = await reduction((a, k) => k % every === 0 && k / every < n && a.play(name, { pan: Math.random() * 1.2 - 0.6 }), 2.6);
+        check(`${label}: unclipped, all played, master compressor moves under 1 dB`, g.peak < 0.5 && g.stats.played === n && !g.stats.dropped && g.red > -1 && ctl.red < -2,
+          `played ${g.stats.played}, peak ${fmtDb(g.peak)} dBFS, most gain reduction ${g.red.toFixed(2)} dB (four heavy impacts: ${ctl.red.toFixed(2)} dB)`);
+      }
+      const twin = await audioDev.render({ seconds: 1.4, dry: true, fps: 100, script: (a, t, i) => i < 100 && i % 12 === 0 && a.play('swingTwin', { pitch: 0.85 + Math.random() * 0.3 }) });
+      check('swingTwin: eight swings a second all play, none limited', twin.engine.stats.played === 9 && !twin.engine.stats.limited && analyze(twin.buffer).peak < 1,
+        `${JSON.stringify(twin.engine.stats)} peak ${fmtDb(analyze(twin.buffer).peak)} dBFS`);
+      check('finisher: lands with the weight of kill (within 1.5 dB) and outlasts it', db(by.finisher.loud) > db(by.kill.loud) - 1.5 && by.finisher.dryDur > by.kill.dryDur + 0.3,
+        `loudest 50 ms ${fmtDb(by.finisher.loud)} vs ${fmtDb(by.kill.loud)} dB, length ${by.finisher.dryDur.toFixed(2)} vs ${by.kill.dryDur.toFixed(2)} s`);
+      check('impact scale: beastBite and beastHoof are lighter than beastStomp', by.beastBite.loud < by.beastStomp.loud && by.beastHoof.loud < by.beastStomp.loud,
+        `loudest 50 ms: bite ${fmtDb(by.beastBite.loud)}, hoof ${fmtDb(by.beastHoof.loud)}, stomp ${fmtDb(by.beastStomp.loud)} dB`);
+      const filler = names.filter((n) => !['footstep', 'uiMove', 'pickupHealth', 'pickupFocus', 'burn', 'powerSwap'].includes(n) && !/^power|^(kill|sever|parry|guardBreak|telegraph|telegraphRed|shockwave|slam|bossRoar|bossPhase|healInterrupt|adapt|stagger|blink|explode|pillar|hammer|heatUp|vent|elite|death|perfectDodge|waveClear|victory|summon|championIntro|sectorUp|secondWind)$/.test(n)).slice(0, 24);
+      const important = ['finisher', 'enrage', 'alarm', 'beastRoar', 'packHowl'], yielding = ['beastHoof', 'beastWing', 'uiHover', 'swingTwin'];
+      let res = null;
+      await audioDev.render({ seconds: 0.5, dry: true, script: (a, t, i, e) => {
+        filler.forEach((n) => a.play(n));
+        const s0 = { ...e.stats };
+        important.forEach((n) => a.play(n));
+        const s1 = { ...e.stats };
+        yielding.forEach((n) => a.play(n));
+        res = { filled: filler.length, important: s1.played - s0.played, frequent: e.stats.played - s1.played, dropped: e.stats.dropped - s1.dropped };
+      } });
+      check(`priorities: under a full voice cap, ${important.join('/')} steal; ${yielding.join(', ')} yield`,
+        res.filled === 24 && res.important === important.length && res.frequent === 0 && res.dropped === yielding.length, JSON.stringify(res));
     }
 
     // Rate limit and polyphony.

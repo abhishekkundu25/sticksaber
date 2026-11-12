@@ -1028,6 +1028,277 @@ const SFX = {
     v.noise({ gp: gate, g: 0.12, bp: { f: v.r(1500, 3500), q: 2 }, curve: 'crush' });
     v.fm({ f: v.r(300, 400), ratio: 1.37, index: 3, index1: 1, a: 0.01, h: 0.15, d: 0.3, g: 0.06, vib: { rate: 13, depth: 200 } });
   } },
+
+  // ----- Animals: voiced sounds go through formant banks with vibrato and a rough AM flutter
+  // (vocal fry), so they read as throats next to the clean synthetic blades. -----
+  // Growl: a low buzzing throat on an "aw" vowel. pitch moves the voice and the formants, so a
+  // big beast at 0.7 is darker as well as lower than a small one at 1.4.
+  beastGrowl: { vary: 0.06, fn(v) {
+    const D = v.r(0.46, 0.54), gp = [[0, 0], [0.07, 0.7], [D * 0.55, 1], [D, 0]];
+    const bank = v.bank([[[[0, 420], [D * 0.5, 560], [D, 380]], 5, 2], [[[0, 820], [D * 0.5, 1000], [D, 760]], 6, 1.2], [[[0, 2300]], 7, 0.35]]);
+    v.tone({ type: 'sawtooth', unison: [-18, 0, 15], fp: [[0, 68], [D * 0.5, 84], [D, 58]], gp, g: 1, drive: 0.9, am: { rate: v.r(24, 32), depth: 0.5 }, vib: { rate: 6.5, depth: 30 }, dest: bank });
+    v.noise({ color: 'pink', gp, g: 0.5, am: { rate: v.r(17, 23), depth: 0.4 }, dest: bank });
+    v.tone({ fp: [[0, 42], [D * 0.5, 52], [D, 36]], gp, g: 0.3 });
+  } },
+  // Bite: a hard tooth clack (short bright noise and a hollow knock) and a wet squelch under it.
+  beastBite: { vary: 0.08, fn(v) {
+    v.noise({ a: 0.0005, d: 0.018, g: 0.8, bp: { f: v.r(2400, 3200), q: 2 } });
+    v.click({ g: 0.4, hp: 2500, d: 0.006 });
+    v.tone({ type: 'triangle', f: v.r(520, 640), to: 300, ft: 0.04, a: 0.0008, d: 0.05, g: 0.35 });
+    v.noise({ color: 'pink', at: 0.004, a: 0.002, d: 0.08, g: 0.55, bp: { f: 1700, to: 450, ft: 0.07, q: 6 } });
+    v.thump(160, 80, 0.06, 0.4, { at: 0.002 });
+  } },
+  // Roar: bossRoar's recipe made smaller and wilder: higher voice, faster open-mouth formant
+  // sweep, more breath, under a second long.
+  beastRoar: { vary: 0.05, pri: 2, rev: 0.3, fn(v) {
+    const D = v.r(0.85, 0.95);
+    const bank = v.bank([
+      [[[0, 480], [0.25, 820], [0.6, 640], [D, 450]], 5, 2.2],
+      [[[0, 950], [0.25, 1400], [0.6, 1150], [D, 850]], 6, 1.4],
+      [[[0, 2600], [0.3, 3000], [D, 2300]], 8, 0.6],
+    ]);
+    const gp = [[0, 0], [0.08, 0.75], [0.25, 1], [0.6, 0.8], [D, 0]];
+    v.tone({ type: 'sawtooth', unison: [-25, -8, 9, 22], fp: [[0, 85], [0.25, 125], [0.6, 105], [D, 70]], gp, g: 1, drive: 1.3, am: { rate: v.r(32, 40), depth: 0.4 }, vib: { rate: 7, depth: 35 }, dest: bank });
+    v.noise({ color: 'pink', gp, g: 0.8, dest: bank });
+    v.noise({ gp, g: 0.12, hp: 4000 });
+    v.tone({ fp: [[0, 45], [0.25, 62], [D, 38]], gp, g: 0.35 });
+    v.noise({ color: 'brown', gp, g: 0.3, lp: 500 });
+  } },
+  // Screech: a high cry that rises and cracks: fast-vibrato saws and an FM rasp through two
+  // narrow upper formants.
+  beastScreech: { vary: 0.06, rev: 0.15, fn(v) {
+    const D = v.r(0.36, 0.42), pk = D * 0.35, gp = [[0, 0], [0.03, 0.8], [pk, 1], [D * 0.7, 0.6], [D, 0]];
+    const bank = v.bank([[[[0, 2200], [pk, 3200], [D, 2400]], 6, 1.6], [[[0, 3800], [pk, 4800], [D, 4000]], 7, 0.9]]);
+    const fp = [[0, 1300], [pk, 2100], [D, 1500]];
+    v.tone({ type: 'sawtooth', unison: [-30, 25], fp, gp, g: 0.9, drive: 1, vib: { rate: v.r(28, 36), depth: 70 }, am: { rate: 47, depth: 0.35 }, dest: bank });
+    v.fm({ fp, f: 1300, ratio: 1.51, index: 2.2, index1: 1, gp, g: 0.1, vib: { rate: 31, depth: 60 } });
+    v.noise({ gp, g: 0.5, dest: bank });
+  } },
+  // Hoof: a dry low knock with a hard edge, quiet because a gallop repeats it four or more times
+  // a second. Yields its voice under load.
+  beastHoof: { vary: 0.12, pri: 0, fn(v) {
+    v.thump(v.r(130, 160), 60, 0.06, 0.8);
+    v.noise({ color: 'brown', a: 0.001, d: 0.035, g: 0.6, lp: v.r(600, 900) });
+    v.noise({ a: 0.0005, d: 0.012, g: 0.2, bp: { f: v.r(1100, 1500), q: 2 } });
+  } },
+  // Wing beat: a soft band of low air that swells and falls, no transient. Frequent and quiet.
+  beastWing: { vary: 0.1, pri: 0, fn(v) {
+    const D = v.r(0.13, 0.16), pk = D * 0.35, gp = [[0, 0], [pk, 1], [D, 0]];
+    v.noise({ color: 'pink', gp, g: 0.8, bp: { pts: [[0, 220], [pk, v.r(650, 800)], [D, 260]], q: 0.8 } });
+    v.tone({ fp: [[0, 55], [pk, 80], [D, 50]], gp, g: 0.25 });
+  } },
+  // Hiss: high breath noise with a rattle (a noise band gated by a square LFO) under it.
+  beastHiss: { vary: 0.05, fn(v) {
+    const D = v.r(0.46, 0.52), gp = [[0, 0], [0.05, 1], [D * 0.6, 0.75], [D, 0]];
+    v.noise({ gp, g: 0.5, bp: { pts: [[0, 4500], [D, 6000]], q: 0.7 } });
+    v.noise({ gp, g: 0.25, hp: 7000 });
+    v.noise({ gp, g: 0.45, bp: { f: v.r(2800, 3600), q: 1.5 }, am: { rate: v.r(26, 34), depth: 0.9, type: 'square' } });
+    v.noise({ color: 'pink', gp: [[0, 0], [0.04, 1], [0.15, 0]], g: 0.15, bp: { f: 1500, q: 1 } });
+  } },
+  // Stomp: a deep driven drop and a rumble of brown noise; lower and longer than landHeavy.
+  beastStomp: { vary: 0.06, rev: 0.1, fn(v) {
+    v.click({ g: 0.25, hp: 1200, d: 0.012 });
+    v.thump(v.r(80, 92), 28, 0.35, 1, { drive: 0.6, h: 0.02 });
+    v.tone({ f: 36, a: 0.005, h: 0.04, d: 0.35, g: 0.4 });
+    v.noise({ color: 'brown', a: 0.001, d: 0.3, g: 0.9, lp: { f: 1500, to: 150 }, am: { rate: 17, depth: 0.3 } });
+    v.noise({ color: 'pink', a: 0.002, d: 0.12, g: 0.25, bp: { f: 500, q: 1 } });
+  } },
+
+  // ----- Weapon forms: each owns a register and a shape the base swings do not use -----
+  // Twin blades: a thin, very short, high noise slit and a faint whistle. No low end at all.
+  swingTwin: { vary: 0.1, pri: 0, fn(v) {
+    const D = v.r(0.09, 0.11), pk = D * 0.4, gp = [[0, 0], [pk, 1], [D, 0]];
+    v.noise({ gp, g: 0.7, bp: { pts: [[0, 3000], [pk, 7500], [D, 4500]], q: 2.5 } });
+    v.tone({ fp: [[0, 1100], [pk, 1900], [D, 1400]], gp, g: 0.05 });
+  } },
+  // Greatblade: a slow dark whoosh with a moaning low saw and sub riding the same arc.
+  swingGreat: { vary: 0.05, fn(v) {
+    const D = v.r(0.44, 0.48), pk = D * 0.55, gp = [[0, 0], [pk, 1], [D, 0]];
+    v.whoosh({ d: D, g: 0.8, color: 'pink', lo: 140, hi: v.r(800, 950), end: 180, q: 1, peak: 0.55 });
+    v.tone({ type: 'sawtooth', unison: [-14, 0, 13], fp: [[0, 48], [pk, 78], [D, 42]], gp, g: 0.18, drive: 0.4, lp: { pts: [[0, 200], [pk, 900], [D, 200]] }, vib: { rate: 4, depth: 25 } });
+    v.tone({ type: 'triangle', fp: [[0, 95], [pk, 150], [D, 85]], gp, g: 0.14, bp: { pts: [[0, 300], [pk, 600], [D, 300]], q: 4 }, vib: { rate: 4, depth: 25 } });
+    v.tone({ fp: [[0, 34], [pk, 56], [D, 30]], gp, g: 0.35 });
+  } },
+  // Staff: air chopped into an accelerating flutter (about 14 to 24 pulses a second) by the
+  // gain points, so it implies rotation; swingSpin by contrast has five broad sweeps.
+  swingStaff: { vary: 0.06, fn(v) {
+    const D = v.r(0.33, 0.37), gp = [[0, 0]];
+    for (let t = 0, rate = 14; t + 1 / rate < D; rate = 14 + 10 * (t / D)) {
+      const env = Math.sin(Math.PI * Math.min(1, t / D + 0.08));
+      t += 1 / rate;
+      gp.push([t - 0.5 / rate, env], [t, 0.15 * env]);
+    }
+    gp.push([D, 0]);
+    const bp = { pts: [[0, 700], [D * 0.5, 1900], [D, 900]], q: 1.8 };
+    v.noise({ gp, g: 0.75, bp });
+    v.noise({ color: 'pink', gp, g: 0.3, bp: { pts: [[0, 250], [D * 0.5, 500], [D, 300]], q: 1.2 } });
+    v.tone({ type: 'triangle', fp: [[0, 120], [D * 0.5, 190], [D, 130]], gp, g: 0.1 });
+  } },
+
+  // ----- Terrain -----
+  // Light platform on: a click and a clean sine sweeping up a fifth-plus, with a soft octave.
+  platformOn: { vary: 0.02, rev: 0.2, fn(v) {
+    v.click({ g: 0.3, hp: 3500, d: 0.005 });
+    const gp = [[0, 0], [0.01, 1], [0.18, 0.7], [0.3, 0]];
+    v.tone({ fp: [[0, 520], [0.14, 1040], [0.3, 1100]], gp, g: 0.2 });
+    v.tone({ type: 'triangle', fp: [[0, 1040], [0.14, 2080], [0.3, 2200]], gp, g: 0.05 });
+    v.fm({ at: 0.12, f: 2200, ratio: 2, index: 0.5, index1: 0.05, a: 0.002, d: 0.17, g: 0.04 });
+  } },
+  // Light platform off: the same tone falling, chopped into a slowing stutter.
+  platformOff: { vary: 0.03, fn(v) {
+    const gate = [[0, 0]];
+    let t = 0;
+    for (let i = 0; i < 6; i++) {
+      const on = 0.022 + i * 0.006, off = 0.012 + i * 0.008, g = 1 - i * 0.13;
+      gate.push([t + 0.001, g], [t + on, g], [t + on + 0.001, 0]);
+      t += on + off;
+    }
+    v.tone({ fp: [[0, 1100], [t, 420]], gp: gate, g: 0.2 });
+    v.tone({ type: 'square', fp: [[0, 550], [t, 210]], gp: gate, g: 0.05, lp: 2400 });
+  } },
+  // Floor panel arming: a mains-like buzz and a crackle that both climb toward the discharge.
+  hazardArm: { vary: 0.02, pri: 2, fn(v) {
+    const D = 0.8, gp = [[0, 0], [0.1, 0.25], [0.6, 0.7], [0.76, 1], [D, 0]];
+    v.tone({ type: 'sawtooth', unison: [-10, 10], fp: [[0, 60], [D, 120]], gp, g: 0.2, drive: 0.6, bp: { pts: [[0, 400], [D, 2400]], q: 2 } });
+    v.tone({ type: 'square', fp: [[0, 120], [D, 240]], gp, g: 0.04, lp: 1500, am: { rate: 50, depth: 0.4 } });
+    v.tone({ fp: [[0, 400], [D, 1600]], gp, g: 0.05 });
+    v.crackle({ gp: [[0, 0], [0.3, 0.2], [D - 0.02, 1], [D, 0]], g: 0.4, bp: { pts: [[0, 2000], [D, 5000]], q: 0.8 } });
+  } },
+  // Panel discharge: a hard crack, a bright crackle burst and a crushed 100 Hz buzz tail.
+  hazardZap: { vary: 0.05, pri: 2, rev: 0.12, fn(v) {
+    v.click({ g: 0.8, hp: 1500, d: 0.012 });
+    v.crackle({ d: 0.2, g: 0.8, bp: { f: 3500, q: 0.6 } });
+    v.noise({ a: 0.0005, d: 0.05, g: 0.45, hp: 3000 });
+    v.thump(200, 90, 0.08, 0.5);
+    v.tone({ type: 'square', unison: [0, 25], f: v.r(95, 110), a: 0.002, h: 0.05, d: 0.25, g: 0.12, curve: 'crush', lp: { f: 3500, to: 700 }, am: { rate: 50, depth: 0.5, type: 'square' } });
+  } },
+  // Charged wall hit: the zap's crack over wallSplat-style meat.
+  wallShock: { vary: 0.06, rev: 0.1, fn(v) {
+    v.click({ g: 0.6, hp: 2000, d: 0.01 });
+    v.crackle({ d: 0.22, g: 0.6, bp: { f: 3200, q: 0.7 } });
+    v.thump(125, 42, 0.22, 0.9, { drive: 0.45, at: 0.004 });
+    v.noise({ color: 'brown', a: 0.001, d: 0.14, g: 0.6, lp: 1200 });
+    v.noise({ a: 0.001, d: 0.05, g: 0.35, bp: { f: 1400, q: 1.2 } });
+    v.tone({ type: 'square', f: 110, a: 0.002, d: 0.18, g: 0.06, curve: 'crush', lp: 2500 });
+  } },
+
+  // ----- Bonds between enemies -----
+  // Tether break: a plucked, bent string (bright saw through a falling bandpass) and a glass tail.
+  tetherSnap: { vary: 0.05, rev: 0.25, fn(v) {
+    v.click({ g: 0.4, hp: 3000, d: 0.005 });
+    v.tone({ type: 'sawtooth', fp: [[0, 880], [0.025, 600], [0.25, 560]], a: 0.0008, d: 0.22, g: 0.14, bp: { f: 2600, to: 900, ft: 0.18, q: 2 } });
+    v.tone({ f: 1760, to: 1200, ft: 0.03, a: 0.0008, d: 0.08, g: 0.05 });
+    v.fm({ at: 0.015, f: 2794, ratio: 3.5, index: 1, index1: 0.05, a: 0.002, d: 0.26, g: 0.05 });
+    v.shards(3, 0.06, 3500, 6500, 0.04, 0.01);
+  } },
+  // Enrage: a driven snarl on a vowel that opens as it rises, peaking late.
+  enrage: { vary: 0.04, pri: 2, rev: 0.2, fn(v) {
+    const D = 0.5, gp = [[0, 0], [0.32, 0.8], [0.4, 1], [D, 0]];
+    const bank = v.bank([[[[0, 450], [0.4, 900], [D, 700]], 5, 2], [[[0, 1000], [0.4, 1700], [D, 1300]], 6, 1.3], [[[0, 2500], [D, 3000]], 8, 0.5]]);
+    v.tone({ type: 'sawtooth', unison: [-22, 0, 20], fp: [[0, 85], [0.4, 230], [D, 190]], gp, g: 1, drive: 1.6, am: { rate: 34, depth: 0.45 }, vib: { rate: 8, depth: 40 }, dest: bank });
+    v.noise({ color: 'pink', gp, g: 0.6, dest: bank });
+    v.crackle({ gp, g: 0.35, bp: { pts: [[0, 2000], [0.4, 4500]], q: 0.7 } });
+    v.tone({ fp: [[0, 42], [0.4, 115], [D, 95]], gp, g: 0.2 });
+  } },
+  // Rider thrown: a body thud, a ragged scrape of gated noise, then a smaller second thud.
+  dismount: { vary: 0.07, fn(v) {
+    v.thump(v.r(120, 140), 50, 0.12, 0.8, { drive: 0.3 });
+    v.noise({ color: 'brown', a: 0.001, d: 0.07, g: 0.5, lp: 1000 });
+    const gate = [[0, 0]];
+    for (let i = 0; i < 8; i++) {
+      const t = 0.06 + i * 0.026 + v.r(0, 0.008), g = 1 - i * 0.1;
+      gate.push([t, 0.2 * g], [t + 0.004, g], [t + 0.018, 0.3 * g]);
+    }
+    gate.push([0.3, 0]);
+    v.noise({ gp: gate, g: 0.35, bp: { f: v.r(1300, 1800), q: 1.2 } });
+    v.thump(105, 45, 0.09, 0.45, { at: 0.17 });
+    v.noise({ color: 'brown', at: 0.17, a: 0.001, d: 0.05, g: 0.3, lp: 900 });
+  } },
+  // Pack rally: a wolf-ish howl, a voiced sine and saw climbing an "oo" to "ah" formant pair.
+  packHowl: { vary: 0.03, pri: 2, rev: 0.35, fn(v) {
+    const D = v.r(0.86, 0.94), gp = [[0, 0], [0.12, 0.55], [0.55, 1], [0.75, 0.8], [D, 0]];
+    const fp = [[0, 330], [0.15, 470], [0.55, 640], [D, 560]];
+    const bank = v.bank([[[[0, 450], [0.55, 850], [D, 750]], 6, 2], [[[0, 1100], [0.55, 1500], [D, 1350]], 7, 1]]);
+    v.tone({ type: 'sawtooth', unison: [-8, 8], fp, gp, g: 0.7, vib: { rate: 5.5, depth: 30 }, dest: bank });
+    v.tone({ type: 'triangle', fp, gp, g: 0.16, vib: { rate: 5.5, depth: 30 } });
+    v.noise({ gp, g: 0.12, dest: bank });
+  } },
+  // Pack breaks: a falling, wavering whimper that loses breath as it goes.
+  nerveBreak: { vary: 0.04, rev: 0.2, fn(v) {
+    const D = v.r(0.56, 0.62), gp = [[0, 0], [0.04, 1], [0.2, 0.75], [D * 0.75, 0.35], [D, 0]];
+    const fp = [[0, 950], [0.08, 1000], [D, 360]];
+    const bank = v.bank([[[[0, 900], [D, 450]], 6, 1.8], [[[0, 2000], [D, 1100]], 7, 0.8]]);
+    v.tone({ type: 'sawtooth', unison: [-10, 10], fp, gp, g: 0.6, vib: { rate: 7, depth: 60 }, am: { rate: 6, depth: 0.35 }, dest: bank });
+    v.tone({ type: 'triangle', fp, gp, g: 0.12, vib: { rate: 7, depth: 60 } });
+    v.noise({ gp, g: 0.25, bp: { pts: [[0, 3000], [D, 900]], q: 1 } });
+  } },
+
+  // ----- Bosses and polish -----
+  // Room change: two urgent whooping pulses of a square dyad over a low square.
+  alarm: { vary: 0, pri: 2, rev: 0.15, fn(v) {
+    for (const at of [0, 0.3]) {
+      v.tone({ at, type: 'square', unison: [0, 30], fp: [[0, 620], [0.2, 980]], a: 0.004, h: 0.18, d: 0.07, g: 0.07, lp: 3500 });
+      v.tone({ at, fp: [[0, 620], [0.2, 980]], a: 0.004, h: 0.18, d: 0.07, g: 0.12 });
+      v.tone({ at, type: 'square', f: 110, a: 0.004, h: 0.18, d: 0.06, g: 0.06, lp: 600 });
+    }
+  } },
+  // Twin bosses swap: two glassy notes, high then a fourth down, with a flick of air between.
+  twinSwap: { vary: 0, rev: 0.3, fn(v) {
+    v.fm({ f: mtof(88), ratio: 3.5, index: 1.2, index1: 0.05, a: 0.001, d: 0.14, g: 0.09 });
+    v.tone({ f: mtof(88) * 2, a: 0.001, d: 0.08, g: 0.025 });
+    v.noise({ gp: [[0, 0], [0.07, 1], [0.09, 0]], g: 0.08, bp: { pts: [[0, 6000], [0.09, 2500]], q: 2 } });
+    v.fm({ at: 0.09, f: mtof(83), ratio: 3.5, index: 1.2, index1: 0.05, a: 0.001, d: 0.2, g: 0.09 });
+    v.tone({ at: 0.09, f: mtof(83) * 2, a: 0.001, d: 0.12, g: 0.025 });
+  } },
+  // Boss killing blow: a reverse swell sucked up into a huge driven boom, then a long bright
+  // bell and air tail. Built for slow motion, where the master lowpass darkens it further.
+  finisher: { vary: 0, pri: 2, rev: 0.45, fn(v) {
+    const S = 0.36, gp = [[0, 0], [S * 0.7, 0.4], [S, 1], [S + 0.01, 0]];
+    v.noise({ gp, g: 0.45, bp: { pts: [[0, 400], [S, 5000]], q: 1.3 } });
+    v.tone({ type: 'sawtooth', unison: [-10, 10], fp: [[0, 80], [S, 240]], gp, g: 0.08, lp: { pts: [[0, 300], [S, 3000]] } });
+    v.click({ at: S, g: 0.4, hp: 1500, d: 0.015 });
+    v.thump(72, 24, 1.0, 1, { at: S, drive: 0.9, h: 0.06 });
+    v.tone({ at: S, f: 32, a: 0.01, h: 0.15, d: 1.1, g: 0.5 });
+    v.noise({ color: 'brown', at: S, a: 0.001, d: 0.7, g: 0.9, lp: { f: 3000, to: 100 } });
+    v.fm({ at: S, f: 1568, ratio: 2.414, index: 3, index1: 0.2, it: 0.5, a: 0.002, d: 1.2, g: 0.12 });
+    v.tone({ at: S, f: 3136, unison: [0, 11], a: 0.03, d: 1.15, g: 0.04, am: { rate: 9, depth: 0.4 } });
+    v.noise({ at: S, gp: [[0, 0], [0.1, 1], [1.2, 0]], g: 0.08, hp: 6000 });
+    v.crackle({ at: S, d: 0.8, g: 0.35, bp: { f: 2600, q: 0.6 } });
+  } },
+  // Menu hover: a tiny soft sine tick, no noise click, under uiMove.
+  uiHover: { vary: 0, pri: 0, fn(v) {
+    v.tone({ f: 1800, a: 0.002, d: 0.018, g: 0.2 });
+  } },
+  // Parry lesson passed: three quick rising bells, a major triad.
+  tutorialDone: { vary: 0, rev: 0.3, fn(v) {
+    [84, 88, 91].forEach((m, i) => v.bell(m, { at: i * 0.08, d: i === 2 ? 0.36 : 0.22, g: 0.1 }));
+  } },
+
+  // ----- Player techniques -----
+  // Launcher pull: air drawn in, falling in pitch and growing louder toward a hard stop.
+  pullIn: { vary: 0.05, pri: 2, fn(v) {
+    const D = 0.35, gp = [[0, 0], [D * 0.5, 0.4], [D * 0.9, 1], [D, 0]];
+    v.noise({ gp, g: 0.55, bp: { pts: [[0, 5000], [D, 700]], q: 1.8 } });
+    v.noise({ color: 'pink', gp, g: 0.3, bp: { pts: [[0, 1200], [D, 250]], q: 1.2 } });
+    v.tone({ fp: [[0, 420], [D, 110]], gp, g: 0.1 });
+    v.thump(120, 60, 0.06, 0.35, { at: D - 0.02 });
+  } },
+  // Saber pins to a wall: a hard thunk and a quivering steel ring.
+  pin: { vary: 0.05, rev: 0.2, fn(v) {
+    v.click({ g: 0.6, hp: 2000, d: 0.01 });
+    v.thump(210, 90, 0.1, 0.8, { drive: 0.4 });
+    v.noise({ color: 'brown', a: 0.001, d: 0.06, g: 0.5, lp: 1400 });
+    v.fm({ f: v.r(1180, 1300), ratio: 1.41, index: 3, index1: 0.3, a: 0.001, d: 0.3, g: 0.12, am: { rate: 18, depth: 0.5 } });
+    v.tone({ f: 2730, a: 0.001, d: 0.15, g: 0.03 });
+  } },
+  // Reflected force: a bright clang with a fast upward sweep riding on it.
+  reflect: { vary: 0.03, pri: 2, rev: 0.25, fn(v) {
+    v.click({ g: 0.6, hp: 2500, d: 0.008 });
+    v.fm({ f: 1760, ratio: 2.76, index: 3, index1: 0.2, a: 0.001, d: 0.3, g: 0.13 });
+    v.tone({ type: 'sawtooth', unison: [-9, 9], fp: [[0, 400], [0.12, 2400]], gp: [[0, 0], [0.01, 1], [0.12, 0.8], [0.16, 0]], g: 0.08, bp: { pts: [[0, 800], [0.12, 4000]], q: 2 } });
+    v.noise({ gp: [[0, 0], [0.01, 1], [0.12, 0.6], [0.16, 0]], g: 0.25, bp: { pts: [[0, 1500], [0.12, 6000]], q: 1.5 } });
+    v.thump(260, 140, 0.08, 0.45);
+  } },
 };
 
 // Mix: per-sound voice gain, set from measured dry peaks (node tools/audio-test.js) toward
@@ -1046,6 +1317,12 @@ const MIX = {
   pickupHealth: .47, pickupFocus: 1.38, draftOpen: 1.7, draftPick: .48, powerSwap: .48,
   powerNova: .48, powerStasis: .98, powerMend: .95, powerArc: 1, powerFlash: 1.8, powerFlashEnd: .6, powerMirror: 1.86, powerJudgment: 1.07, powerCrescent: .95,
   crit: 1.55, burn: .25, summon: 1, championIntro: .51, sectorUp: .9, secondWind: .58, anomaly: 2,
+  beastGrowl: .42, beastBite: .8, beastRoar: .31, beastScreech: .48, beastHoof: .27, beastWing: .32, beastHiss: .44, beastStomp: .46,
+  swingTwin: .54, swingGreat: .64, swingStaff: 1.07,
+  platformOn: .71, platformOff: .78, hazardArm: 1.41, hazardZap: .46, wallShock: .5,
+  tetherSnap: 1, enrage: .37, dismount: .55, packHowl: .68, nerveBreak: .54,
+  alarm: 1.53, twinSwap: 2.19, finisher: .42, uiHover: .32, tutorialDone: 2.2,
+  pullIn: .9, pin: .47, reflect: .65,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -1977,6 +2254,8 @@ class Engine {
       const comp = c.createDynamicsCompressor(), lim = c.createDynamicsCompressor();
       setParams(comp, { threshold: -14, knee: 10, ratio: 3, attack: 0.004, release: 0.2 });
       setParams(lim, { threshold: -3, knee: 0, ratio: 20, attack: 0.001, release: 0.1 });
+      this.comp = comp; // read by tools/audio-test for gain reduction
+      this.lim = lim;
       const pre = gainNode(c, 0.5), clip = c.createWaveShaper();
       clip.curve = clipCurve();
       out.connect(comp);
