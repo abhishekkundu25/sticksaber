@@ -4,7 +4,11 @@ A side-view action game for the browser. You are a stick figure with an energy s
 
 The game has the full player moveset, eight enemy types, two bosses, three arena families with seeded variants, and a training room. Every run is generated from a seed, so no two climbs are the same. The design notes are in [docs/DESIGN.md](docs/DESIGN.md).
 
-## Run it
+## Play it
+
+https://abhishekkundu25.github.io/sticksaber/
+
+## Run it locally
 
 ```
 npm start
