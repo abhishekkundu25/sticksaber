@@ -8,6 +8,17 @@ const COMBOS = [
   ['light', 'light', 'light', 'light'], ['light', 'light', 'heavy'], ['heavy'], ['light', 'heavy'],
   ['down+heavy', 'light', 'light', 'heavy'], ['light', 'light', 'light', 'heavy'], ['dash', 'light', 'light'], ['jump', 'down+heavy'],
 ];
+// Showman strings for the title screen. A trailing `!` holds the button (rise with a launcher), `!!` charges it.
+const SHOW = [
+  ['light', 'light', 'heavy!', 'light', 'light', 'light', 'heavy'],
+  ['light', 'light', 'light', 'heavy'],
+  ['jump', 'down+heavy', 'light', 'light'],
+  ['dash', 'light', 'light', 'heavy!', 'light', 'light', 'heavy'],
+  ['light', 'light', 'light', 'light'],
+  ['heavy!!', 'light', 'light'],
+  ['down+heavy!', 'light', 'light', 'light', 'heavy'],
+];
+const BURSTABLE = { hitstun: 1, ragdoll: 1, recoil: 1, stagger: 1 };
 
 export class BotInput {
   constructor(world, skill = 0.8) {
@@ -15,6 +26,7 @@ export class BotInput {
     this.down = {}; this.pressedAt = {}; this.hold = {};
     for (const a of ACTIONS) { this.down[a] = false; this.pressedAt[a] = -9; this.hold[a] = 0; }
     this.script = []; this.wait = 0; this.seen = new Map(); this.repeat = null;
+    this.show = false; // title-screen mode: flashier strings and free use of Focus
   }
   held(a) { return this.down[a]; }
   axisX() { return (this.down.right ? 1 : 0) - (this.down.left ? 1 : 0); }
@@ -62,6 +74,16 @@ export class BotInput {
     // Sometimes burst out of a beating, and open Overdrive when the meter is full and something is in reach.
     if ((p.state === 'hitstun' || p.state === 'ragdoll') && w.focus >= 200 && rng() < this.skill * dt * 3) this.press('special');
     if (w.focus >= w.maxFocus && tgt && td < 320 && p.state === 'free' && rng() < this.skill * dt * 6) this.press('overdrive');
+    if (this.show) {
+      // Never take a beating quietly, and send the saber through anything lined up ahead, bodies included.
+      if (BURSTABLE[p.state] && w.focus >= 100 && rng() < dt * 12) this.press('special');
+      if (p.armed && w.focus >= 100 && w.overdrive <= 0 && p.state === 'free' && p.onGround && rng() < dt * 1.1) {
+        for (const e of w.fighters) {
+          const ahead = (e.x - p.x) * p.facing;
+          if (e.team === 1 && !e.phantom && (!e.dead || e.deadT < 2.5) && ahead > 140 && ahead < 460) { this.press('special'); this.wait = 0.4; this.script.length = 0; return; }
+        }
+      }
+    }
     if (p.riposteT > 0 && rng() < this.skill) { this.press('light'); return; }
     if (this.down.guard || !tgt) return;
     if ((this.wait -= dt) > 0) return;
@@ -71,14 +93,21 @@ export class BotInput {
     if (channel && td > 260 && w.focus >= 100 && p.armed) { this.press('special'); this.wait = 0.5; return; }
     if (tgt.y < -400) { this.down[p.x > 0 ? 'left' : 'right'] = true; return; } // boss is airborne: keep moving
     const reach = 96 + 34 * (tgt.scale - 1);
-    if (td > reach) { this.down[dir] = true; if (td > 420 && p.dashCd <= 0 && rng() < dt * 3) this.press('dash'); return; }
+    if (td > reach) { this.down[dir] = true; if (td > (this.show ? 260 : 420) && p.dashCd <= 0 && rng() < dt * (this.show ? 6 : 3)) this.press('dash'); return; }
     if (!this.script.length) {
       // `repeat` forces the same string every time, to check that the game punishes it.
-      this.script = [...(this.repeat || COMBOS[(rng() * COMBOS.length) | 0])];
+      const pool = this.show ? SHOW : COMBOS;
+      this.script = [...(this.repeat || pool[(rng() * pool.length) | 0])];
+      if (this.show && tgt.def.flying && !tgt.rag) this.script = ['jump', 'light', 'light', 'heavy']; // go up after a drone
       if (Math.abs(dx) > 8) p.facing = dx > 0 ? 1 : -1;
     }
     const step = this.script.shift();
-    for (const a of step.split('+')) this.press(a, a === 'down' ? 0.2 : 0.07);
-    this.wait = step.includes('jump') ? 0.28 : this.script.length ? 0.2 : 0.42;
+    let longest = 0;
+    for (const token of step.split('+')) {
+      const a = token.replace(/!+$/, ''), bangs = token.length - a.length;
+      const hold = bangs === 2 ? 0.56 : bangs === 1 ? 0.34 : a === 'down' ? 0.2 : 0.07;
+      this.press(a, hold); if (hold > longest) longest = hold;
+    }
+    this.wait = longest > 0.5 ? 0.78 : longest > 0.3 ? 0.27 : step.includes('jump') ? 0.28 : this.script.length ? 0.2 : 0.42;
   }
 }

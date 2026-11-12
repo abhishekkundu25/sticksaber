@@ -61,16 +61,44 @@ function toMenu() {
   director.startTraining();
   director.hintT = 0; world.bannerMsg = null;
   world.clearEnemies();
-  world.input = new BotInput(world, 0.9);
+  world.input = new BotInput(world, 0.78);
+  world.input.show = true;
+  demoQueue.length = 0; demoGap = 0; demoAlive = 0;
   buildMenu();
 }
+// The title-screen fight is a showcase: a scripted player with a fast-filling Focus meter takes on
+// one small group after another and uses everything it has.
+const DEMO_WAVES = [
+  ['initiate', 'initiate', 'initiate'], ['initiate', 'initiate', 'marksman'], ['duelist', 'initiate'], ['bulwark', 'initiate', 'initiate'],
+  ['lancer', 'initiate', 'initiate'], ['wraith', 'drone', 'initiate'], ['initiate', 'initiate', 'initiate', 'initiate'],
+  ['drone', 'drone', 'initiate'], ['duelist', 'lancer'],
+];
+const demoQueue = [];
+let demoGap = 0, demoAlive = 0;
 function demo(dt) {
+  const p = world.player;
   world.input.tick(dt);
-  if (!world.fighters.some((f) => f.team === 1)) {
-    const p = world.player, side = p.x > 0 ? -1 : 1;
-    world.spawnEnemy(pick(['initiate', 'initiate', 'duelist', 'bulwark', 'lancer', 'wraith']), p.x + side * 420);
-    if (Math.random() < 0.5) world.spawnEnemy(pick(['initiate', 'drone']), p.x - side * 380);
+  if (!p.dead) {
+    p.hp = Math.min(p.maxHp, p.hp + 30 * dt);
+    if (world.overdrive <= 0) world.focus = Math.min(world.maxFocus, world.focus + 30 * dt);
   }
+  for (let i = demoQueue.length - 1; i >= 0; i--) {
+    const s = demoQueue[i];
+    if ((s.t -= dt) > 0) continue;
+    world.spawnEnemy(s.kind, p.x + s.dx, true, s.elite ? { elite: s.elite } : null);
+    demoQueue.splice(i, 1);
+  }
+  const alive = world.countEnemies();
+  // A beat of slow motion as each group's last fighter falls.
+  if (demoAlive > 0 && alive === 0 && !demoQueue.length) world.slow(0.3, 0.55);
+  demoAlive = alive;
+  if (alive || demoQueue.length) { demoGap = 0.7; return; }
+  if ((demoGap -= dt) > 0) return;
+  let side = p.x > 0 ? -1 : 1;
+  pick(DEMO_WAVES).forEach((kind, i) => {
+    demoQueue.push({ kind, dx: side * (380 + Math.random() * 160), t: i * 0.45, elite: kind !== 'initiate' && kind !== 'drone' && Math.random() < 0.25 ? pick(['swift', 'armored', 'volatile']) : null });
+    side = -side;
+  });
 }
 function startRun(floor = 1, seed = fixedSeed || undefined) { world.input = input; app.state = 'play'; director.startRun(floor - 1, seed); }
 function startTraining() { world.input = input; app.state = 'play'; director.startTraining(); }

@@ -224,7 +224,8 @@ export class Hud {
   menu(ctx, W, H, app) {
     if (!this.menuGrad || this.menuH !== H) {
       const gr = this.menuGrad = ctx.createLinearGradient(0, 0, 0, H); this.menuH = H;
-      gr.addColorStop(0, '#04060be0'); gr.addColorStop(0.42, '#04060b70'); gr.addColorStop(0.7, '#04060b30'); gr.addColorStop(0.84, '#04060bb0'); gr.addColorStop(1, '#04060bf0');
+      // Dark behind the title and the menu row, clear across the band where the fight happens.
+      gr.addColorStop(0, '#04060bd0'); gr.addColorStop(0.3, '#04060b50'); gr.addColorStop(0.46, '#04060b10'); gr.addColorStop(0.8, '#04060b10'); gr.addColorStop(0.9, '#04060ba8'); gr.addColorStop(1, '#04060bf0');
     }
     ctx.fillStyle = this.menuGrad; ctx.fillRect(0, 0, W, H);
     const cx = W / 2, ty = 150;
