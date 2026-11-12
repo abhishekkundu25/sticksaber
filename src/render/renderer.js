@@ -12,6 +12,7 @@ import { BONES } from '../game/ragdoll.js';
 
 const BODY = '#06080c';
 const AURA = { swift: '#ffe45c', armored: '#6fb6ff', volatile: '#ff7a2e' };
+const FAR = [4, 5, 8, 9], TORSO = [1, 6, 7], ARM = [2, 3];
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 
 export class Renderer {
@@ -313,6 +314,13 @@ export class Renderer {
       const kq = Math.min(1, f.vent) * (0.6 + Math.sin(t * 14) * 0.2);
       g.globalAlpha = kq * 0.5; g.drawImage(glowSprite('#bfe6ff'), f.tx - 60, f.ty - 70, 120, 120);
     }
+    if (f.isPlayer && world.overdrive > 0) {
+      // Overdrive aura: a pulsing halo and a ring on the floor that shrinks as the time runs out.
+      const kq = world.overdrive / 6, pulse = 0.7 + Math.sin(t * 16) * 0.3;
+      g.globalAlpha = 0.3 * pulse; g.drawImage(glowSprite('#56e9ff'), f.cx - 90, f.cy - 100, 180, 200);
+      g.strokeStyle = '#56e9ff'; g.lineWidth = 3; g.globalAlpha = 0.8 * pulse;
+      g.beginPath(); g.ellipse(f.x, f.y - 2, 26 + 46 * kq, (26 + 46 * kq) * 0.18, 0, 0, TAU); g.stroke();
+    }
     if (f.broken) {
       const kq = 0.5 + Math.sin(t * 12) * 0.3;
       g.globalAlpha = kq * 0.5; g.drawImage(glowSprite('#ffd36b'), j[0] - 34, j[1] - 34, 68, 68);
@@ -489,21 +497,23 @@ export class Renderer {
 
     if (f.ribbons.length) this.ribbon(ctx, f, 1, false);
 
-    const alive = f.rag ? f.rag.alive : null;
-    const bone = (i) => !alive || alive[i];
+    // A limp body draws whatever bones its ragdoll currently has, so chopped pieces stay visible.
+    const rg = f.rag;
     const seg = (i) => { const a = BONES[i][0] * 2, b = BONES[i][1] * 2; ctx.moveTo(j[a], j[a + 1]); ctx.lineTo(j[b], j[b + 1]); };
     const group = (ids, rimA) => {
-      ctx.beginPath(); for (const i of ids) if (bone(i)) seg(i);
+      ctx.beginPath();
+      if (rg) { if (ids === TORSO) for (const [a, b] of rg.bones) { ctx.moveTo(rg.x[a], rg.y[a]); ctx.lineTo(rg.x[b], rg.y[b]); } }
+      else for (const i of ids) seg(i);
       ctx.globalAlpha = alpha * rimA; ctx.strokeStyle = rim; ctx.lineWidth = lw + 2.6; ctx.stroke();
       ctx.globalAlpha = alpha; ctx.strokeStyle = body; ctx.lineWidth = lw; ctx.stroke();
     };
-    group([4, 5, 8, 9], 0.5);            // far arm and leg, dimmer rim for depth
+    group(FAR, 0.5);                     // far arm and leg, dimmer rim for depth
     if (d.deco === 'bulwark' || d.deco === 'horns' || d.deco === 'forge') {
       const r = (d.deco === 'bulwark' ? 10 : d.deco === 'forge' ? 15 : 13) * s;
       ctx.beginPath(); ctx.arc(j[2], j[3] + 2 * s, r, 0, TAU);
       ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = rim; ctx.lineWidth = 1.4; ctx.stroke();
     }
-    group([1, 6, 7], 1);                 // spine and near leg
+    group(TORSO, 1);                     // spine and near leg (or the whole ragdoll)
     const hr = 9 * s * (d.deco === 'horns' || d.deco === 'forge' ? 0.8 : 1);
     ctx.beginPath(); ctx.arc(j[0], j[1], hr, 0, TAU);
     ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = rim; ctx.lineWidth = 1.5; ctx.stroke();
@@ -523,7 +533,7 @@ export class Renderer {
         ctx.strokeStyle = '#aeb9c8'; ctx.lineWidth = 4.2 * (d.blade.wide ? 1.5 : 1); ctx.stroke();
       }
     }
-    group([2, 3], 1);
+    group(ARM, 1);
     ctx.restore();
   }
 

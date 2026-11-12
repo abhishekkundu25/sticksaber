@@ -9,6 +9,8 @@ export const PLAYER = {
   ctrl: playerCtrl,
 };
 
+const BURSTABLE = { hitstun: 1, stagger: 1, ragdoll: 1, getup: 1, recoil: 1 };
+
 export function playerCtrl(f, world, dt) {
   const inp = world.input;
   if (!inp || world.lockInput) return;
@@ -16,6 +18,11 @@ export function playerCtrl(f, world, dt) {
   f.riposteT = (f.riposteT || 0) - dt;
   f.sinceDash = (f.sinceDash ?? 9) + dt;
   if (f.onGround) { f.airJumps = 1; f.airDash = 1; f.coyote = 0.09; f.refunded = false; } else f.coyote -= dt;
+
+  // Focus spends that are not attacks. Burst answers being hit; Overdrive is started on your own terms.
+  if (BURSTABLE[f.state] && !f.dead) {
+    if (inp.peek('special', 0.2)) { inp.consume('special'); if (world.burst(f)) return; }
+  } else if (!f.dead && inp.peek('overdrive', 0.15)) { inp.consume('overdrive'); world.startOverdrive(f); }
 
   switch (f.state) {
     case 'free':

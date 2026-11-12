@@ -61,8 +61,13 @@ export function applyHit(world, A, B, h, cx, cy) {
   const fx = world.fx;
 
   if (B.dead) {
-    // Corpses stay physical for a moment: a follow-up swing bats them around.
-    if (B.deadT < 2.2 && A?.isPlayer) { B.rag.kick(dir * 380, -360, rand(-6, 6)); fx.spark(cx, cy, 0, 3.14, 6, 380, B.color); }
+    // Corpses stay physical for a moment: every further cut slices off another piece.
+    if (B.deadT < 3.4 && (A?.isPlayer || h.fromPlayer)) {
+      const [ix, iy] = cutImpulse(A, dir);
+      if (!world.chop(B, cx, cy, ix, iy, 1)) { B.rag.kick(dir * 380, -360, rand(-6, 6)); fx.spark(cx, cy, 0, 3.14, 6, 380, B.color); }
+      else { world.stop(0.035); world.shake(0.14); }
+      if (A) A.hitLanded = true;
+    }
     return 'corpse';
   }
   if (B.invuln > 0) {
@@ -84,7 +89,9 @@ export function applyHit(world, A, B, h, cx, cy) {
   // An enemy that has read this move family turns it aside when it is free to, and merely shrugs it
   // off (a glancing hit) when it is busy attacking.
   const fam = A?.move?.fam ?? h.fam;
-  const read = !B.isPlayer && B.def.adaptAt && fam !== 'riposte' && (B.adapt[fam] || 0) >= B.def.adaptAt && !B.rag && B.state !== 'stagger';
+  // Overdrive: for its few seconds nothing the player does can go stale or be read.
+  const od = world.overdrive > 0 && (A?.isPlayer || !!h.fromPlayer);
+  const read = !od && !B.isPlayer && B.def.adaptAt && fam !== 'riposte' && (B.adapt[fam] || 0) >= B.def.adaptAt && !B.rag && B.state !== 'stagger';
   if (read && A?.isPlayer && frontal && canDeflect(B)) return deflect(world, B, A, fam, cx, cy, dir);
 
   // ── damage ──
@@ -92,10 +99,11 @@ export function applyHit(world, A, B, h, cx, cy) {
   if (read) { dmg *= 0.4; post = 0; }
   if (A?.isPlayer || h.fromPlayer) {
     const id = A?.move?.id ?? h.id ?? 'x';
-    const r = world.style.land(id);
+    const r = world.style.land(id, od);
     dmg *= r.mul; fresh = r.fresh;
     if (A?.charged) { dmg *= 1.6; post *= 1.8; }
-    world.gainFocus(6 * r.mul * (fresh ? 1.5 : 1) * (1 + world.style.rank * 0.12));
+    // Stale hits earn nothing: Focus is paid for with variety.
+    if (!r.stale) world.gainFocus(6 * r.mul * (fresh ? 1.5 : 1) * (1 + world.style.rank * 0.12));
     if (A) A.hitLanded = true;
   } else dmg *= world.enemyDmg * (A ? A.dmgMul : 1);
   if (B.broken) dmg *= 1.5;
@@ -107,7 +115,7 @@ export function applyHit(world, A, B, h, cx, cy) {
   world.onDamage(A, B, dmg, h, cx, cy, dir, { fresh, punished, glance: read });
 
   if (!B.isPlayer) {
-    if (fam && B.def.adaptAt) {
+    if (fam && B.def.adaptAt && !od) {
       for (const k in B.adapt) if (k !== fam) B.adapt[k] = Math.max(0, B.adapt[k] - 0.6);
       B.adapt[fam] = (B.adapt[fam] || 0) + 1;
       if (B.adapt[fam] >= B.def.adaptAt && B.reads !== fam) { B.reads = fam; world.onAdapt(B, fam); }
@@ -181,10 +189,26 @@ function kill(world, A, B, h, cx, cy, dir) {
   const kvy = spike ? Math.abs(h.ky) * 0.8 : Math.min(h.ky, -260) - 140;
   B.die(kvx, kvy, rand(-7, 7));
   if (spike) B.rag.bounce = 0.6;
-  let cut = -1;
-  if (!B.isPlayer && !h.shape && (h.dmg >= 9 || rng() < 0.5)) cut = B.severNear(cx, cy);
-  world.onKill(A, B, h, cx, cy, dir, cut);
+  // The killing blow cuts the body: once for a light hit, twice for a heavy one, three times for a
+  // riposte, a charged heavy, anything in Overdrive, or a boss.
+  let cuts = 0;
+  if (!B.isPlayer && !B.def.flying) {
+    const heavy = h.kind !== 'flinch' || h.dmg >= 15;
+    const n = world.overdrive > 0 || A?.move?.id === 'RIPOSTE' || A?.charged || B.def.boss ? 3 : heavy ? 2 : 1;
+    const [ix, iy] = cutImpulse(A, dir);
+    cuts = world.chop(B, cx, cy, ix, iy, n);
+  }
+  world.onKill(A, B, h, cx, cy, dir, cuts);
   return 'kill';
+}
+
+// Direction and strength with which a cut piece is thrown: along the blade's travel when there is one.
+function cutImpulse(A, dir) {
+  if (A && A.armed) {
+    const dx = A.tx - A.ptx, dy = A.ty - A.pty, d = Math.hypot(dx, dy);
+    if (d > 2) return [(dx / d) * 430, (dy / d) * 430 - 120];
+  }
+  return [dir * 400, -220];
 }
 
 export function breakPosture(world, B) {
@@ -205,7 +229,7 @@ function parry(world, D, A, h, cx, cy, dir) {
   fx.text(D.x, D.j[1] - 40, 'PARRY', '#ffffff', 22, 0.8);
   world.sfx('parry', D.x); world.stop(0.12); world.slow(0.4, 0.28); world.shake(0.4); world.punch(0.035);
   D.parryT = 0.2; D.posture = Math.max(0, D.posture - 20); D.blockT = 0.1; D.pv[7] += 9; D.pv[3] -= 3;
-  if (D.isPlayer) { D.riposteT = 0.85; world.gainFocus(22); world.style.bonus(14); world.stats.parries++; }
+  if (D.isPlayer) { D.riposteT = 0.85; world.gainFocus(34); world.style.bonus(14); world.stats.parries++; }
   if (!A || A.dead) return 'parry';
   world.lastParried = A;
   A.posture += A.def.parryPosture ?? 50; A.postureDelay = 3; A.barT = 3.5;

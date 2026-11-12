@@ -17,7 +17,13 @@ export const famLabel = (f) => FAM_LABEL[f] || f.toUpperCase();
 class Style {
   constructor() { this.reset(); }
   reset() { this.recent = []; this.points = 0; this.rank = 0; this.combo = 0; this.comboT = 0; this.best = 0; this.lastFresh = 0; this.rankT = 0; }
-  land(id) {
+  // `free` (Overdrive): the hit counts as fresh and leaves no trace in the history.
+  land(id, free = false) {
+    if (free) {
+      this.combo++; this.comboT = 2.8; if (this.combo > this.best) this.best = this.combo;
+      this.points = Math.min(RANKS[5] + 30, this.points + 7); this.lastFresh = 0.6;
+      return { mul: 1.12, fresh: true, stale: false };
+    }
     let n = 0;
     for (const r of this.recent) if (r === id) n++;
     const mul = n === 0 ? 1.12 : n === 1 ? 1 : n === 2 ? 0.8 : 0.6;
@@ -44,6 +50,10 @@ class Style {
   }
 }
 
+export const OVERDRIVE_TIME = 6;
+const OD_COLOR = '#e6fdff';
+export const newStats = () => ({ parries: 0, reads: 0, interrupts: 0, kills: 0, dodges: 0, hitsTaken: 0, cuts: 0, bursts: 0, overdrives: 0 });
+
 export class World {
   constructor() {
     this.fx = new Fx();
@@ -58,7 +68,8 @@ export class World {
     this.time = 0; this.hitstop = 0; this.slowK = 1; this.slowT = 0; this.witch = 0; this.timeScale = 1;
     this.focus = 100; this.maxFocus = 300; this.rally = 0; this.rallyT = 0;
     this.enemyDmg = 1; this.maxAttackers = 1; this.lastAtkT = -9; this.atkGap = 0.32;
-    this.stats = { parries: 0, reads: 0, interrupts: 0, kills: 0, dodges: 0, hitsTaken: 0 };
+    this.stats = newStats();
+    this.overdrive = 0; this.lastBurst = -9; this.odGhost = 0;
     this.boss = null; this.bossChannel = 0; this.marker = null;
     this.bannerMsg = null; this.screenFlash = null; this.lockInput = false;
     this.events = []; // drained by the director / main loop: {type, ...}
@@ -71,7 +82,7 @@ export class World {
   spawnPlayer(x = 0) {
     const p = new Fighter(PLAYER, x, 0);
     this.player = p; this.fighters.push(p);
-    this.cam.x = x;
+    this.cam.x = x; this.overdrive = 0;
     return p;
   }
   // opts: { elite: 'swift' | 'armored' | 'volatile', temper: 'aggressive' | 'cautious' | 'flank' }
@@ -121,10 +132,101 @@ export class World {
   flashScreen(color, t) { this.screenFlash = { color, t, max: t }; }
   banner(title, sub, t = 2.4) { this.bannerMsg = { title, sub, t, max: t }; }
   gainFocus(v) {
+    if (this.overdrive > 0) return; // the meter is the Overdrive clock while it runs
     const before = Math.floor(this.focus / 100);
     this.focus = Math.min(this.maxFocus, this.focus + v);
     if (Math.floor(this.focus / 100) > before) this.sfx('focus', this.player.x, 0.7);
   }
+  // Slice a dead body up to `n` times near (x, y), throwing each piece along (ix, iy). Returns the cuts made.
+  chop(B, x, y, ix, iy, n = 1) {
+    const fx = this.fx, ang = Math.atan2(iy, ix);
+    let made = 0;
+    for (let i = 0; i < n; i++) {
+      const c = B.rag.chop(x + rand(-16, 16) * i, y + rand(-26, 26) * i, ix * rand(0.7, 1.25), iy * rand(0.7, 1.2) - rand(140, 320));
+      if (!c) break;
+      made++;
+      fx.ember(c[0], c[1], 9, '#ffb060'); fx.spark(c[0], c[1], ang, 0.9, 9, 560, '#ffd9a0', { white: 0.5 });
+      fx.slash(c[0], c[1], ang, 80, '#ffffff', 0.14, 3); fx.flash(c[0], c[1], 34, '#ffb060', 0.1);
+    }
+    if (!made) return 0;
+    this.stats.cuts += made;
+    this.sfx('sever', x, 0.9, 1 + B.rag.pieces * 0.04);
+    if (B.rag.pieces >= 5 && !B.diced) {
+      B.diced = true;
+      fx.text(B.rag.x[1], B.rag.y[1] - 60, 'DICED', '#ffb060', 18, 0.9);
+      this.gainFocus(8); this.style.bonus(6);
+    }
+    return made;
+  }
+
+  // Burst: spend one pip while being hit or knocked down to blow everything back and stand up.
+  burst(f) {
+    if (this.focus < 100 || this.time - this.lastBurst < 1.5) {
+      this.sfx('uiMove', f.x); this.fx.text(f.x, f.j[1] - 36, this.focus < 100 ? 'NO FOCUS' : 'NOT YET', '#8fa3b8', 14, 0.6);
+      return false;
+    }
+    this.focus -= 100; this.lastBurst = this.time; this.stats.bursts++;
+    if (f.rag) f.getUp(0.14); else f.setState('free');
+    f.invuln = Math.max(f.invuln, 0.75); f.vx = 0; f.posture = 0;
+    const cx = f.x, cy = f.y - 60, fx = this.fx;
+    for (const e of this.fighters) {
+      if (e.team === f.team || e.dead || e.phantom) continue;
+      const dx = e.x - cx;
+      if (Math.abs(dx) > 310 || e.y < -420) continue;
+      const dir = dx >= 0 ? 1 : -1;
+      if (e.rag) e.rag.kick(dir * 640, -430, rand(-5, 5));
+      else if (e.def.armor >= 2 || e.def.noRagdoll) {
+        // Heavies and bosses are not thrown, but the blast stops whatever they were doing.
+        const scripted = e.state === 'custom' && e.ai.busy && !e.ai.channel;
+        if (e.invuln <= 0 && !scripted) { e.setState('recoil', 0.55); e.vx = dir * 620; e.posture += 20; e.barT = 3; }
+      } else e.toRagdoll(dir * 640, -440, rand(-5, 5));
+      fx.spark(e.cx, e.cy, dir > 0 ? 0 : Math.PI, 0.8, 8, 620, f.color, { white: 0.5 });
+    }
+    for (const p of this.projectiles.list) if (p.team !== f.team && Math.abs(p.x - cx) < 340) p.life = 0;
+    fx.ring(cx, cy, 20, 330, 0.45, f.color, 1, 9); fx.ring(cx, cy, 10, 220, 0.3, '#ffffff', 1, 4); fx.ring(cx, f.y - 2, 30, 380, 0.5, f.color, 0.2, 6);
+    fx.flash(cx, cy, 240, f.color, 0.22); fx.spark(cx, cy, 0, 3.14, 44, 980, f.color, { white: 0.5, grav: 300 });
+    fx.dust(cx - 30, f.y, 7, -1, 340); fx.dust(cx + 30, f.y, 7, 1, 340);
+    for (let i = 0; i < 3; i++) fx.ghost(f, '#ffffff', 0.3 + i * 0.07);
+    fx.text(cx, cy - 80, 'BURST', f.color, 24, 0.9);
+    this.sfx('shockwave', cx, 1, 1.3); this.sfx('parry', cx, 0.7, 0.7);
+    this.stop(0.13); this.slow(0.4, 0.26); this.shake(0.65); this.punch(0.035); this.flashScreen(f.color, 0.18);
+    return true;
+  }
+
+  // Overdrive: spend the whole meter. For six seconds the blade is longer and faster, nothing goes
+  // stale or gets read, and each hit returns a little health. Taking a hit ends it.
+  startOverdrive(f) {
+    if (this.overdrive > 0) return false;
+    if (this.focus < this.maxFocus) {
+      this.sfx('uiMove', f.x); this.fx.text(f.x, f.j[1] - 36, 'NEED FULL FOCUS', '#8fa3b8', 14, 0.7);
+      return false;
+    }
+    this.focus = 0; this.overdrive = OVERDRIVE_TIME; this.odGhost = 0; this.stats.overdrives++;
+    f.rate = 1.15; f.bladeLen = f.def.blade.len * f.scale * 1.22; f.color = OD_COLOR;
+    f.invuln = Math.max(f.invuln, 0.5);
+    const cx = f.cx, cy = f.cy, fx = this.fx;
+    for (const e of this.fighters) {
+      if (e.team === f.team || e.dead || e.phantom || e.rag || Math.abs(e.x - f.x) > 230 || e.def.armor >= 2) continue;
+      e.setState('hitstun', 0.4); e.vx = (e.x >= f.x ? 1 : -1) * 420;
+    }
+    fx.ring(cx, cy, 240, 14, 0.3, '#56e9ff', 1, 5); fx.ring(cx, cy, 20, 300, 0.5, OD_COLOR, 1, 8); fx.ring(f.x, f.y - 2, 20, 340, 0.5, '#56e9ff', 0.2, 5);
+    fx.flash(cx, cy, 260, '#56e9ff', 0.3); fx.spark(cx, cy, -Math.PI / 2, 1.2, 46, 900, '#56e9ff', { white: 0.6, grav: 200 });
+    for (let i = 0; i < 5; i++) fx.ghost(f, '#56e9ff', 0.3 + i * 0.08);
+    fx.text(f.x, f.j[1] - 60, 'OVERDRIVE', OD_COLOR, 28, 1.2);
+    this.sfx('bossPhase', f.x, 0.8, 1.7); this.sfx('ignite', f.x, 1, 1.3); this.sfx('rankUp', f.x, 0.8);
+    this.stop(0.16); this.slow(0.35, 0.4); this.shake(0.5); this.punch(0.04); this.flashScreen('#56e9ff', 0.3);
+    return true;
+  }
+  endOverdrive(broken) {
+    const f = this.player;
+    this.overdrive = 0;
+    if (!f) return;
+    f.rate = 1; f.bladeLen = f.def.blade.len * f.scale; f.color = f.def.color;
+    this.fx.ring(f.cx, f.cy, 14, 120, 0.3, f.color, 1, 3);
+    this.sfx('extinguish', f.x, 0.8, 1.2);
+    if (broken) { this.fx.text(f.x, f.j[1] - 40, 'OVERDRIVE BROKEN', '#ff6b6b', 16, 0.9); this.fx.spark(f.cx, f.cy, 0, 3.14, 20, 600, OD_COLOR); this.sfx('guardBreak', f.x, 0.6); }
+  }
+
   guarding(f) { return f.state === 'guard' || (f.def.shield && f.state === 'free' && f.onGround && !f.broken); }
 
   requestAttack(f, ranged = false) {
@@ -241,6 +343,7 @@ export class World {
       this.style.hurt(); this.stats.hitsTaken++;
       this.rally = Math.min(B.maxHp - Math.max(0, B.hp), this.rally + dmg * 0.6); this.rallyT = 3.2;
       this.sfx('hurt', B.x); this.flashScreen('#ff2a3a', 0.25);
+      if (this.overdrive > 0) this.endOverdrive(true);
     } else {
       if (info.punished) fx.text(cx, cy - 62, 'PUNISH', '#ffd36b', 16, 0.8);
       if (info.glance) fx.text(cx, cy - 46, 'GLANCED', '#8fa3b8', 13, 0.6);
@@ -248,6 +351,7 @@ export class World {
       if (A === pl) {
         // Rally: striking back wins a slice of recent damage back.
         if (this.rally > 0) { const r = Math.min(this.rally, dmg * 0.5); this.rally -= r; pl.hp = Math.min(pl.maxHp, pl.hp + r); }
+        if (this.overdrive > 0) pl.hp = Math.min(pl.maxHp, pl.hp + 1.5);
         if (!pl.onGround && pl.state === 'attack' && pl.move.air && !pl.move.plunge) {
           pl.vy = Math.min(pl.vy, -175);
           if (!pl.refunded) { pl.refunded = true; pl.airJumps = 1; pl.airDash = 1; }
@@ -263,7 +367,7 @@ export class World {
     this.events.push({ type: 'adapt', fam });
   }
 
-  onKill(A, B, h, cx, cy, dir, cut) {
+  onKill(A, B, h, cx, cy, dir, cuts) {
     const fx = this.fx;
     if (B.isPlayer) {
       this.stop(0.2); this.slow(0.25, 1.6); this.shake(0.7); this.sfx('death', B.x);
@@ -273,7 +377,6 @@ export class World {
     this.stats.kills++;
     fx.spark(cx, cy, dir > 0 ? 0 : Math.PI, 1.5, 30, 900, B.color, { white: 0.3 });
     fx.flash(cx, cy, 100, '#ffffff', 0.16);
-    if (cut >= 0) { fx.ember(cx, cy, 14, '#ffb060'); this.sfx('sever', cx); }
     this.sfx('kill', cx); this.stop(0.14); this.shake(0.5); this.punch(0.03);
     if (B.elite === 'volatile') this.projectiles.mine(B, B.x, { color: '#ff7a2e', fuse: 0.8, r: 125, dmg: 16 });
     this.gainFocus(12); this.style.bonus(6);
@@ -288,7 +391,7 @@ export class World {
   perfectDodge(pl, by) {
     pl.dodged = true;
     this.witch = 1.25; this.stats.dodges++;
-    this.gainFocus(22); this.style.bonus(10);
+    this.gainFocus(34); this.style.bonus(10);
     for (let i = 0; i < 3; i++) this.fx.ghost(pl, '#ffffff', 0.35 + i * 0.08);
     this.fx.ring(pl.cx, pl.cy, 14, 150, 0.4, pl.color, 1, 3);
     this.fx.text(pl.x, pl.j[1] - 40, 'FLOW', pl.color, 20, 0.8);
@@ -317,6 +420,13 @@ export class World {
     this.fx.update(dt);
     if (this.style.update(dt)) this.sfx('rankUp', this.player.x, 0.6);
     if (this.rallyT > 0) this.rallyT -= dt; else if (this.rally > 0) this.rally = Math.max(0, this.rally - 18 * dt);
+    if (this.overdrive > 0) {
+      const pl = this.player;
+      this.overdrive -= dt;
+      // A trail of afterimages while the blade is moving.
+      if ((this.odGhost -= dt) <= 0 && pl && !pl.rag && (pl.state === 'attack' || pl.state === 'dash' || Math.abs(pl.vx) > 200)) { this.odGhost = 0.05; this.fx.ghost(pl, '#56e9ff', 0.22); }
+      if (this.overdrive <= 0 || !pl || pl.dead) this.endOverdrive(false);
+    }
     for (let i = fs.length - 1; i >= 0; i--) if (fs[i].remove) fs.splice(i, 1);
   }
 

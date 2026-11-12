@@ -39,6 +39,9 @@ const SCRIPTS = {
   drone: { enemy: 'drone', dist: 300, live: true, keys: [], from: 150, frames: 220, every: 11, crop: [900, 520], dy: -150 },
   lancer: { enemy: 'lancer', dist: 300, live: true, keys: [], from: 40, frames: 150, every: 10, crop: [820, 360], dx: 130 },
   echo: { enemy: 'proctor', dist: 300, live: true, p3: true, keys: [], from: 150, frames: 160, every: 10, crop: [1000, 420], dx: 150, dy: -40 },
+  chop: { enemy: 'initiate', dist: 110, hp: 8, passive: true, keys: [...K(4), ...J(52), ...J(70), ...J(90), ...K(112)], from: 22, frames: 130, every: 6, crop: [560, 360], dx: 110, dy: -30 },
+  burst: { enemy: 'initiate', dist: 90, passive: true, extra: [['initiate', -80], ['bulwark', 170], ['initiate', -170]], pre: 'hitstun', keys: [[8, 'special', 1], [12, 'special', 0]], from: 4, frames: 66, every: 3, crop: [900, 460], dy: -90 },
+  overdrive: { enemy: 'dummy', dist: 130, keys: [[4, 'overdrive', 1], [8, 'overdrive', 0], ...J(40), ...J(56), ...J(72), ...J(90)], from: 2, frames: 130, every: 6, crop: [640, 400], dx: 60, dy: -50 },
   plunge: { enemy: 'dummy', dist: 90, keys: [[2, 'jump', 1], [20, 'jump', 0], [24, 'down', 1], [24, 'heavy', 1], [30, 'heavy', 0], [60, 'down', 0]], from: 20, frames: 72, every: 3, crop: [560, 520], dy: -130 },
 };
 
@@ -55,7 +58,9 @@ async function run(name) {
       if (sc.hp) e.hp = sc.hp;
       if (sc.passive || sc.force) e.def = { ...e.def, ctrl: null };
     }
+    for (const [kind, dx] of sc.extra || []) { const x = w.spawnEnemy(kind, p.x + dx, false); x.def = { ...x.def, ctrl: null }; }
     for (let i = 0; i < 40; i++) g.tick(1 / 60);
+    if (sc.pre === 'hitstun') { p.setState('hitstun', 1.2); p.vx = -200; }
     if (sc.force) { e.face(p.x); e.startMove(sc.force); }
     if (sc.p3) { e.ai.phase = 2; e.double = true; e.color = e.def.color2; e.hp = e.maxHp * 0.24; e.ai.heals = []; }
     const cv = document.getElementById('game'), [cw, ch] = sc.crop;
@@ -77,7 +82,7 @@ async function run(name) {
         shot++;
       }
     }
-    for (const a of ['light', 'heavy', 'guard', 'dash', 'jump', 'down', 'right', 'left', 'special']) g.input.set(a, 'strip', false);
+    for (const a of ['light', 'heavy', 'guard', 'dash', 'jump', 'down', 'right', 'left', 'special', 'overdrive']) g.input.set(a, 'strip', false);
     return sheet.toDataURL('image/png');
   }, sc);
   writeFileSync(`${OUT}strip-${name}.png`, Buffer.from(url.split(',')[1], 'base64'));

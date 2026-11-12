@@ -27,6 +27,8 @@ Your progress is the highest floor you have reached. It is saved in the browser,
 | Heavy attack, hold to charge | K (or right mouse) | Y |
 | Guard, tap on impact to parry | L | RB |
 | Throw saber (costs 1 focus) | I | LB |
+| Burst (costs 1 focus, while being hit or knocked down) | I | LB |
+| Overdrive (needs a full focus meter) | O | Click either stick |
 | Pause | Esc | Start |
 
 Fullscreen is F. Mute is M. G cycles graphics quality between auto, high and low.
@@ -47,6 +49,8 @@ Fullscreen is F. Mute is M. G cycles graphics quality between auto, high and low
 | Parry | Tap L up to 0.2 s before a hit lands | Staggers the attacker. |
 | Riposte | J or K after a parry | Pass-through cut. Kills an Initiate outright. |
 | Recover | Shift as you hit the floor | Skips the knockdown. |
+| Burst | I while you are being hit, knocked down or deflected | A shockwave throws light enemies, interrupts heavy ones and bosses, clears enemy projectiles and stands you up. No damage. 1.5 s cooldown. |
+| Overdrive | O with all three focus pips | Six seconds of a longer, faster blade. Nothing goes stale or gets read, and each hit returns 1.5 health. Taking a hit ends it. |
 
 ## The ten floors
 
@@ -71,6 +75,8 @@ The first wave that introduces an enemy is fixed and comes with a hint. Every ot
 - A white flash on an enemy means the attack can be parried. A red flash means it cannot be blocked, so dash through it.
 - Using the same move repeatedly lowers its damage. Duelists and the Proctor go further: they read a repeated move family, show ADAPTED, then turn the next one aside and counter.
 - After you take damage, part of it stays orange on your health bar for three seconds. Landing hits wins it back.
+- A killing blow cuts the body: once for a light hit, twice for a heavy one, three times for a riposte, a charged heavy or anything in Overdrive. Keep hitting the body, or throw your saber through it, and it comes apart further, up to nine pieces.
+- Focus is earned by fresh moves, parries and perfect dodges. Stale hits earn none.
 - Enemies learn extra attacks on higher floors, and each one rolls a temperament when it spawns: aggressive, cautious, or a flanker that vaults over you.
 - From floor VIII some enemies are elites with a coloured ring at their feet. Gold is fast, blue does not flinch during wind-ups, orange bursts a second after it dies.
 - The Forgemaster's hammer heats through each string. You can parry it until it glows white. When it vents steam, hit it.
@@ -81,7 +87,7 @@ The first wave that introduces an enemy is fixed and comes with a hint. Every ot
 | Command | What it does | Time |
 | --- | --- | --- |
 | `npm test` | Runs the simulation tests, then the benchmark. Fails on a broken rule or a missed performance budget. | about 6 s |
-| `node --test tests/` | Simulation tests only: seeded replays are identical, generated waves obey the rules across 300 seeds, move data is well formed, both bosses can be beaten. | under 1 s |
+| `node --test tests/` | Simulation tests only: seeded replays are identical, generated waves obey the rules across 300 seeds, move data is well formed, both bosses can be beaten, and Burst, Overdrive and chopping follow their rules. | under 1 s |
 | `npm run bench` | The benchmark alone, in report mode (prints, never fails). | about 5 s |
 | `npm run fuzz` | Long soak: random input on every floor, then scripted players of four skill levels climb the whole tower. Prints clear times and falls per floor. | minutes |
 | `npm run smoke` | Drives the real game in headless Chrome, reports runtime errors and frame times, and writes screenshots to `tools/out/`. | about 2 min |

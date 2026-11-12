@@ -2,7 +2,7 @@
 // pose solved to 11 joints, a move/state machine, and a ragdoll it can drop into and blend back out of.
 import { clamp, approach, wrapNear, ik2, TAU, EASE, rng } from '../core/math.js';
 import { MOVES, sampleMove, fillStance, makeStance, N, C } from './moves.js';
-import { Ragdoll, BONES, G } from './ragdoll.js';
+import { Ragdoll, G } from './ragdoll.js';
 
 const { PY, PX, ROT, LEAN, HEAD, HA, HR, BL, UA, LA, F1X, F1Y, F2X, F2Y } = C;
 export const J = { HEAD: 0, NECK: 1, PELVIS: 2, ELB_F: 3, HAND_F: 4, ELB_B: 5, HAND_B: 6, KNEE_F: 7, FOOT_F: 8, KNEE_B: 9, FOOT_B: 10 };
@@ -359,7 +359,7 @@ export class Fighter {
     for (let i = 0; i < NJ; i++) { this.j[i * 2] = rag.x[i]; this.j[i * 2 + 1] = rag.y[i]; }
     this.x = rag.x[J.PELVIS]; this.y = 0;
     // The blade follows the forearm while the body is limp.
-    const ex = rag.x[J.ELB_F], ey = rag.y[J.ELB_F], hx = rag.x[J.HAND_F], hy = rag.y[J.HAND_F];
+    const ex = rag.x[rag.handRoot], ey = rag.y[rag.handRoot], hx = rag.x[J.HAND_F], hy = rag.y[J.HAND_F];
     const d = Math.hypot(hx - ex, hy - ey) || 1;
     this.bx = hx; this.by = hy;
     this.tx = hx + ((hx - ex) / d) * this.bladeLen; this.ty = Math.min(-2, hy + ((hy - ey) / d) * this.bladeLen);
@@ -391,19 +391,5 @@ export class Fighter {
     this.dead = true; this.hp = 0; this.activeHit = null; this.tele = 0; this.fade = 1;
     if (this.rag) this.rag.kick(vx, vy, spin); else this.toRagdoll(vx, vy, spin);
     this.rag.gravScale = 1;
-  }
-
-  // Cut the bone nearest a world point (used on killing blows).
-  severNear(x, y) {
-    if (!this.rag) return -1;
-    let best = -1, bd = 1e9;
-    for (let b = 1; b < BONES.length; b++) {
-      const [a, c] = BONES[b];
-      const mx = (this.rag.x[a] + this.rag.x[c]) / 2, my = (this.rag.y[a] + this.rag.y[c]) / 2;
-      const d = (mx - x) ** 2 + (my - y) ** 2;
-      if (d < bd) { bd = d; best = b; }
-    }
-    if (best >= 0) this.rag.sever(best);
-    return best;
   }
 }

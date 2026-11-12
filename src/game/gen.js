@@ -25,6 +25,7 @@ const HINTS = {
   lancer: 'Lancers out-reach you and skewer jumps. Parry the thrust, then dash in close where the pike is useless',
   wraith: 'Wraiths vanish and reappear at your back. Listen for the second blink, turn, and parry',
   drone: 'Drones hover out of reach. Jump at them, launch into them, or parry the dive. Any hit drops them',
+  focus: 'Focus has three uses. I throws your saber. I while you are being hit bursts you free. O with a full meter is OVERDRIVE',
   elite: 'Elites carry an aura: gold is fast, blue will not flinch, orange bursts when it dies. Step back from orange',
   gauntlet: 'Everything the Spire has. Keep moving, keep changing attacks',
   proctor: 'It learns your habits. When it kneels to heal, hit it. I throws your saber across the room',
@@ -53,7 +54,7 @@ const FLOOR_DEFS = [
   { arena: 'hall', title: 'EXAMINATION HALL', sub: 'The Proctor', music: 'boss', boss: 'proctor', waves: 1,
     teach: [T('proctor', 1, ['proctor', 560])] },
 ];
-const HINT_FOR_GENERATED = { 4: 'launch', 8: 'elite', 9: 'gauntlet' };
+const HINT_FOR_GENERATED = { 2: 'focus', 4: 'launch', 8: 'elite', 9: 'gauntlet' };
 
 export const waveBudget = (floor, wave) => 2.2 + floor * 0.85 + wave * 0.9;
 

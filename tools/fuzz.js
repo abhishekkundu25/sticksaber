@@ -7,7 +7,7 @@ import { Director } from '../src/game/encounters.js';
 import { BotInput } from '../src/game/bot.js';
 import { rng } from '../src/core/math.js';
 
-const ACTIONS = ['left', 'right', 'down', 'jump', 'light', 'heavy', 'guard', 'dash', 'special'];
+const ACTIONS = ['left', 'right', 'down', 'jump', 'light', 'heavy', 'guard', 'dash', 'special', 'overdrive'];
 class RandomInput {
   constructor() { this.now = 0; this.down = {}; this.pressedAt = {}; for (const a of ACTIONS) { this.down[a] = false; this.pressedAt[a] = -9; } }
   tick(dt) {

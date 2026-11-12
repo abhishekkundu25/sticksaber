@@ -2,6 +2,7 @@
 // the training room.
 import { clamp, seedRng, hash32 } from '../core/math.js';
 import { generateRun, FLOORS } from './gen.js';
+import { newStats } from './world.js';
 
 const TRAIN_KEYS = { Digit1: 'initiate', Digit2: 'bulwark', Digit3: 'duelist', Digit4: 'marksman', Digit5: 'brute', Digit6: 'lancer', Digit7: 'wraith', Digit8: 'drone', Digit9: 'forgemaster', Digit0: 'proctor', Equal: 'dummy' };
 const TRAIN_HINT = '1 Initiate  2 Bulwark  3 Duelist  4 Marksman  5 Brute  6 Lancer  7 Wraith  8 Drone  9 Forgemaster  0 Proctor   - Clear   = Target';
@@ -29,7 +30,7 @@ export class Director {
     this.floors = generateRun(this.seed);
     seedRng(hash32(this.seed, 0x51ed));
     this.training = false; w.training = false;
-    w.style.reset(); w.focus = 100; w.stats = { parries: 0, reads: 0, interrupts: 0, kills: 0, dodges: 0, hitsTaken: 0 };
+    w.style.reset(); w.focus = 100; w.stats = newStats();
     this.runTime = 0; this.deaths = 0;
     this.enterStage(stage, 0, true);
   }

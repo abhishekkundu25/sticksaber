@@ -28,8 +28,9 @@ Every fighter has 11 joints. The animated pose and the ragdoll use the same join
 - Launchers, knockdowns and kills hand the body to the ragdoll. Hitting a ragdoll sets its velocity, so juggles stay predictable while limbs flail.
 - Each juggle hit raises gravity on the target by 9%, which ends infinite combos without a hard counter.
 - A spike bounces the body off the floor. A hard throw into the arena wall bounces it back.
-- A killing blow cuts the bone nearest the blade. The cut ends glow and cool.
-- Corpses stay physical for two seconds and can be batted around.
+- A killing blow slices the body. A cut splits one bone into two shorter ones, so both halves stay visible and fly apart along the blade's path. The cut ends glow and cool.
+- A light kill cuts once and a heavy kill twice. A riposte, a charged heavy, any kill during Overdrive and a boss kill cut three times.
+- The body stays cuttable for 3.4 seconds. Each further hit, or a thrown saber passing through, slices off another piece, up to eight cuts. At five pieces the game shows DICED and pays a small focus and style bonus.
 
 ### Defence and recovery
 
@@ -43,6 +44,18 @@ Every fighter has 11 joints. The animated pose and the ragdoll use the same join
 | Tech | Dash as your body reaches the floor to stand up at once. |
 | Mercy | Enemies do not start an attack on a player who is down or standing up. You are invulnerable for 0.7 s after standing. |
 | Retry | Death restarts the current wave with full health. |
+
+### Focus
+
+The meter holds three pips. Fresh moves fill it (stale hits earn nothing), a parry or a perfect dodge gives a third of a pip, and being hit does not drain it. It has three uses at two prices, so each pip is a choice between reach, safety and damage.
+
+| Cost | Move | Input | Effect |
+| --- | --- | --- | --- |
+| 1 pip | Saber throw | I | The blade flies out and returns, hitting several times. You are unarmed until it comes back. |
+| 1 pip | Burst | I while hit, knocked down or deflected | A shockwave within 310 units throws light enemies, interrupts Brutes and bosses, clears enemy projectiles and stands you up with 0.75 s of invulnerability. It deals no damage and has a 1.5 s cooldown. |
+| 3 pips | Overdrive | O | For six seconds the blade is 22% longer and you act 15% faster. No move goes stale or can be read, each hit returns 1.5 health, and every kill cuts three times. Taking a hit ends it. No focus is earned while it runs. |
+
+Burst can interrupt the Proctor's heal if you are close, but it does not break its posture the way a hit does. Overdrive spends the pip you would need to throw the saber at a heal, which is the trade.
 
 ### Variety
 

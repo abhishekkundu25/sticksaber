@@ -97,7 +97,7 @@ export class Projectiles {
     world.fx.spark(p.x, p.y, ang, 0.9, 16, 620, by.color, { white: 0.6 }); world.fx.flash(p.x, p.y, 70, '#ffffff', 0.14);
     world.fx.ring(p.x, p.y, 6, 70, 0.25, '#ffffff', 1, 3);
     world.sfx('boltReflect', p.x); world.stop(0.07); world.shake(0.25);
-    if (by.isPlayer) { world.gainFocus(14); world.style.bonus(8); }
+    if (by.isPlayer) { world.gainFocus(20); world.style.bonus(8); }
   }
 
   tickWave(world, p, dt) {
@@ -127,7 +127,7 @@ export class Projectiles {
     world.fx.text(f.x, f.j[1] - 40, 'PARRY', '#ffffff', 22, 0.8);
     world.sfx('parry', f.x); world.stop(0.1); world.shake(0.3);
     f.parryT = 0.2;
-    if (f.isPlayer) { world.gainFocus(22); world.style.bonus(12); f.riposteT = 0; world.stats.parries++; }
+    if (f.isPlayer) { world.gainFocus(34); world.style.bonus(12); f.riposteT = 0; world.stats.parries++; }
   }
 
   tickSaber(world, p, dt) {
@@ -151,7 +151,8 @@ export class Projectiles {
     }
     for (const [f, t] of p.cd) if (t - dt <= 0) p.cd.delete(f); else p.cd.set(f, t - dt);
     for (const f of world.fighters) {
-      if (f.team === p.team || f.dead || f.remove || f.phantom || p.cd.has(f)) continue;
+      // The player's thrown saber keeps cutting bodies it passes through.
+      if (f.team === p.team || (f.dead && (p.team !== 0 || f.deadT > 3.4)) || f.remove || f.phantom || p.cd.has(f)) continue;
       const c = hurtCircles(f);
       for (let k = 0; k < 12; k += 3) {
         if (Math.hypot(c[k] - p.x, c[k + 1] - p.y) > c[k + 2] + p.len) continue;

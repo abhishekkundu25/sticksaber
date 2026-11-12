@@ -3,7 +3,7 @@
 // dodge red ones, jump shockwaves) and mixes its combos. `skill` (0..1) is the chance it reacts to
 // any given threat.
 import { rng } from '../core/math.js';
-const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'light', 'heavy', 'guard', 'dash', 'special'];
+const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'light', 'heavy', 'guard', 'dash', 'special', 'overdrive'];
 const COMBOS = [
   ['light', 'light', 'light', 'light'], ['light', 'light', 'heavy'], ['heavy'], ['light', 'heavy'],
   ['down+heavy', 'light', 'light', 'heavy'], ['light', 'light', 'light', 'heavy'], ['dash', 'light', 'light'], ['jump', 'down+heavy'],
@@ -59,6 +59,9 @@ export class BotInput {
     if (w.marker?.lock && Math.abs(w.marker.x - p.x) < 150 && !this.seen.get(w.marker)) { this.seen.set(w.marker, 1); if (rng() < this.skill) { this.press('right', 0.3); this.press('dash'); } }
 
     if (p.state === 'ragdoll' && p.rag.y[2] > -50 && rng() < this.skill * dt * 20) this.press('dash');
+    // Sometimes burst out of a beating, and open Overdrive when the meter is full and something is in reach.
+    if ((p.state === 'hitstun' || p.state === 'ragdoll') && w.focus >= 200 && rng() < this.skill * dt * 3) this.press('special');
+    if (w.focus >= w.maxFocus && tgt && td < 320 && p.state === 'free' && rng() < this.skill * dt * 6) this.press('overdrive');
     if (p.riposteT > 0 && rng() < this.skill) { this.press('light'); return; }
     if (this.down.guard || !tgt) return;
     if ((this.wait -= dt) > 0) return;

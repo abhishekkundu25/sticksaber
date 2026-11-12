@@ -125,7 +125,7 @@ function sound(dt) {
   if (app.state === 'menu' || app.state === 'controls') { audio.loop('heal', false); audio.loop('throw', false); }
   const pan = (x) => clamp((x - cam.x) / 720, -1, 1);
   const speed = (f) => clamp(Math.hypot(f.tx - f.ptx, f.ty - f.pty) / 22, 0, 1);
-  audio.hum('player', playing && p && !p.dead && p.armed ? { pan: pan(p.x), speed: speed(p), pitch: 1, vol: 1 } : null);
+  audio.hum('player', playing && p && !p.dead && p.armed ? { pan: pan(p.x), speed: speed(p), pitch: world.overdrive > 0 ? 1.3 : 1, vol: 1 } : null);
   let n = 0;
   if (playing) {
     for (const f of world.fighters) {
@@ -135,7 +135,7 @@ function sound(dt) {
   }
   for (; n < 3; n++) audio.hum('e' + n, null);
   const boss = world.boss && !world.boss.dead ? world.boss : null;
-  const heat = clamp(0.25 + world.countEnemies() * 0.12 + world.style.rank * 0.08 + (boss && boss.ai.phase >= 2 ? 0.35 : 0), 0, 1);
+  const heat = clamp(0.25 + world.countEnemies() * 0.12 + world.style.rank * 0.08 + (boss && boss.ai.phase >= 2 ? 0.35 : 0) + (world.overdrive > 0 ? 0.4 : 0), 0, 1);
   audio.music(app.state === 'menu' || app.state === 'controls' ? 'menu' : director.music, heat);
   // Re-assert the ambience once a second: the first request can arrive before the audio context exists.
   if ((rainT -= dt) <= 0) { rainT = 1; audio.loop('rain', renderer.arena?.id === 'causeway'); }

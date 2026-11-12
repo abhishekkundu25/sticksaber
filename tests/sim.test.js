@@ -7,6 +7,9 @@ import { Director } from '../src/game/encounters.js';
 import { BotInput } from '../src/game/bot.js';
 import { MOVES } from '../src/game/moves.js';
 import { ENEMIES } from '../src/game/enemies.js';
+import { applyHit } from '../src/game/combat.js';
+import { MAX_CUTS } from '../src/game/ragdoll.js';
+import { seedRng } from '../src/core/math.js';
 import { generateRun, generateFloor, waveBudget, UNLOCK, COST, MAX_PER_WAVE, FLOORS, seedLabel, parseSeed } from '../src/game/gen.js';
 
 const DT = 1 / 120;
@@ -121,4 +124,79 @@ test('both bosses can be beaten', () => {
 test('seed labels round-trip', () => {
   for (const s of [1, 42, 123456, 2176782335]) assert.equal(parseSeed(seedLabel(s)), s);
   assert.equal(parseSeed(''), 0);
+});
+
+// A quiet room with the player and passive targets, for testing one mechanic at a time.
+function room(kinds = ['initiate'], gap = 120) {
+  seedRng(5);
+  const world = new World();
+  world.input = new BotInput(world, 0); world.lockInput = true;
+  world.setArena(2200);
+  const p = world.spawnPlayer(0);
+  const foes = kinds.map((k, i) => { const e = world.spawnEnemy(k, gap * (i + 1), false); e.def = { ...e.def, ctrl: null }; return e; });
+  for (let i = 0; i < 30; i++) world.step(DT);
+  return { world, p, foes };
+}
+const HEAVY = { dmg: 999, post: 10, kx: 300, ky: -300, kind: 'knock', stop: 0, shake: 0, stun: 0.3 };
+const LIGHT = { dmg: 5, post: 10, kx: 200, ky: 0, kind: 'flinch', stop: 0, shake: 0, stun: 0.3 };
+
+test('killing blows cut the body, and further hits cut it into more pieces', () => {
+  const { world, p, foes: [a, b] } = room(['initiate', 'initiate']);
+  a.hp = 1; applyHit(world, p, a, LIGHT, a.cx, a.cy);
+  assert.ok(a.dead);
+  assert.equal(a.rag.pieces, 2, 'a light kill cuts once');
+  applyHit(world, p, b, HEAVY, b.cx, b.cy);
+  assert.equal(b.rag.pieces, 3, 'a heavy kill cuts twice');
+  p.hitSet.clear(); applyHit(world, p, b, LIGHT, b.rag.x[2], b.rag.y[2]);
+  assert.equal(b.rag.pieces, 4, 'hitting the corpse cuts again');
+  for (let i = 0; i < 30; i++) { p.hitSet.clear(); applyHit(world, p, b, LIGHT, b.rag.x[1], b.rag.y[1]); }
+  assert.ok(b.rag.pieces <= MAX_CUTS + 1, 'the number of cuts is capped');
+  for (let i = 0; i < 240; i++) world.step(DT);
+  assert.ok(Array.from(b.rag.x.subarray(0, b.rag.n)).every(Number.isFinite) && Array.from(b.rag.y.subarray(0, b.rag.n)).every(Number.isFinite));
+  assert.ok(world.stats.cuts >= 4);
+});
+
+test('burst costs one pip, frees the player and throws enemies back', () => {
+  const { world, p, foes: [a, big] } = room(['initiate', 'brute']);
+  world.focus = 100;
+  p.setState('hitstun', 2);
+  assert.ok(world.burst(p));
+  assert.equal(world.focus, 0);
+  assert.equal(p.state, 'free');
+  assert.ok(p.invuln > 0.5);
+  assert.ok(a.rag && a.hp === a.maxHp, 'a light enemy is thrown, undamaged');
+  assert.equal(big.state, 'recoil', 'a heavy enemy is interrupted, not thrown');
+  world.focus = 300; p.setState('hitstun', 2);
+  assert.equal(world.burst(p), false, 'it has a cooldown');
+  assert.equal(world.focus, 300);
+});
+
+test('overdrive needs a full meter, stops staleness and reads, and ends when the player is hit', () => {
+  const { world, p, foes: [d] } = room(['duelist']);
+  world.focus = 200;
+  assert.equal(world.startOverdrive(p), false);
+  world.focus = 300;
+  assert.ok(world.startOverdrive(p));
+  assert.equal(world.focus, 0);
+  assert.ok(p.bladeLen > p.def.blade.len && p.rate > 1);
+  for (let i = 0; i < 6; i++) assert.equal(world.style.land('L1', true).mul, 1.12);
+  // A Duelist that has read light attacks cannot turn them aside during Overdrive.
+  d.adapt.light = 99; d.facing = -1; p.facing = 1;
+  p.startMove('L1'); const hp = d.hp;
+  assert.equal(applyHit(world, p, d, LIGHT, d.cx, d.cy), 'hit');
+  assert.ok(d.hp < hp - 5, 'full damage, not a glancing 40%');
+  world.gainFocus(50); assert.equal(world.focus, 0, 'no focus is earned while it runs');
+  p.invuln = 0; applyHit(world, null, p, { ...LIGHT, dir: -1 }, p.cx, p.cy);
+  assert.equal(world.overdrive, 0);
+  assert.equal(p.bladeLen, p.def.blade.len); assert.equal(p.rate, 1); assert.equal(p.color, p.def.color);
+});
+
+test('overdrive runs out after six seconds', () => {
+  const { world, p } = room([]);
+  world.focus = 300; world.startOverdrive(p);
+  for (let t = 0; t < 5.5; t += DT) world.step(DT);
+  assert.ok(world.overdrive > 0);
+  for (let t = 0; t < 1.2; t += DT) world.step(DT);
+  assert.equal(world.overdrive, 0);
+  assert.equal(p.rate, 1);
 });

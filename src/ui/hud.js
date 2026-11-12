@@ -11,7 +11,7 @@ const MOVELIST = [
   ['LIGHT STRING', 'J  J  J  J'], ['HEAVY  ·  hold to charge', 'K'], ['GUARD  ·  tap on impact to PARRY', 'L'],
   ['RIPOSTE  (after a parry)', 'J or K'], ['LAUNCHER', 'S + K   or   J J K'], ['BREAKER  ·  COMET', 'J K   ·   J J J K'],
   ['AIR STRING  ·  SPIKE', 'J J J   ·   K'], ['PLUNGE  (in the air)', 'S + K'], ['DASH CUT', 'SHIFT then J'],
-  ['SABER THROW  (1 focus)', 'I'], ['RECOVER  (as you hit the floor)', 'SHIFT'], ['PAUSE  ·  GRAPHICS QUALITY', 'ESC   ·   G'],
+  ['SABER THROW  (1 focus)', 'I'], ['BURST  (1 focus, while hit or down)', 'I'], ['OVERDRIVE  (full focus)', 'O'], ['RECOVER  (as you hit the floor)', 'SHIFT'], ['PAUSE  ·  GRAPHICS QUALITY', 'ESC   ·   G'],
 ];
 
 export class Hud {
@@ -37,6 +37,7 @@ export class Hud {
     const slow = world.timeScale < 0.75 && app.state === 'play';
     this.bars += ((slow ? 1 : 0) - this.bars) * Math.min(1, dt * 8);
     if (this.bars > 0.01) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, 26 * this.bars); ctx.fillRect(0, H - 26 * this.bars, W, 26 * this.bars); }
+    if (world.overdrive > 0 && app.state === 'play') { ctx.globalAlpha = 0.05 + Math.sin(this.t * 16) * 0.015; ctx.fillStyle = '#56e9ff'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
     if (world.witch > 0 && app.state === 'play') { ctx.globalAlpha = 0.1 * Math.min(1, world.witch * 3); ctx.fillStyle = '#56e9ff'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
 
     if (app.state === 'play' || app.state === 'pause') {
@@ -103,13 +104,22 @@ export class Hud {
     if (po > 0.01) { ctx.fillStyle = '#00000088'; ctx.fillRect(x, y + 13, w * 0.6, 4); ctx.fillStyle = po > 0.75 ? '#ff6b4a' : '#ffd36b'; ctx.fillRect(x, y + 13, w * 0.6 * po, 4); }
     // Focus pips.
     const fy = y + 24;
+    if (world.overdrive > 0) {
+      // The meter becomes the Overdrive clock.
+      const k = clamp(world.overdrive / 6, 0, 1), pulse = 0.75 + Math.sin(this.t * 16) * 0.25;
+      ctx.fillStyle = '#00000088'; ctx.fillRect(x - 1, fy - 1, 134, 8);
+      ctx.globalAlpha = pulse; ctx.fillStyle = '#e6fdff'; ctx.fillRect(x, fy, 132 * k, 6); ctx.globalAlpha = 1;
+      this.text(ctx, 'OVERDRIVE', x + 146, fy + 4, 11, '#e6fdff', 'left', 700, 3);
+      return;
+    }
     for (let i = 0; i < 3; i++) {
       const fx = x + i * 46, k = clamp(world.focus / 100 - i, 0, 1);
       ctx.fillStyle = '#00000088'; ctx.fillRect(fx - 1, fy - 1, 42, 8);
       ctx.fillStyle = '#ffffff1c'; ctx.fillRect(fx, fy, 40, 6);
       ctx.fillStyle = k >= 1 ? '#56e9ff' : '#2b7f96'; ctx.fillRect(fx, fy, 40 * k, 6);
     }
-    this.text(ctx, p.armed ? 'FOCUS' : 'SABER OUT', x + 146, fy + 4, 11, p.armed ? '#ffffff77' : '#56e9ff', 'left', 600, 2);
+    const full = world.focus >= world.maxFocus;
+    this.text(ctx, !p.armed ? 'SABER OUT' : full ? 'FOCUS FULL  ·  O' : 'FOCUS', x + 146, fy + 4, 11, !p.armed || full ? '#56e9ff' : '#ffffff77', 'left', full ? 700 : 600, 2);
   }
 
   combo(ctx, W, world, dt) {
@@ -201,9 +211,9 @@ export class Hud {
     ctx.fillStyle = '#ffe2a0'; ctx.fillRect(W / 2 - 220, 212, 440, 1.5);
     const m = Math.floor(dir.runTime / 60), s = Math.floor(dir.runTime % 60);
     const rows = [['TIME', `${m}:${String(s).padStart(2, '0')}`], ['FALLS', dir.deaths], ['BEST COMBO', world.style.best], ['PARRIES', world.stats.parries], ['PERFECT DODGES', world.stats.dodges],
-      ['HEALS INTERRUPTED', world.stats.interrupts], ['TIMES READ', world.stats.reads], ['HITS TAKEN', world.stats.hitsTaken]];
+      ['HEALS INTERRUPTED', world.stats.interrupts], ['TIMES READ', world.stats.reads], ['HITS TAKEN', world.stats.hitsTaken], ['CUTS', world.stats.cuts]];
     rows.forEach(([k, v], i) => {
-      const y = 262 + i * 34;
+      const y = 254 + i * 32;
       this.text(ctx, k, W / 2 - 20, y, 16, '#ffffff99', 'right', 600, 4);
       this.text(ctx, String(v), W / 2 + 20, y, 22, '#ffffff', 'left', 700, 2);
     });
@@ -243,11 +253,11 @@ export class Hud {
     this.text(ctx, title, W / 2, 74, 40, '#ffffff', 'center', 700, 14);
     ctx.fillStyle = '#56e9ff'; ctx.fillRect(W / 2 - 120, 104, 240, 1.5);
     MOVELIST.forEach(([k, v], i) => {
-      const y = 148 + i * 33;
+      const y = 142 + i * 29;
       this.text(ctx, k, W / 2 - 24, y, 15, '#ffffffaa', 'right', 600, 3);
       this.text(ctx, v, W / 2 + 24, y, 17, '#56e9ff', 'left', 700, 3);
     });
-    this.text(ctx, 'Gamepad:  A jump   X light   Y heavy   B dash   RB guard   LB throw', W / 2, H - 78, 13, '#ffffff77', 'center', 600, 2);
+    this.text(ctx, 'Gamepad:  A jump   X light   Y heavy   B dash   RB guard   LB throw / burst   stick click overdrive', W / 2, H - 78, 13, '#ffffff77', 'center', 600, 2);
     this.text(ctx, foot, W / 2, H - 46, 14, '#ffffffcc', 'center', 600, 3);
   }
 }
