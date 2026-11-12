@@ -103,7 +103,7 @@ function tickGuard(f, world, counterAfter) {
 
 function initAi(f, extra) {
   const t = TEMPER[f.temper] || { cd: 1, guard: 1, range: 0 };
-  Object.assign(f.ai, { cd: rand(0.5, 1.3), spread: rand(0, 110), turn: 0, seenAtk: 0, guardT: 0, blocks: 0, retreat: 0, last: null, init: true, flankCd: rand(1.5, 4),
+  Object.assign(f.ai, { cd: rand(0.9, 1.6), spread: rand(0, 110), turn: 0, seenAtk: 0, guardT: 0, blocks: 0, retreat: 0, last: null, init: true, flankCd: rand(1.5, 4),
     cdMul: t.cd, guardMul: t.guard, rangeAdd: t.range, blocked(self) { self.ai.blocks++; } }, extra);
 }
 
@@ -120,7 +120,8 @@ function aimMove(f, pl) {
 
 function meleeCtrl(f, world, dt) {
   const ai = f.ai, P = f.def.ai, pl = world.player;
-  if (!ai.init) initAi(f);
+  // New arrivals take a moment before their first swing, longer on the first floor.
+  if (!ai.init) { initAi(f); if (world.floor === 1) ai.cd += 0.8; }
   tickAdapt(f, dt);
   ai.cd -= dt; ai.retreat -= dt; ai.guardT -= dt; ai.flankCd -= dt;
   if (tickGuard(f, world, P.counterAfter ?? 99)) return;
