@@ -326,7 +326,7 @@ export class Fighter {
     this.t2x = this.x + L[24] * f; this.t2y = this.y - L[25];
     if (this.twin) {
       // The off-hand blade runs on from the forearm, turned by the form's own angle.
-      const a = p[LA] + (this.blade.twinAngle ?? 0.35) + r, len = bl * (this.blade.twinLen ?? 0.9);
+      const a = p[LA] + (this.blade.twinAngle ?? 0.35) - r, len = bl * (this.blade.twinLen ?? 0.9);
       this.b3x = j[12]; this.b3y = j[13];
       this.t3x = j[12] + Math.cos(a) * len * f; this.t3y = j[13] - Math.sin(a) * len;
     }

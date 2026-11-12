@@ -224,7 +224,7 @@ function kill(world, A, B, h, cx, cy, dir) {
   let cuts = 0;
   if (!B.isPlayer && !B.def.flying) {
     const heavy = h.kind !== 'flinch' || h.dmg >= 15;
-    const n = world.overdrive > 0 || A?.move?.id === 'RIPOSTE' || A?.charged || B.def.boss ? 3 : heavy ? 2 : 1;
+    const n = world.overdrive > 0 || A?.move?.fam === 'riposte' || A?.charged || B.def.boss ? 3 : heavy ? 2 : 1;
     const [ix, iy] = cutImpulse(A, dir);
     cuts = world.chop(B, cx, cy, ix, iy, n);
   }
