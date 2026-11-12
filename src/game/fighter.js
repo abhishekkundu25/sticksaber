@@ -12,6 +12,7 @@ const TRAIL_N = 28;
 export const TRAIL_STRIDE = 6;
 const ikOut = new Float32Array(4);
 const L = new Float32Array(NJ * 2 + 4); // local joints + blade tip + second tip
+const NO_TRAITS = Object.freeze({});
 
 export class Fighter {
   constructor(def, x, team) {
@@ -48,8 +49,12 @@ export class Fighter {
     this.rate = 1;        // personal time scale (elite "swift", slowed states)
     this.phantom = false; // an afterimage: attacks, but cannot be hit or targeted
     this.dmgMul = 1; this.heat = 0; this.vent = 0; this.elite = null; this.temper = null;
-    const s = def.scale;
-    this.lens = [DIM.neck * s, DIM.torso * s, DIM.upper * s, DIM.fore * s, DIM.upper * s, DIM.fore * s, DIM.thigh * s, DIM.shin * s, DIM.thigh * s, DIM.shin * s];
+    // Proportions: generated strains stretch or shorten the torso, arms and legs for their own silhouette.
+    const s = def.scale, pr = def.prop;
+    this.dTorso = DIM.torso * (pr?.torso ?? 1); this.dArm = DIM.upper * (pr?.arm ?? 1); this.dLeg = DIM.thigh * (pr?.leg ?? 1); this.legK = pr?.leg ?? 1;
+    this.lens = [DIM.neck * s, this.dTorso * s, this.dArm * s, this.dArm * s, this.dArm * s, this.dArm * s, this.dLeg * s, this.dLeg * s, this.dLeg * s, this.dLeg * s];
+    this.tr = def.traits || NO_TRAITS; // trait flags: swift, armored, volatile, vampiric, splitter, regen
+    this.burnT = 0; this.burnDps = 0; this.sinceHurt = 9;
     this.computeJoints();
     this.pbx = this.bx; this.pby = this.by; this.ptx = this.tx; this.pty = this.ty;
   }
@@ -102,6 +107,7 @@ export class Fighter {
     if (this.vib > 0) this.vib -= dt;
     if (this.barT > 0) this.barT -= dt;
     if (this.shieldHit > 0) this.shieldHit -= dt;
+    this.sinceHurt += dt;
     if (this.postureDelay > 0) this.postureDelay -= dt;
     else if (this.posture > 0 && this.state !== 'stagger') this.posture = Math.max(0, this.posture - this.def.postureRegen * dt);
 
@@ -137,7 +143,7 @@ export class Fighter {
     } else if (this.onGround && this.state !== 'dash' && !this.stepping) {
       this.vx = approach(this.vx, 0, fric * dt);
     }
-    if (!this.onGround) this.vy += G * grav * (this.gravMul ?? 1) * dt;
+    if (!this.onGround) this.vy += G * grav * (this.gravMul ?? 1) * world.gravK * dt;
     this.x += this.vx * dt; this.y += this.vy * dt;
     if (this.y >= 0 && this.vy >= 0) {
       if (!this.onGround) this.land(world);
@@ -176,7 +182,7 @@ export class Fighter {
     }
     this.armorNow = !!m.armor && mt >= m.armor[0] && mt <= m.armor[1];
     // "Armored" elites shrug off hits through every wind-up.
-    if (this.elite === 'armored' && m.hits.length && mt <= m.hits[m.hits.length - 1].t1) this.armorNow = true;
+    if (this.tr.armored && m.hits.length && mt <= m.hits[m.hits.length - 1].t1) this.armorNow = true;
     if (m.invuln && mt >= m.invuln[0] && mt <= m.invuln[1]) this.invuln = Math.max(this.invuln, 0.03);
     let grav = 1;
     if (m.plunge) {
@@ -200,8 +206,8 @@ export class Fighter {
       this.face(tgt.x);
       this.vx = clamp((tgt.x - this.x - this.facing * 40) / air, -arg[1], arg[1]); this.vy = arg[0]; this.onGround = false; this.y -= 1;
     }
-    else if (type === 'heat') { this.heat = arg; this.color = this.def.heatColors[arg]; if (arg > 0) world.sfx('heatUp', this.x, 0.8, 0.85 + arg * 0.15); }
-    else if (type === 'vent') { this.vent = 1.7; this.heat = 0; this.color = this.def.heatColors[0]; world.sfx('vent', this.x); }
+    else if (type === 'heat') { if (!this.def.heatColors) return; this.heat = arg; this.color = this.def.heatColors[arg]; if (arg > 0) world.sfx('heatUp', this.x, 0.8, 0.85 + arg * 0.15); }
+    else if (type === 'vent') { if (!this.def.heatColors) return; this.vent = 1.7; this.heat = 0; this.color = this.def.heatColors[0]; world.sfx('vent', this.x); }
     else if (type === 'fx') world.moveFx(this, arg);
     else if (type === 'spawn') world.spawnFrom(this, arg);
   }
@@ -271,19 +277,19 @@ export class Fighter {
 
   computeJoints() {
     const p = this.p, s = this.scale, f = this.facing, j = this.j;
-    const px = p[PX] * s, py = p[PY] * s;
+    const px = p[PX] * s, py = p[PY] * s * this.legK;
     const ta = Math.PI / 2 - p[LEAN];
-    const nx = px + Math.cos(ta) * DIM.torso * s, ny = py + Math.sin(ta) * DIM.torso * s;
+    const nx = px + Math.cos(ta) * this.dTorso * s, ny = py + Math.sin(ta) * this.dTorso * s;
     const ha = ta - p[HEAD];
     L[0] = nx + Math.cos(ha) * DIM.neck * s; L[1] = ny + Math.sin(ha) * DIM.neck * s;
     L[2] = nx; L[3] = ny; L[4] = px; L[5] = py;
-    const U = DIM.upper * s, F = DIM.fore * s;
+    const U = this.dArm * s, F = U;
     const reach = (U + F) * clamp(p[HR], 0.2, 1);
     ik2(nx, ny, nx + Math.cos(p[HA]) * reach, ny + Math.sin(p[HA]) * reach, U, F, -1, ikOut);
     L[6] = ikOut[0]; L[7] = ikOut[1]; L[8] = ikOut[2]; L[9] = ikOut[3];
     L[10] = nx + Math.cos(p[UA]) * U; L[11] = ny + Math.sin(p[UA]) * U;
     L[12] = L[10] + Math.cos(p[LA]) * F; L[13] = L[11] + Math.sin(p[LA]) * F;
-    const T = DIM.thigh * s, Sh = DIM.shin * s;
+    const T = this.dLeg * s, Sh = T;
     ik2(px, py, p[F1X] * s, p[F1Y] * s, T, Sh, 1, ikOut);
     L[14] = ikOut[0]; L[15] = ikOut[1]; L[16] = ikOut[2]; L[17] = ikOut[3];
     ik2(px, py, p[F2X] * s, p[F2Y] * s, T, Sh, 1, ikOut);
@@ -354,7 +360,7 @@ export class Fighter {
 
   updateRagdoll(world, dt) {
     const rag = this.rag, s = this.scale;
-    rag.gravScale = this.dead ? 1 : 1 + this.juggle * 0.09;
+    rag.gravScale = (this.dead ? 1 : 1 + this.juggle * 0.09) * world.gravK;
     const impact = rag.step(dt, world.minX, world.maxX);
     for (let i = 0; i < NJ; i++) { this.j[i * 2] = rag.x[i]; this.j[i * 2 + 1] = rag.y[i]; }
     this.x = rag.x[J.PELVIS]; this.y = 0;

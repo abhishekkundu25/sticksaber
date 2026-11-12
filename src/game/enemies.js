@@ -1,6 +1,8 @@
 // Enemy roster and brains. Each type is built to have one silhouette, one rhythm and one clear answer.
+// These eight are the hand-made chassis. A run also generates its own strains, champions and sector
+// bosses from them (strains.js): same brains, new bodies, traits and move lists.
 // Variation comes from three places: later floors unlock extra attacks (`floor` on a move option),
-// each spawn rolls a temperament, and from floor 8 some spawns are elites.
+// each spawn rolls a temperament, and some spawns are elites.
 import { rand, clamp, rng, approach } from '../core/math.js';
 import { MOVES, C } from './moves.js';
 import { breakPosture } from './combat.js';
@@ -35,7 +37,7 @@ export const ENEMIES = {
     ai: { range: [110, 165], cd: [0.5, 1.2],
       moves: [{ id: 'br_swing', max: 200, w: 3 }, { id: 'br_smash', max: 180, w: 2 }, { id: 'br_charge', min: 380, max: 1200, w: 3 }, { id: 'br_sweep', max: 210, w: 2, floor: 6 }, { id: 'br_leap', min: 240, max: 620, w: 3, floor: 6 }] },
     hitWall(f, world) {
-      if (f.move?.id !== 'br_charge' || f.mt < 0.75) return;
+      if (f.move?.src !== 'br_charge' || f.mt < f.move.run + 0.03) return;
       world.shake(0.7); world.sfx('wallSplat', f.x); world.fx.spark(f.x + f.facing * 30, -80, f.facing > 0 ? Math.PI : 0, 1.2, 24, 600, '#ffd36b');
       world.fx.text(f.x, f.j[1] - 50, 'STUNNED', '#ffd36b', 20, 1);
       breakPosture(world, f);
@@ -69,6 +71,17 @@ export const ENEMIES = {
 };
 // The Proctor's afterimage: same body, no cape, runs one move and disappears.
 ENEMIES.echo = { ...ENEMIES.proctor, kind: 'echo', name: 'Echo', boss: false, ribbons: [], adaptAt: 0, ctrl: echoCtrl };
+// What a "splitter" strain leaves behind when it dies.
+ENEMIES.shard = { ...ENEMIES.initiate, kind: 'shard', name: 'Shard', scale: 0.72, hp: 22, posture: 30, runSpeed: 280, blade: { len: 52 }, chainBreak: 0,
+  ai: { ...ENEMIES.initiate.ai, cd: [0.3, 0.9], guard: 0, moves: [{ id: 'i_slash', max: 135, w: 3 }, { id: 'i_lunge', min: 140, max: 250, w: 2 }] } };
+// An afterimage of any boss: the same definition with the brain swapped for the echo's.
+const echoDefs = new Map();
+export function echoDef(def) {
+  if (def.kind === 'proctor') return ENEMIES.echo;
+  let d = echoDefs.get(def);
+  if (!d) echoDefs.set(def, d = { ...def, kind: 'echo', name: 'Echo', boss: false, ribbons: [], adaptAt: 0, ctrl: echoCtrl, traits: undefined });
+  return d;
+}
 
 const TEMPER = { aggressive: { cd: 0.6, guard: 0.5, range: -10 }, cautious: { cd: 1.35, guard: 1.6, range: 40 }, flank: { cd: 0.9, guard: 1, range: 0 } };
 const mercy = (pl) => pl.rag || pl.state === 'getup';
@@ -103,8 +116,9 @@ function tickGuard(f, world, counterAfter) {
 
 function initAi(f, extra) {
   const t = TEMPER[f.temper] || { cd: 1, guard: 1, range: 0 };
+  // `cdK` is the floor's pace: deeper floors and higher difficulties leave shorter gaps between attacks.
   Object.assign(f.ai, { cd: rand(0.9, 1.6), spread: rand(0, 110), turn: 0, seenAtk: 0, guardT: 0, blocks: 0, retreat: 0, last: null, init: true, flankCd: rand(1.5, 4),
-    cdMul: t.cd, guardMul: t.guard, rangeAdd: t.range, blocked(self) { self.ai.blocks++; } }, extra);
+    cdMul: t.cd * (f.ai.cdK ?? 1), guardMul: t.guard, rangeAdd: t.range, blocked(self) { self.ai.blocks++; } }, extra);
 }
 
 // Point the weapon at the player while a move's aim window is open. Returns true if the move is an aiming one.
@@ -191,9 +205,12 @@ function marksmanCtrl(f, world, dt) {
   const down = mercy(pl);
   if (dist < 140 && ai.kickCd <= 0 && !down && world.requestAttack(f)) { f.startMove('m_kick'); ai.kickCd = 2.2; ai.cd = Math.max(ai.cd, 1.2); return; }
   if (ai.cd <= 0 && dist > 190 && !down && world.requestAttack(f, true)) {
-    const o = [{ id: 'm_shot', w: 3 }];
-    if (world.floor >= 3 && dist < 620) o.push({ id: 'm_lob', w: 2 });
-    if (world.floor >= 5) o.push({ id: 'm_burst', w: 2 });
+    let o = f.def.ai?.shots;
+    if (!o) {
+      o = [{ id: 'm_shot', w: 3 }];
+      if (world.floor >= 3 && dist < 620) o.push({ id: 'm_lob', w: 2 });
+      if (world.floor >= 5) o.push({ id: 'm_burst', w: 2 });
+    }
     const m = weighted(o, ai.last);
     ai.last = m.id; f.aimLocal = 0; f.startMove(m.id);
     ai.cd = MOVES[m.id].dur + rand(1.2, 2.4) * ai.cdMul;
@@ -253,7 +270,11 @@ function blink(f, world, mode) {
     if (k < 1) return;
     g.fade = 1; ai.busy = false; ai.script = null;
     if (mode === 'away') { g.setState('free'); ai.cd = rand(1.4, 2.6) * ai.cdMul; }
-    else { g.startMove(w.floor >= 8 && rng() < 0.5 ? 'w_cross' : 'w_slash'); ai.struck = true; ai.linger = 0.5; ai.cd = rand(2, 3.2) * ai.cdMul; }
+    else {
+      const S = g.def.ai?.strikes ?? g.def.kit?.strikes;
+      g.startMove(S ? S[(rng() * S.length) | 0] : w.floor >= 8 && rng() < 0.5 ? 'w_cross' : 'w_slash');
+      ai.struck = true; ai.linger = 0.5; ai.cd = g.def.boss ? MOVES[g.move.id].dur + rand(0.3, 0.7) : rand(2, 3.2) * ai.cdMul;
+    }
   };
 }
 
@@ -278,7 +299,7 @@ function droneCtrl(f, world, dt) {
   f.vx = approach(f.vx, clamp((tx - f.x) * 3, -f.def.runSpeed, f.def.runSpeed), 900 * dt);
   f.vy = approach(f.vy, clamp((ty - f.y) * 4, -300, 300), 1300 * dt);
   if (ai.cd > 0 || pl.dead || mercy(pl)) return;
-  if (rng() < 0.55) { if (world.requestAttack(f)) droneDive(f, world); return; }
+  if (rng() < (f.def.ai?.dive ?? 0.55)) { if (world.requestAttack(f)) droneDive(f, world); return; }
   if (world.requestAttack(f, true)) { f.aimLocal = -0.6; f.vx = 0; f.vy = 0; f.startMove('dr_shot'); ai.cd = MOVES.dr_shot.dur + rand(1.6, 3) * ai.cdMul; }
 }
 
@@ -539,4 +560,114 @@ function skyfall(f, world) {
       ai.cd = MOVES.p_slam.dur + 0.3;
     }
   };
+}
+
+// ───────────── Generated champions and sector bosses ─────────────
+// Reinforcements: the caller kneels, beams come down, `n` of its sector's fighters arrive.
+function summon(f, world, n) {
+  const ai = f.ai, pl = world.player, kinds = f.def.adds || ['initiate'];
+  f.setState('custom', 1.3); ai.busy = true; ai.called = (ai.called || 0) + 1; f.invuln = Math.max(f.invuln, 0.5);
+  f.tele = 0.5; f.teleRed = false; world.sfx('summon', f.x); world.sfx('bossRoar', f.x, 0.6, 1.2);
+  world.fx.ring(f.cx, f.cy, 20, 260, 0.5, f.color, 1, 5); world.fx.text(f.x, f.j[1] - 60 * f.scale, 'REINFORCEMENTS', f.color, 18, 1.2);
+  f.poseFn = (g, t) => { t[PY] = 34; t[LEAN] = 0.2; t[HA] = 1.57; t[HR] = 1; t[BL] = 1.57; t[UA] = 1.9; t[LA] = 1.7; return 22; };
+  let sent = false;
+  ai.script = (g, w) => {
+    if (sent || g.st < 0.55) return;
+    sent = true;
+    for (let i = 0; i < n; i++) {
+      const side = i % 2 ? -1 : 1;
+      w.spawnEnemy(kinds[(rng() * kinds.length) | 0], pl.x + side * rand(380, 520), true, { add: true });
+    }
+  };
+}
+
+// A champion is a strain grown to boss size: the ordinary melee brain, a health bar across the
+// screen, and one call for help at half health.
+export function championCtrl(f, world, dt) {
+  const ai = f.ai;
+  world.boss = f;
+  if (f.state === 'custom') { ai.script?.(f, world, dt); return; }
+  if (ai.busy) { ai.busy = false; ai.script = null; }
+  if (ai.init && !ai.called && f.hp / f.maxHp <= 0.5 && f.state === 'free' && f.onGround && !world.player.dead) return summon(f, world, 2);
+  meleeCtrl(f, world, dt);
+}
+
+const PHASE_NAMES = ['', 'PHASE II', 'PHASE III'];
+function wardenShift(f, world) {
+  const ai = f.ai, pl = world.player, K = f.def.kit, next = ai.phase + 1;
+  f.setState('custom', 2.0); ai.busy = true; f.invuln = 2.2; ai.burst = false;
+  f.tele = 0.5; f.teleRed = next > 2; world.sfx('bossRoar', f.x, 1, next > 2 ? 0.85 : 1);
+  f.poseFn = (g, t) => {
+    if (g.st < 0.9) { t[PY] = 32; t[LEAN] = 0.45; t[HEAD] = 0.4; t[HA] = -1.4; t[BL] = -1.5; t[UA] = -1.4; t[LA] = -1.0; return 12; }
+    t[PY] = 52; t[LEAN] = -0.28; t[HEAD] = -0.3; t[HA] = 0.9; t[HR] = 1; t[BL] = 1.57; t[UA] = 2.3; t[LA] = 2.5; return 30;
+  };
+  const col = next > 2 ? f.def.color3 : f.def.color2;
+  ai.script = (g, w) => {
+    if (g.st < 0.9) { if (rng() < 0.6) w.fx.ember(g.cx + rand(-130, 130), g.cy + rand(-110, 60), 1, col); return; }
+    if (ai.burst) return;
+    ai.burst = true; ai.phase = next; ai.p3 = next > 2; ai.sp = 1.2;
+    g.color = next > 2 ? g.def.color3 : g.def.color2; g.rate += 0.07;
+    if (K.doubleAt === next) g.double = true;
+    w.fx.ring(g.cx, g.cy, 20, 520, 0.6, g.color, 1, 8); w.fx.ring(g.x, -2, 20, 600, 0.6, '#ffffff', 0.2, 5);
+    w.fx.flash(g.cx, g.cy, 320, g.color, 0.4); w.fx.spark(g.cx, g.cy, 0, 3.14, 50, 900, g.color, { white: 0.5 });
+    w.sfx('bossPhase', g.x, 1, next > 2 ? 1.2 : 1); w.shake(0.8); w.stop(0.16, true); w.flashScreen(g.color, 0.35);
+    w.banner(PHASE_NAMES[next - 1], K.phaseText[next - 2], 2.4);
+    const dx = pl.x - g.x;
+    if (Math.abs(dx) < 460 && !pl.rag && !pl.dead) { pl.setState('hitstun', 0.45); pl.vx = (dx >= 0 ? 1 : -1) * 760; pl.invuln = 0.6; }
+  };
+}
+
+// A sector boss. Everything it does comes from `def.kit`, which strains.js generates:
+//   moves:    [{ id, min, max, w, phase }]   attacks by distance, some held back for later phases
+//   specials: skyfall, summon, blink         bigger set pieces on their own cooldown
+//   phases:   health fractions at which it shifts (one or two), heals: fractions at which it kneels
+//   echo:     the phase from which an afterimage repeats its attacks
+export function wardenCtrl(f, world, dt) {
+  const ai = f.ai, pl = world.player, K = f.def.kit;
+  if (!ai.init) initAi(f, { cd: 1.4, phase: 1, heals: [...(K.heals || [])], script: null, hurt: proctorHurt, onBreak: proctorReset, sp: 3, called: 0, p3: false });
+  tickAdapt(f, dt);
+  ai.cd -= dt; ai.guardT -= dt; ai.sp -= dt;
+  world.boss = f;
+  if (f.state === 'custom') { ai.script?.(f, world, dt); return; }
+  if (ai.busy) { proctorReset(f, world); f.fade = 1; } // knocked out of a set piece, a blink included
+  if (tickGuard(f, world, 2)) return;
+  if (f.state !== 'free' || !f.onGround || pl.dead) return;
+
+  const dx = pl.x - f.x, dist = Math.abs(dx), want = dx >= 0 ? 1 : -1;
+  f.facing = want;
+  const hpk = f.hp / f.maxHp;
+  if (ai.phase <= K.phases.length && hpk <= K.phases[ai.phase - 1]) return wardenShift(f, world);
+  if (ai.heals.length && hpk <= ai.heals[0]) { ai.heals.shift(); return startHeal(f, world); }
+
+  if (K.guard && pl.state === 'attack' && pl.atkSerial !== ai.seenAtk && dist < 210) {
+    ai.seenAtk = pl.atkSerial;
+    if (rng() < K.guard + (ai.phase - 1) * 0.1) { f.setState('guard'); ai.guardT = rand(0.5, 0.9); ai.blocks = 0; return; }
+  }
+
+  const hold = K.hold || [110, 230];
+  if (ai.cd > 0 || mercy(pl)) {
+    if (dist > hold[1]) f.moveX = want * 0.8; else if (dist < hold[0] && f.x > world.minX + 90 && f.x < world.maxX - 90) f.moveX = -want * 0.6;
+    return;
+  }
+
+  if (ai.sp <= 0) {
+    const list = K.specials.filter((sp) => sp !== 'summon' || (ai.phase >= 2 && ai.called < 2 && world.countEnemies() <= 2));
+    if (list.length) {
+      const sp = list[(rng() * list.length) | 0];
+      ai.sp = rand(6, 9) - ai.phase;
+      if (sp === 'skyfall') return skyfall(f, world);
+      if (sp === 'blink') return blink(f, world, rng() < 0.7 ? 'behind' : 'front');
+      return summon(f, world, 2);
+    }
+  }
+
+  const opts = K.moves.filter((m) => dist >= (m.min ?? 0) && dist <= m.max && (m.phase ?? 1) <= ai.phase);
+  if (!opts.length) { f.moveX = dist > hold[1] ? want : -want * 0.6; return; }
+  const pick = weighted(opts, ai.last), m = MOVES[pick.id];
+  ai.last = pick.id;
+  // From its echo phase on, an afterimage stays behind and repeats the attack half a second later.
+  if (K.echo && ai.phase >= K.echo && !m.landMove && !m.run && rng() < 0.65) { world.spawnEcho(f, pick.id, 0.55); world.sfx('echo', f.x); }
+  if (pick.dash && dist > 170) { f.vx = want * clamp((dist - 120) * 5.5, 0, 1150); world.fx.ghost(f, f.color, 0.3); world.sfx('dash', f.x); }
+  f.startMove(pick.id);
+  ai.cd = m.dur + rand(0.5, 1.0) / (0.75 + ai.phase * 0.35);
 }

@@ -52,19 +52,23 @@ try {
     await ev(() => { const g = window.__game; g.world.clearEnemies(); g.world.lockInput = false; });
   }
   if (scenario === 'all' || scenario === 'run') {
-    // One screenshot a few seconds into each of the ten floors.
-    for (let f = 1; f <= 10; f++) {
-      await ev((n) => window.__game.startRun(n, 4242), f);
-      await sleep(f === 5 || f === 10 ? 4600 : 5200);
-      await shot(`floor-${String(f).padStart(2, '0')}`);
+    // One screenshot a few seconds into a floor of each sector: skirmishes, a champion, two keepers.
+    for (const f of [1, 12, 23, 34, 45, 56, 60, 67, 78, 89, 100]) {
+      await ev((n) => { const g = window.__game; g.startRun(n, 4242); g.world.player.invuln = 99; }, f);
+      await sleep(f % 5 ? 5200 : 4600);
+      await shot(`floor-${String(f).padStart(3, '0')}`);
     }
+    // The draft that follows a cleared floor.
+    await ev(() => { const g = window.__game, d = g.director; g.startRun(34, 4242); d.draft = d.offer(34); d.state = 'draft'; d.t = 0; });
+    await sleep(900);
+    await shot('draft');
   }
   if (scenario === 'all' || scenario === 'boss') {
     // Let the scripted player fight the boss at a fixed timestep and grab each signature moment once.
     const shots = await ev(async () => {
       const { BotInput } = await import('/src/game/bot.js');
       const g = window.__game, w = g.world;
-      g.app.manual = true; g.startRun(10, 99);
+      g.app.manual = true; g.startRun(100, 99);
       const real = w.input; w.input = new BotInput(w, 0.85);
       const cv = document.getElementById('game'), out = {}, pending = {};
       const want = {
@@ -77,7 +81,7 @@ try {
       for (let i = 0; i < 60 * 240 && Object.keys(out).length < Object.keys(want).length; i++) {
         w.input.tick(1 / 60); g.tick(1 / 60);
         const p = w.player, b = w.boss;
-        if (p.hp < 50 && !p.dead) p.hp = 100;
+        if (p.hp < p.maxHp * 0.5 && !p.dead) p.hp = p.maxHp;
         if (g.director.state === 'victory' && out.victory) break;
         if (!b) continue;
         if (out.phase && !pending.sky && b.state === 'free') { pending.sky = 1; b.ai.force = 'sky'; b.ai.cd = 0; }

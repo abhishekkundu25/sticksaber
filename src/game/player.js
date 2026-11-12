@@ -23,6 +23,8 @@ export function playerCtrl(f, world, dt) {
   if (BURSTABLE[f.state] && !f.dead) {
     if (inp.peek('special', 0.2)) { inp.consume('special'); if (world.burst(f)) return; }
   } else if (!f.dead && inp.peek('overdrive', 0.15)) { inp.consume('overdrive'); world.startOverdrive(f); }
+  // The selected power can be changed at any moment, even mid-swing.
+  if (inp.peek('cycle', 0.2)) { inp.consume('cycle', 0.2); world.cyclePower(1); }
 
   switch (f.state) {
     case 'free':
@@ -70,6 +72,8 @@ export function playerCtrl(f, world, dt) {
       if (f.st > 0.08 && (inp.peek('light', 0.2) || inp.peek('heavy', 0.2))) tryAttack(f, world, inp, 0, null);
       break;
 
+    case 'custom': f.script?.(f, world, dt); break; // a power that takes over the body (Flash Step)
+
     case 'ragdoll':
       // Tech: dash as you hit the floor to roll straight back to your feet.
       if (!f.dead && f.rag && f.rag.y[2] > -60 && f.st > 0.25 && inp.consume('dash', 0.22)) {
@@ -104,7 +108,7 @@ function tryDash(f, world, inp, ax) {
   inp.consume('dash');
   const dir = ax || f.facing;
   f.setState('dash', 0.17);
-  f.dashDir = dir; f.facing = dir; f.invuln = Math.max(f.invuln, 0.15); f.dashCd = 0.46; f.dodged = false; f.sinceDash = 0; f.ghostT = 0;
+  f.dashDir = dir; f.facing = dir; f.invuln = Math.max(f.invuln, 0.15); f.dashCd = 0.46 * world.mods.dashCd; f.dodged = false; f.sinceDash = 0; f.ghostT = 0;
   world.sfx('dash', f.x);
   if (f.onGround) world.fx.dust(f.x, 0, 5, -dir, 220);
   return true;
@@ -122,13 +126,8 @@ function enterGuard(f, world, inp) {
 function trySpecial(f, world, inp, ax) {
   if (!inp.peek('special', 0.12)) return false;
   inp.consume('special');
-  if (!f.armed) return false;
-  if (world.focus < 100) { world.sfx('uiMove', f.x); world.fx.text(f.x, f.j[1] - 36, 'NO FOCUS', '#8fa3b8', 14, 0.6); return false; }
-  world.focus -= 100;
   autoFace(f, world, ax);
-  f.startMove('THROW');
-  if (!f.onGround) f.vy = Math.min(f.vy, -180);
-  return true;
+  return world.usePower(f);
 }
 
 function tryAttack(f, world, inp, ax, cur) {

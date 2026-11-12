@@ -10,9 +10,10 @@ const BUTTONS = [
   ['dash', 'DASH', 25, 30, 16],
   ['guard', 'GUARD', 5, 44, 16],
   ['special', 'THROW', 45, 25, 13],
+  ['cycle', 'SWAP', 60, 27, 10],
   ['overdrive', 'OVER\nDRIVE', 26, 49, 13],
 ];
-const HELD = ['left', 'right', 'down', 'light', 'heavy', 'jump', 'dash', 'guard', 'special', 'overdrive'];
+const HELD = ['left', 'right', 'down', 'light', 'heavy', 'jump', 'dash', 'guard', 'special', 'cycle', 'overdrive'];
 
 export class Touch {
   // hooks: { tap(x, y) in logical canvas units, cmd(name) for pause / resume / quit / spawn }
@@ -34,7 +35,8 @@ export class Touch {
       + '<button class="sys resume" data-cmd="resume">RESUME</button><button class="sys quit" data-cmd="quit">QUIT</button>';
     document.body.appendChild(root);
     this.base = root.querySelector('.base'); this.knob = root.querySelector('.knob'); this.od = root.querySelector('[data-a="overdrive"]');
-    this.sp = root.querySelector('[data-a="special"]'); this.burst = false;
+    this.sp = root.querySelector('[data-a="special"]'); this.burst = false; this.power = 'THROW';
+    this.swap = root.querySelector('[data-a="cycle"]'); this.swap.style.display = 'none'; this.multi = false;
     const opts = { passive: false };
     root.addEventListener('touchstart', (e) => this.onStart(e), opts);
     root.addEventListener('touchmove', (e) => this.onMove(e), opts);
@@ -56,11 +58,17 @@ export class Touch {
     this.releaseAll();
   }
   setReady(on) { if (this.enabled) this.od.classList.toggle('ready', on); }
-  // The same button throws the saber and bursts. While a burst is available it says so and lights up.
+  // The power button carries the name of the selected Focus power. SWAP appears once there is a second one.
+  setPower(label, multi) {
+    if (!this.enabled) return;
+    if (label !== this.power) { this.power = label; if (!this.burst) this.sp.textContent = label; }
+    if (multi !== this.multi) { this.multi = multi; this.swap.style.display = multi ? '' : 'none'; }
+  }
+  // The same button bursts. While a burst is available it says so and lights up.
   setBurst(on) {
     if (!this.enabled || on === this.burst) return;
     this.burst = on;
-    this.sp.textContent = on ? 'BURST' : 'THROW';
+    this.sp.textContent = on ? 'BURST' : this.power;
     this.sp.classList.toggle('ready', on);
   }
 

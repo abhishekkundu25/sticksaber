@@ -103,6 +103,14 @@ export const MOVES = {
     hits: [hit(0.06, 0.22, 45, { kx: 420, ky: -260, kind: 'knock', stop: 0.16, shake: 0.6, post: 45, sweepBody: true, unblockable: true })],
     step: [[0.06, 0.19, 1700]], ev: [[0.05, 'sfx', 'swingSpin'], [0.06, 'fx', 'riposteLine']] },
 
+  // Focus powers. CAST is the shared gesture; CRESCENT sends a wave of light along the floor.
+  CAST: { fam: 'power', dur: 0.3, cancel: 0.16, next: {},
+    keys: [[0, { ha: 1.9, hr: 0.75, bl: 1.7, lean: -0.12, py: 49 }], [0.08, { ha: 1.6, hr: 1, bl: 1.57, lean: -0.2, py: 52, ua: 2.2, la: 2.4 }, 'out'], [0.3, { ha: 1.2, hr: 0.9, bl: 1.4 }]],
+    hits: [] },
+  CRESCENT: { fam: 'power', dur: 0.36, cancel: 0.2, next: {},
+    keys: [...cutUp(0, 0.13, 0.07), [0.36, { ...SU, bl: 2.1 }]],
+    hits: [], ev: [[0.11, 'spawn', 'pcrescent'], [0.08, 'sfx', 'swingHeavy']] },
+
   // ───────────── Initiate ─────────────
   i_slash: { dur: 1.0, keys: [...cutDown(0, 0.56), [1.0, SD]], hits: [hit(0.45, 0.6, 9, { post: 22, kx: 260 })],
     step: [[0.4, 0.55, 260]], ev: [[0.24, 'tele', 0], [0.44, 'sfx', 'swingLight']], punish: [0.6, 1.0] },
@@ -241,19 +249,109 @@ export const MOVES = {
     ev: [[0.0, 'fx', 'groundHit'], [0.02, 'spawn', 'waves']], punish: [0.15, 1.5] },
 };
 
-for (const id in MOVES) {
-  const m = MOVES[id];
-  m.id = id;
+// Fill in defaults and compile the key track. A channel given as `null` is released back to the
+// fighter's own stance from that key on (used when two moves are joined).
+function finish(id, m) {
+  m.id = id; m.src ??= id; // `src` is the hand-made move a generated one came from
   m.fam ??= 'enemy';
   m.hits ??= []; m.ev ??= []; m.step ??= [];
-  m.k = m.keys.map(([t, o, e]) => {
+  const rel = [];
+  m.k = m.keys.map(([t, o, e], i) => {
     const a = new Float32Array(N).fill(NaN);
-    for (const key in o) a[IDX[key]] = o[key];
+    rel[i] = null;
+    for (const key in o) {
+      if (o[key] === null) (rel[i] ??= new Set()).add(IDX[key]); else a[IDX[key]] = o[key];
+    }
     return { t, a, e: EASE[e || 'io'] };
   });
   for (let i = 1; i < m.k.length; i++) {
-    for (let c = 0; c < N; c++) if (Number.isNaN(m.k[i].a[c])) m.k[i].a[c] = m.k[i - 1].a[c];
+    for (let c = 0; c < N; c++) if (Number.isNaN(m.k[i].a[c]) && !rel[i]?.has(c)) m.k[i].a[c] = m.k[i - 1].a[c];
   }
+  return m;
+}
+for (const id in MOVES) finish(id, MOVES[id]);
+
+// ───────────── Generated moves ─────────────
+// Enemy strains and bosses are generated per run, and so are some of their attacks: faster or slower
+// copies of a hand-made move, and two moves joined into one string. Ids are derived from the sources,
+// so the same variant is only ever built once.
+export function registerMove(id, m) {
+  if (!MOVES[id]) MOVES[id] = finish(id, m);
+  return id;
+}
+
+const jumps = (m) => !!m.landMove || !!m.plunge || m.ev.some((e) => e[1] === 'leap' || e[1] === 'leapAt');
+const R4 = (v) => Math.round(v * 1e4) / 1e4;
+
+// Every hit and every projectile must be announced. The first tell needs a readable gap; later hits
+// in a string can come quicker, as they do in the hand-made strings.
+export function fairTells(m) {
+  const marks = [...m.hits.map((h) => h.t0), ...m.ev.filter((e) => e[1] === 'spawn').map((e) => e[0])].sort((a, b) => a - b);
+  const tells = m.ev.filter((e) => e[1] === 'tele');
+  let prev = -1;
+  for (let i = 0; i < marks.length; i++) {
+    const t0 = marks[i], need = i === 0 ? 0.2 : 0.13;
+    let best = null;
+    for (const e of tells) if (e[0] < t0 && e[0] > prev && (!best || e[0] > best[0])) best = e;
+    if (!best) { if (i === 0) return false; prev = t0; continue; }
+    if (t0 - best[0] < need) {
+      best[0] = R4(Math.max(prev + 0.02, 0.02, t0 - need - 0.04));
+      if (t0 - best[0] < need - 0.03) return false;
+    }
+    prev = t0;
+  }
+  return true;
+}
+
+// A copy of an enemy move played at `k` times its length. Quick copies hit lighter, slow ones harder.
+export function tempoMove(srcId, k) {
+  const s = MOVES[srcId];
+  if (k === 1 || s.fam !== 'enemy' || jumps(s)) return srcId;
+  const id = `${srcId}@${Math.round(k * 100)}`;
+  if (MOVES[id]) return id;
+  const T = (t) => R4(t * k), pair = (a) => (a ? a.map(T) : undefined);
+  const dk = k < 1 ? 0.85 : 1 + (k - 1) * 0.9;
+  const m = {
+    dur: T(s.dur), tier: s.tier, src: srcId, aimRange: s.aimRange,
+    keys: s.keys.map(([t, o, e]) => [T(t), o, e]),
+    hits: s.hits.map((h) => ({ ...h, t0: T(h.t0), t1: T(h.t1), dmg: Math.max(1, Math.round(h.dmg * dk)), post: Math.round(h.post * dk) })),
+    step: s.step.map(([a, b, v]) => [T(a), T(b), v / k]),
+    ev: s.ev.map(([t, type, arg]) => [T(t), type, arg]),
+    armor: pair(s.armor), punish: pair(s.punish), aim: pair(s.aim), line: pair(s.line), run: s.run === undefined ? undefined : T(s.run),
+  };
+  return fairTells(m) ? registerMove(id, m) : srcId;
+}
+
+// Two enemy moves joined into one string: the first is cut short after its last hit and the second
+// follows straight on. Returns null when the pair cannot be joined.
+export function chainMove(aId, bId) {
+  const a = MOVES[aId], b = MOVES[bId];
+  const ok = (m) => m.fam === 'enemy' && m.hits.length && !jumps(m) && !m.run && !m.aim && !m.line;
+  if (aId === bId || !ok(a) || !ok(b)) return null;
+  const id = `${aId}+${bId}`;
+  if (MOVES[id]) return id;
+  const cut = R4(a.hits[a.hits.length - 1].t1 + 0.08), sh = (t) => R4(t + cut);
+  // Channels the first move posed and the second never mentions go back to the stance.
+  const used = new Set();
+  for (const [t, o] of a.keys) if (t < cut) for (const key in o) used.add(key);
+  const first = { ...b.keys[0][1] };
+  for (const key of used) if (!(key in first)) first[key] = null;
+  const m = {
+    dur: sh(b.dur), tier: Math.max(a.tier || 0, b.tier || 0) || undefined, src: aId,
+    keys: [...a.keys.filter(([t]) => t < cut), [sh(b.keys[0][0]), first, b.keys[0][2]], ...b.keys.slice(1).map(([t, o, e]) => [sh(t), o, e])],
+    hits: [...a.hits.map((h) => ({ ...h, dmg: Math.max(1, Math.round(h.dmg * 0.85)) })), ...b.hits.map((h) => ({ ...h, t0: sh(h.t0), t1: sh(h.t1), dmg: Math.max(1, Math.round(h.dmg * 0.9)) }))],
+    step: [...a.step.filter((s) => s[0] < cut).map((s) => [s[0], Math.min(s[1], cut), s[2]]), ...b.step.map(([x, y, v]) => [sh(x), sh(y), v])],
+    ev: [...a.ev.filter((e) => e[0] < cut).map((e) => [...e]), ...b.ev.map(([t, type, arg]) => [sh(t), type, arg])],
+    armor: a.armor, punish: b.punish ? b.punish.map(sh) : undefined,
+  };
+  return fairTells(m) ? registerMove(id, m) : null;
+}
+
+// A copy with some event types removed, for bosses that borrow the Forgemaster's attacks without its heat.
+export function stripEvents(srcId, types) {
+  const s = MOVES[srcId], id = `${srcId}~`;
+  if (MOVES[id]) return id;
+  return registerMove(id, { ...s, id: undefined, k: undefined, src: srcId, keys: s.keys, hits: s.hits, step: s.step, ev: s.ev.filter((e) => !types.includes(e[1])) });
 }
 
 // Write the move's pose at time t over `tgt`, which the caller pre-fills with the fighter's stance.

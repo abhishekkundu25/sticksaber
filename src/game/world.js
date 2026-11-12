@@ -2,11 +2,13 @@
 // it runs headless for fuzz tests; sound and input are injected.
 import { clamp, lerp, rand, noise1, rng } from '../core/math.js';
 import { Fighter } from './fighter.js';
-import { resolveCombat } from './combat.js';
+import { resolveCombat, applyHit } from './combat.js';
 import { Projectiles } from './projectiles.js';
 import { Fx } from '../render/fx.js';
 import { PLAYER } from './player.js';
-import { ENEMIES } from './enemies.js';
+import { ENEMIES, echoDef } from './enemies.js';
+import { baseMods, buildMods } from './augments.js';
+import { POWERS } from './powers.js';
 
 const RANKS = [0, 18, 42, 72, 108, 150];
 export const RANK_NAMES = ['', 'D', 'C', 'B', 'A', 'S'];
@@ -53,7 +55,13 @@ class Style {
 export const OVERDRIVE_TIME = 6;
 const STOP_BANK = 0.3; // seconds of hit-stop that can be held in reserve
 const OD_COLOR = '#e6fdff';
-export const newStats = () => ({ parries: 0, reads: 0, interrupts: 0, kills: 0, dodges: 0, hitsTaken: 0, cuts: 0, bursts: 0, overdrives: 0 });
+const AURA_TRAITS = ['swift', 'armored', 'volatile'];
+const STORM_HIT = { dmg: 28, post: 30, kx: 200, ky: -300, kind: 'knock', stop: 0.05, shake: 0.3, stun: 0.4, fromPlayer: true, id: 'STORM', fam: 'power', unblockable: true };
+const WIRE_HIT = { dmg: 10, post: 10, kx: 120, ky: 0, kind: 'flinch', stop: 0.02, shake: 0.1, stun: 0.3, fromPlayer: true, id: 'WIRE', fam: 'power', unblockable: true };
+const BURST_HIT = { dmg: 18, post: 30, kx: 640, ky: -440, kind: 'knock', stop: 0, shake: 0, stun: 0.4, fromPlayer: true, id: 'BURST', fam: 'power', unblockable: true };
+// The mirror image: the player's body with a brain that only copies.
+const MIRROR = { ...PLAYER, name: 'Mirror', ribbons: [], ctrl: mirrorCtrl };
+export const newStats = () => ({ parries: 0, reads: 0, interrupts: 0, kills: 0, dodges: 0, hitsTaken: 0, cuts: 0, bursts: 0, overdrives: 0, powers: 0, orbs: 0, crits: 0 });
 
 export class World {
   constructor() {
@@ -76,42 +84,79 @@ export class World {
     this.events = []; // drained by the director / main loop: {type, ...}
     this.training = false;
     this.floor = 1; // 1-based floor number; enemies unlock extra attacks as it rises
+    // Per-run state the director fills in.
+    this.roster = null;                    // generated enemy definitions for this run, by kind
+    this.hpMul = 1; this.rateMul = 1; this.cdMul = 1; this.gravK = 1; this.anom = null;
+    this.build = {}; this.mods = baseMods(); // drafted augments and the modifiers they add up to
+    this.powers = ['throw']; this.powerIdx = 0; this.powerT = 0;
+    this.bonusHp = 0;                      // health earned by beating sector keepers
+    this.orbs = []; this.mirror = null; this.stasis = 0;
+    this.windUsed = false; this.freeCast = false; this.odShield = 0; this.odMax = OVERDRIVE_TIME; this.hitCount = 0;
   }
 
   // ───────────── setup ─────────────
   setArena(width) { this.minX = -width / 2; this.maxX = width / 2; }
+  setBuild(build) {
+    this.build = build; this.mods = buildMods(build);
+    this.maxFocus = 300 + this.mods.pips * 100;
+    const p = this.player;
+    if (p && !p.dead) {
+      const up = PLAYER.hp + this.mods.maxHp + this.bonusHp - p.maxHp;
+      p.maxHp += up; p.hp = Math.min(p.maxHp, p.hp + Math.max(0, up));
+      p.speedMul = this.mods.speed;
+      if (this.overdrive <= 0) p.bladeLen = this.baseBlade(p);
+    }
+  }
+  baseBlade(f) { return f.def.blade.len * f.scale * (f.isPlayer ? this.mods.blade : 1); }
   spawnPlayer(x = 0) {
     const p = new Fighter(PLAYER, x, 0);
     this.player = p; this.fighters.push(p);
-    this.cam.x = x; this.overdrive = 0;
+    this.cam.x = x; this.overdrive = 0; this.mirror = null; this.stasis = 0; this.orbs.length = 0;
+    p.hp = p.maxHp = PLAYER.hp + this.mods.maxHp + this.bonusHp; p.speedMul = this.mods.speed; p.bladeLen = this.baseBlade(p);
     return p;
   }
+  def(kind) { return this.roster?.[kind] || ENEMIES[kind]; }
   // opts: { elite: 'swift' | 'armored' | 'volatile', temper: 'aggressive' | 'cautious' | 'flank' }
   spawnEnemy(kind, x, drop = true, opts = null) {
-    const def = ENEMIES[kind];
+    const def = this.def(kind);
     const f = new Fighter(def, clamp(x, this.minX + 60, this.maxX - 60), 1);
     if (def.hitWall) f.hitWall = (w) => def.hitWall(f, w);
     f.face(this.player ? this.player.x : 0);
     if (opts?.temper) f.temper = opts.temper;
+    if (opts?.color) f.color = opts.color;
+    const frenzy = this.anom === 'frenzy';
+    let hp = def.hp * this.hpMul * (frenzy ? 0.75 : 1);
+    f.rate = this.rateMul * (frenzy ? 1.15 : 1); f.ai.cdK = this.cdMul; f.dmgMul = def.dmg ?? 1;
     if (opts?.elite) {
-      f.elite = opts.elite;
-      f.hp = f.maxHp = Math.round(def.hp * 1.35);
-      if (opts.elite === 'swift') f.rate = 1.25;
+      f.elite = opts.elite; f.tr = { ...f.tr, [opts.elite]: 1 };
+      hp *= 1.35;
     }
+    if (f.tr.swift) f.rate *= 1.2;
+    f.hp = f.maxHp = Math.round(hp);
     if (drop) {
       f.y = def.flying ? -520 : -620; f.vy = 500; f.onGround = false;
-      this.fx.beam(f.x, 0.7, def.color); this.sfx(f.elite ? 'elite' : 'ignite', f.x, f.elite ? 0.9 : 0.5);
+      this.fx.beam(f.x, def.boss ? 1.1 : 0.7, def.color);
+      this.sfx(def.champion ? 'championIntro' : f.elite ? 'elite' : 'ignite', f.x, f.elite || def.boss ? 0.9 : 0.5);
     }
     this.fighters.push(f);
     return f;
   }
   // An afterimage that repeats one of the boss's moves a beat later. It cannot be hit.
   spawnEcho(src, move, delay) {
-    const f = new Fighter(ENEMIES.echo, src.x, 1);
+    const f = new Fighter(echoDef(src.def), src.x, 1);
     f.facing = src.facing; f.phantom = true; f.double = src.double; f.color = src.color; f.fade = 0.5; f.dmgMul = 0.6;
-    f.p.set(src.p); f.ai.wait = delay; f.ai.move = move;
+    f.p.set(src.p); f.ai.wait = delay; f.ai.move = move; f.rate = src.rate;
     f.computeJoints();
     this.fighters.push(f);
+    return f;
+  }
+  // The Mirror power: an image of the player that stands at their back and repeats their attacks.
+  spawnMirror(src, life) {
+    const f = new Fighter(MIRROR, src.x - src.facing * 64, 0);
+    f.phantom = true; f.fade = 0.6; f.color = '#b9f6ff'; f.dmgMul = 0.5; f.facing = src.facing; f.gravMul = 0;
+    f.bladeLen = src.bladeLen; f.ai.life = life; f.ai.serial = src.atkSerial || 0; f.ai.queue = null;
+    f.computeJoints();
+    this.fighters.push(f); this.mirror = f;
     return f;
   }
   clearEnemies() {
@@ -142,7 +187,7 @@ export class World {
   gainFocus(v) {
     if (this.overdrive > 0) return; // the meter is the Overdrive clock while it runs
     const before = Math.floor(this.focus / 100);
-    this.focus = Math.min(this.maxFocus, this.focus + v);
+    this.focus = Math.min(this.maxFocus, this.focus + v * this.mods.focus * (this.anom === 'surge' ? 2 : 1));
     if (Math.floor(this.focus / 100) > before) this.sfx('focus', this.player.x, 0.7);
   }
   // Slice a dead body up to `n` times near (x, y), throwing each piece along (ix, iy). Returns the cuts made.
@@ -168,12 +213,13 @@ export class World {
   }
 
   // Burst: spend one pip while being hit or knocked down to blow everything back and stand up.
-  burst(f) {
-    if (this.focus < 100 || this.time - this.lastBurst < 1.5) {
+  burst(f, free = false) {
+    if (!free && (this.focus < 100 || this.time - this.lastBurst < 1.5)) {
       this.sfx('uiMove', f.x); this.fx.text(f.x, f.j[1] - 36, this.focus < 100 ? 'NO FOCUS' : 'NOT YET', '#8fa3b8', 14, 0.6);
       return false;
     }
-    this.focus -= 100; this.lastBurst = this.time; this.stats.bursts++;
+    if (!free) { this.focus -= 100; this.stats.bursts++; }
+    this.lastBurst = this.time;
     if (f.rag) f.getUp(0.14); else f.setState('free');
     f.invuln = Math.max(f.invuln, 0.75); f.vx = 0; f.posture = 0;
     const cx = f.x, cy = f.y - 60, fx = this.fx;
@@ -189,6 +235,8 @@ export class World {
         if (e.invuln <= 0 && !scripted) { e.setState('recoil', 0.55); e.vx = dir * 620; e.posture += 20; e.barT = 3; }
       } else e.toRagdoll(dir * 640, -440, rand(-5, 5));
       fx.spark(e.cx, e.cy, dir > 0 ? 0 : Math.PI, 0.8, 8, 620, f.color, { white: 0.5 });
+      // Aftershock: the blast also hurts.
+      if (this.mods.burstDmg && e.invuln <= 0) applyHit(this, null, e, { ...BURST_HIT, dmg: this.mods.burstDmg, dir }, e.cx, e.cy);
     }
     for (const p of this.projectiles.list) if (p.team !== f.team && Math.abs(p.x - cx) < 340) p.life = 0;
     fx.ring(cx, cy, 20, 330, 0.45, f.color, 1, 9); fx.ring(cx, cy, 10, 220, 0.3, '#ffffff', 1, 4); fx.ring(cx, f.y - 2, 30, 380, 0.5, f.color, 0.2, 6);
@@ -209,8 +257,9 @@ export class World {
       this.sfx('uiMove', f.x); this.fx.text(f.x, f.j[1] - 36, 'NEED FULL FOCUS', '#8fa3b8', 14, 0.7);
       return false;
     }
-    this.focus = 0; this.overdrive = OVERDRIVE_TIME; this.odGhost = 0; this.stats.overdrives++;
-    f.rate = 1.15; f.bladeLen = f.def.blade.len * f.scale * 1.22; f.color = OD_COLOR;
+    this.focus = 0; this.overdrive = this.odMax = OVERDRIVE_TIME + this.mods.odTime; this.odGhost = 0; this.stats.overdrives++;
+    this.odShield = this.mods.odShield;
+    f.rate = 1.15; f.bladeLen = this.baseBlade(f) * 1.22; f.color = OD_COLOR;
     f.invuln = Math.max(f.invuln, 0.5);
     const cx = f.cx, cy = f.cy, fx = this.fx;
     for (const e of this.fighters) {
@@ -229,10 +278,109 @@ export class World {
     const f = this.player;
     this.overdrive = 0;
     if (!f) return;
-    f.rate = 1; f.bladeLen = f.def.blade.len * f.scale; f.color = f.def.color;
+    f.rate = 1; f.bladeLen = this.baseBlade(f); f.color = f.def.color;
     this.fx.ring(f.cx, f.cy, 14, 120, 0.3, f.color, 1, 3);
     this.sfx('extinguish', f.x, 0.8, 1.2);
     if (broken) { this.fx.text(f.x, f.j[1] - 40, 'OVERDRIVE BROKEN', '#ff6b6b', 16, 0.9); this.fx.spark(f.cx, f.cy, 0, 3.14, 20, 600, OD_COLOR); this.sfx('guardBreak', f.x, 0.6); }
+  }
+
+  // ───────────── focus powers ─────────────
+  get power() { return POWERS[this.powers[this.powerIdx]] || POWERS.throw; }
+  cyclePower(dir = 1) {
+    const n = this.powers.length;
+    if (n < 2) return;
+    this.powerIdx = (this.powerIdx + dir + n) % n; this.powerT = 1.4;
+    this.sfx('powerSwap', this.player ? this.player.x : 0, 0.8, 1 + this.powerIdx * 0.1);
+  }
+  // By slot number or by id.
+  selectPower(which) {
+    const i = typeof which === 'number' ? which : this.powers.indexOf(which);
+    if (i < 0 || i >= this.powers.length || i === this.powerIdx) return i === this.powerIdx;
+    this.powerIdx = i; this.powerT = 1.4;
+    this.sfx('powerSwap', this.player ? this.player.x : 0, 0.8, 1 + i * 0.1);
+    return true;
+  }
+  // Spend pips on the selected power. Returns true if it went off.
+  usePower(f) {
+    const P = this.power, cost = this.freeCast ? 0 : P.cost * 100;
+    if (P.ready && !P.ready(this, f)) return false;
+    if (this.focus < cost) { this.sfx('uiMove', f.x); this.fx.text(f.x, f.j[1] - 36, this.overdrive > 0 ? 'OVERDRIVE' : 'NO FOCUS', '#8fa3b8', 14, 0.6); return false; }
+    if (!P.use(this, f)) return false;
+    if (this.freeCast) { this.freeCast = false; this.fx.text(f.x, f.j[1] - 70, 'FREE', '#ffd36b', 14, 0.8); }
+    this.focus -= cost; this.stats.powers++;
+    return true;
+  }
+  // A bolt from the player's build (Stormcaller, Live Wire) onto the nearest enemy other than `from`.
+  strike(from, hit, dmg, range, color, fromSky) {
+    let best = null, bd = range;
+    for (const e of this.fighters) {
+      if (e.team !== 1 || e.dead || e.phantom || e === from || e.remove || e.y < -700) continue;
+      const d = Math.abs(e.x - from.x);
+      if (d < bd) { bd = d; best = e; }
+    }
+    if (!best) return;
+    if (fromSky) { this.fx.zap(best.x + rand(-60, 60), -760, best.cx, best.cy, color, 0.3); this.fx.flash(best.cx, best.cy, 120, color, 0.2); this.sfx('powerArc', best.x, 0.9, 0.8); this.shake(0.3); }
+    else { this.fx.zap(from.cx, from.cy, best.cx, best.cy, color, 0.2); this.sfx('powerArc', best.x, 0.5, 1.3); }
+    applyHit(this, null, best, { ...hit, dmg, dir: best.x >= from.x ? 1 : -1 }, best.cx, best.cy);
+  }
+  // Killed enemies sometimes leave motes of health and focus that fly to the player.
+  dropOrbs(B, x, y) {
+    if (this.training || B.def.kind === 'shard') return;
+    const pl = this.player, k = this.mods.orbs * (this.anom === 'bounty' ? 3 : 1);
+    let hp = rng() < (pl && pl.hp < pl.maxHp * 0.4 ? 0.18 : 0.06) * k ? 1 : 0, fo = rng() < 0.12 * k ? 1 : 0;
+    if (B.elite) fo += rng() < 0.5 ? 1 : 0;
+    if (B.def.boss) { hp += 4; fo += 4; }
+    for (let i = 0; i < hp + fo && this.orbs.length < 40; i++) {
+      this.orbs.push({ kind: i < hp ? 'hp' : 'focus', x, y, vx: rand(-260, 260), vy: -rand(240, 520), t: 0 });
+    }
+  }
+  tickOrbs(dt) {
+    const pl = this.player, L = this.orbs, pull = this.countEnemies() === 0;
+    for (let i = L.length - 1; i >= 0; i--) {
+      const o = L[i];
+      o.t += dt;
+      const dx = pl.cx - o.x, dy = pl.cy - o.y, d = Math.hypot(dx, dy) || 1;
+      if (o.t > 0.45 && !pl.dead && (d < 210 || pull)) {
+        const sp = Math.min(1500, 500 + o.t * 900);
+        o.vx = (dx / d) * sp; o.vy = (dy / d) * sp;
+      } else { o.vy += 1500 * dt; o.vx *= 1 - 1.5 * dt; }
+      o.x = clamp(o.x + o.vx * dt, this.minX + 10, this.maxX - 10); o.y += o.vy * dt;
+      if (o.y > -10 && o.vy > 0) { o.y = -10; o.vy *= -0.45; }
+      if (d < 30 && o.t > 0.3 && !pl.dead) {
+        if (o.kind === 'hp') { pl.hp = Math.min(pl.maxHp, pl.hp + 4); this.fx.text(pl.x, pl.j[1] - 30, '+4', '#7dffb0', 13, 0.6); this.sfx('pickupHealth', pl.x, 0.7); }
+        else { this.gainFocus(18); this.sfx('pickupFocus', pl.x, 0.6); }
+        this.fx.flash(o.x, o.y, 40, o.kind === 'hp' ? '#7dffb0' : '#56e9ff', 0.12);
+        this.stats.orbs++;
+        L.splice(i, 1);
+      } else if (o.t > 14) L.splice(i, 1);
+    }
+  }
+  // Burning, regenerating strains, the Wellspring trickle.
+  tickStatus(dt) {
+    for (const f of this.fighters) {
+      if (f.dead || f.team !== 1) continue;
+      if (f.burnT > 0) {
+        f.burnT -= dt;
+        if (f.hp > 1) { f.hp = Math.max(1, f.hp - f.burnDps * dt); f.barT = Math.max(f.barT, 0.5); }
+        if (rng() < dt * 22) this.fx.ember(f.cx + rand(-10, 10), f.cy + rand(-30, 20), 1, '#ff8a30');
+      }
+      if (f.tr.regen && f.sinceHurt > 3 && f.hp < f.maxHp) {
+        f.hp = Math.min(f.maxHp, f.hp + f.maxHp * 0.05 * dt); f.barT = Math.max(f.barT, 0.5);
+        if (rng() < dt * 10) this.fx.ember(f.cx + rand(-14, 14), f.cy + rand(-20, 30), 1, '#7dffb0');
+      }
+    }
+    if (this.mods.focusRegen && this.overdrive <= 0 && this.focus < this.maxFocus) this.focus = Math.min(this.maxFocus, this.focus + this.mods.focusRegen * dt);
+    if (this.stasis > 0) this.stasis -= dt;
+    if (this.powerT > 0) this.powerT -= dt;
+  }
+  // Second Wind: the killing blow is refused once per floor.
+  secondWind(f) {
+    this.windUsed = true;
+    f.hp = f.maxHp * 0.3; this.rally = 0;
+    this.burst(f, true);
+    this.fx.text(f.x, f.j[1] - 110, 'SECOND WIND', '#ffd36b', 26, 1.4);
+    this.sfx('secondWind', f.x); this.slow(0.25, 0.8); this.flashScreen('#ffd36b', 0.4);
+    f.invuln = Math.max(f.invuln, 1.6);
   }
 
   guarding(f) { return f.state === 'guard' || (f.def.shield && f.state === 'free' && f.onGround && !f.broken); }
@@ -283,7 +431,11 @@ export class World {
 
   spawnFrom(f, what) {
     const pl = this.player;
-    if (what === 'saber') { f.armed = false; this.projectiles.saber(f); this.audioLoop('throw', true); }
+    if (what === 'saber') { f.armed = false; this.projectiles.saber(f, 480 * this.mods.throwRange, this.mods.throwDmg); this.audioLoop('throw', true); }
+    else if (what === 'pcrescent') {
+      this.projectiles.wave(f, f.x + f.facing * 50, f.facing, { crescent: true, speed: 980, h: 96, range: 1150, dmg: 20 });
+      this.fx.flash(f.tx, f.ty, 90, f.color, 0.16); this.sfx('powerCrescent', f.x);
+    }
     else if (what === 'disc') { f.armed = false; this.projectiles.saber(f, 430); }
     else if (what === 'lob') { this.projectiles.lob(f, f.j[12], f.j[13], clamp(pl.x + pl.vx * 0.35, this.minX + 40, this.maxX - 40)); }
     else if (what === 'embers') {
@@ -351,7 +503,15 @@ export class World {
       this.style.hurt(); this.stats.hitsTaken++;
       this.rally = Math.min(B.maxHp - Math.max(0, B.hp), this.rally + dmg * 0.6); this.rallyT = 3.2;
       this.sfx('hurt', B.x); this.flashScreen('#ff2a3a', 0.25);
-      if (this.overdrive > 0) this.endOverdrive(true);
+      if (this.overdrive > 0) {
+        if (this.odShield) { this.odShield = 0; fx.text(B.x, B.j[1] - 40, 'UNBROKEN', OD_COLOR, 16, 0.9); fx.ring(B.cx, B.cy, 20, 140, 0.3, OD_COLOR, 1, 4); }
+        else this.endOverdrive(true);
+      }
+      // A vampiric strain feeds on what it takes.
+      if (A && A.tr.vampiric && !A.dead) {
+        A.hp = Math.min(A.maxHp, A.hp + dmg * 1.5 + A.maxHp * 0.04); A.barT = 3;
+        fx.ember(B.cx, B.cy, 8, '#ff3b5e'); fx.text(A.x, A.j[1] - 40 * A.scale, 'FEEDS', '#ff3b5e', 13, 0.7);
+      }
     } else {
       if (info.punished) fx.text(cx, cy - 62, 'PUNISH', '#ffd36b', 16, 0.8);
       if (info.glance) fx.text(cx, cy - 46, 'GLANCED', '#8fa3b8', 13, 0.6);
@@ -360,6 +520,9 @@ export class World {
         // Rally: striking back wins a slice of recent damage back.
         if (this.rally > 0) { const r = Math.min(this.rally, dmg * 0.5); this.rally -= r; pl.hp = Math.min(pl.maxHp, pl.hp + r); }
         if (this.overdrive > 0) pl.hp = Math.min(pl.maxHp, pl.hp + 1.5);
+        if (this.mods.leech) pl.hp = Math.min(pl.maxHp, pl.hp + this.mods.leech);
+        // Live Wire: every fourth blade hit jumps to someone else.
+        if (this.mods.arc && ++this.hitCount % 4 === 0) this.strike(B, WIRE_HIT, this.mods.arc, 320, '#c9a0ff', false);
         if (!pl.onGround && pl.state === 'attack' && pl.move.air && !pl.move.plunge) {
           pl.vy = Math.min(pl.vy, -175);
           if (!pl.refunded) { pl.refunded = true; pl.airJumps = 1; pl.airDash = 1; }
@@ -386,10 +549,23 @@ export class World {
     fx.spark(cx, cy, dir > 0 ? 0 : Math.PI, 1.5, 30, 900, B.color, { white: 0.3 });
     fx.flash(cx, cy, 100, '#ffffff', 0.16);
     this.sfx('kill', cx); this.stop(0.14); this.shake(0.5); this.punch(0.03);
-    if (B.elite === 'volatile') this.projectiles.mine(B, B.x, { color: '#ff7a2e', fuse: 0.8, r: 125, dmg: 16 });
+    if (B.tr.volatile || this.anom === 'volatile') this.projectiles.mine(B, B.x, { color: '#ff7a2e', fuse: 0.8, r: 125, dmg: 16 });
+    if (B.tr.splitter && this.countEnemies() < 9) {
+      fx.text(cx, cy - 50, 'SPLITS', B.color, 15, 0.8);
+      for (const side of [-1, 1]) {
+        const sh = this.spawnEnemy('shard', B.x + side * 30, false, { color: B.color });
+        sh.y = -60; sh.vy = -420; sh.vx = side * 260; sh.onGround = false; sh.invuln = 0.3;
+      }
+    }
     this.gainFocus(12); this.style.bonus(6);
-    const pl = this.player;
-    if (pl && !pl.dead) pl.hp = Math.min(pl.maxHp, pl.hp + 2 + Math.min(this.rally, 6));
+    const pl = this.player, M = this.mods;
+    if (pl && !pl.dead) pl.hp = Math.min(pl.maxHp, pl.hp + 2 + M.killHeal + Math.min(this.rally, 6));
+    if (M.reap) this.gainFocus(M.reap);
+    this.dropOrbs(B, cx, cy);
+    if (B.def.boss) {
+      // Whatever it called in falls with it.
+      for (const e of this.fighters) if (e.team === 1 && !e.dead && e !== B && !e.def.boss && !e.phantom) { e.die((e.x >= cx ? 1 : -1) * 300, -420, rand(-6, 6)); fx.spark(e.cx, e.cy, 0, 3.14, 14, 600, e.color); }
+    } else if (M.storm) this.strike(B, STORM_HIT, M.storm, 720, '#bfe6ff', true);
     const left = this.countEnemies();
     if (left === 0 && !this.training) this.slow(0.2, 0.9);
     this.events.push({ type: 'kill', kind: B.def.kind, left, boss: !!B.def.boss });
@@ -398,8 +574,8 @@ export class World {
 
   perfectDodge(pl, by) {
     pl.dodged = true;
-    this.witch = 1.25; this.stats.dodges++;
-    this.gainFocus(34); this.style.bonus(10);
+    this.witch = Math.max(this.witch, 1.25 + this.mods.dodgeTime); this.stats.dodges++;
+    this.gainFocus(34 + this.mods.dodgeFocus); this.style.bonus(10);
     for (let i = 0; i < 3; i++) this.fx.ghost(pl, '#ffffff', 0.35 + i * 0.08);
     this.fx.ring(pl.cx, pl.cy, 14, 150, 0.4, pl.color, 1, 3);
     this.fx.text(pl.x, pl.j[1] - 40, 'FLOW', pl.color, 20, 0.8);
@@ -427,6 +603,8 @@ export class World {
     this.separate(dt);
     resolveCombat(this);
     this.projectiles.update(this, dt, ets);
+    if (this.orbs.length) this.tickOrbs(dt);
+    this.tickStatus(dt);
     this.fx.update(dt);
     if (this.style.update(dt)) this.sfx('rankUp', this.player.x, 0.6);
     if (this.rallyT > 0) this.rallyT -= dt; else if (this.rally > 0) this.rally = Math.max(0, this.rally - 18 * dt);
@@ -437,6 +615,7 @@ export class World {
       if ((this.odGhost -= dt) <= 0 && pl && !pl.rag && (pl.state === 'attack' || pl.state === 'dash' || Math.abs(pl.vx) > 200)) { this.odGhost = 0.05; this.fx.ghost(pl, '#56e9ff', 0.22); }
       if (this.overdrive <= 0 || !pl || pl.dead) this.endOverdrive(false);
     }
+    if (this.mirror && (this.mirror.remove || !fs.includes(this.mirror))) this.mirror = null;
     for (let i = fs.length - 1; i >= 0; i--) if (fs[i].remove) fs.splice(i, 1);
   }
 
@@ -480,4 +659,28 @@ export class World {
     const s = c.trauma * c.trauma * 10;
     c.sx = noise1(c.t * 34) * s; c.sy = noise1(c.t * 34 + 50) * s;
   }
+}
+
+// Brain of the mirror image: keep station behind the player and repeat each attack a beat later.
+function mirrorCtrl(f, world, dt) {
+  const ai = f.ai, pl = world.player;
+  if ((ai.life -= dt) <= 0 || !pl || pl.dead) {
+    f.remove = true; world.fx.ghost(f, f.color, 0.4); world.fx.ring(f.cx, f.cy, 10, 90, 0.3, f.color, 1, 3);
+    return;
+  }
+  f.fade = ai.life < 1 ? 0.25 + 0.35 * ai.life : 0.6;
+  f.bladeLen = pl.bladeLen; f.rate = pl.rate;
+  if (pl.atkSerial !== ai.serial) {
+    ai.serial = pl.atkSerial;
+    const m = pl.move;
+    if (m && pl.state === 'attack' && m.hits.length && !m.plunge && m.fam !== 'power' && m.fam !== 'throw') ai.queue = { id: m.id, t: 0.14 };
+  }
+  if (f.state === 'attack') return;
+  f.y = pl.rag ? 0 : pl.y; f.vy = 0; f.onGround = f.y >= 0;
+  if (ai.queue && (ai.queue.t -= dt) <= 0) {
+    f.facing = pl.facing; f.startMove(ai.queue.id); ai.queue = null;
+    return;
+  }
+  const tx = clamp(pl.x - pl.facing * 64, world.minX + 40, world.maxX - 40);
+  f.x += (tx - f.x) * Math.min(1, dt * 9); f.vx = 0; f.facing = pl.facing;
 }

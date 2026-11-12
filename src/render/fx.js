@@ -23,10 +23,10 @@ export class Fx {
   constructor() {
     this.pool = []; // recycled spark records, so a long fight does not feed the garbage collector
     this.sparks = []; this.flashes = []; this.rings = []; this.slashes = []; this.dusts = [];
-    this.texts = []; this.ghosts = []; this.beams = []; this.embers = [];
+    this.texts = []; this.ghosts = []; this.beams = []; this.embers = []; this.zaps = [];
   }
 
-  clear() { for (const k of ['sparks', 'flashes', 'rings', 'slashes', 'dusts', 'texts', 'ghosts', 'beams', 'embers']) this[k].length = 0; }
+  clear() { for (const k of ['sparks', 'flashes', 'rings', 'slashes', 'dusts', 'texts', 'ghosts', 'beams', 'embers', 'zaps']) this[k].length = 0; }
 
   spark(x, y, ang, spread, n, speed, color, o = NONE) {
     for (let i = 0; i < n && this.sparks.length < MAX_SPARKS; i++) {
@@ -53,6 +53,17 @@ export class Fx {
     this.ghosts.push({ j: Float32Array.from(f.j), bx: f.bx, by: f.by, tx: f.tx, ty: f.ty, t2x: f.t2x, t2y: f.t2y, double: f.double, lit: f.armed && f.bladeOn > 0.5, color, life, max: life, w: f.def.lineW * f.scale });
   }
   beam(x, life, color) { this.beams.push({ x, life, max: life, color }); }
+  // A jagged bolt between two points. The kinks are fixed when it is made, so it does not need the sim's random stream to draw.
+  zap(x0, y0, x1, y1, color, life = 0.2) {
+    if (this.zaps.length > 24) return;
+    const n = Math.max(3, Math.min(9, Math.round(Math.hypot(x1 - x0, y1 - y0) / 60))), pts = new Float32Array((n + 1) * 2);
+    const nx = -(y1 - y0), ny = x1 - x0, nl = Math.hypot(nx, ny) || 1;
+    for (let i = 0; i <= n; i++) {
+      const u = i / n, k = i === 0 || i === n ? 0 : rand(-26, 26);
+      pts[i * 2] = x0 + (x1 - x0) * u + (nx / nl) * k; pts[i * 2 + 1] = y0 + (y1 - y0) * u + (ny / nl) * k;
+    }
+    this.zaps.push({ pts, color, life, max: life, x: (x0 + x1) / 2, y: (y0 + y1) / 2, r: Math.hypot(x1 - x0, y1 - y0) / 2 + 30 });
+  }
   ember(x, y, n, color) {
     for (let i = 0; i < n && this.embers.length < 120; i++) {
       const life = rand(0.6, 1.6);
@@ -72,7 +83,7 @@ export class Fx {
       s.x += s.vx * dt; s.y += s.vy * dt;
       if (s.y > -1 && s.vy > 0) { s.y = -1; s.vy *= -0.42; s.vx *= 0.7; }
     }
-    for (const k of ['flashes', 'rings', 'slashes', 'texts', 'ghosts', 'beams']) {
+    for (const k of ['flashes', 'rings', 'slashes', 'texts', 'ghosts', 'beams', 'zaps']) {
       a = this[k];
       for (let i = a.length - 1; i >= 0; i--) { a[i].life -= dt; if (a[i].life <= 0) a.splice(i, 1); }
     }
@@ -139,6 +150,16 @@ export class Fx {
       if (gh.lit) {
         g.globalAlpha = k * 0.7; g.lineWidth = 4;
         g.beginPath(); g.moveTo(gh.double ? gh.t2x : gh.bx, gh.double ? gh.t2y : gh.by); g.lineTo(gh.tx, gh.ty); g.stroke();
+      }
+    }
+    for (const z of this.zaps) {
+      const k = z.life / z.max, p = z.pts;
+      g.strokeStyle = z.color;
+      for (const [w, a] of [[9, 0.3], [3.2, 1]]) {
+        g.globalAlpha = a * k; g.lineWidth = w * (0.5 + k * 0.5);
+        g.beginPath(); g.moveTo(p[0], p[1]);
+        for (let i = 2; i < p.length; i += 2) g.lineTo(p[i], p[i + 1]);
+        g.stroke();
       }
     }
     for (const b of this.beams) {

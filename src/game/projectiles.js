@@ -18,13 +18,16 @@ export class Projectiles {
   }
   wave(owner, x, dir, o = {}) {
     const speed = o.speed ?? 520, life = (o.range ?? 560) / speed;
+    const hit = { dmg: o.dmg ?? 14, post: 30, kx: 380, ky: -430, kind: 'knock', stop: 0.09, shake: 0.4, stun: 0.4, unblockable: !o.crescent };
+    // The player's own wave (the Crescent power) scores like any other attack and cannot be stopped by a shield.
+    if (owner.team === 0) Object.assign(hit, { fromPlayer: true, id: 'CRESCENT', fam: 'power', unblockable: true, post: 40 });
     this.list.push({ type: o.crescent ? 'crescent' : 'wave', team: owner.team, owner, x, dir, speed, h: o.h ?? 46, w: 24, life, max: life, color: owner.color,
-      parryable: !!o.crescent, seen: new Set(), hit: { dmg: o.dmg ?? 14, post: 30, kx: 380, ky: -430, kind: 'knock', stop: 0.09, shake: 0.4, stun: 0.4, unblockable: !o.crescent } });
+      parryable: !!o.crescent && owner.team !== 0, seen: new Set(), hit });
   }
   // A thrown blade that flies out and homes back to its owner. The player's saber and the Duelist's staff both use it.
-  saber(owner, range = 480) {
+  saber(owner, range = 480, dmgK = 1) {
     this.list.push({ type: 'saber', team: owner.team, owner, x: owner.cx + owner.facing * 30, y: owner.cy - 4, x0: owner.cx + owner.facing * 30, dir: owner.facing, range, t: 0, phase: 'out', ang: 0, life: 9,
-      color: owner.color, len: owner.double ? owner.bladeLen * 0.9 : owner.bladeLen * 0.5, cd: new Map(), hit: owner.isPlayer ? SABER_HIT : DISC_HIT });
+      color: owner.color, len: owner.double ? owner.bladeLen * 0.9 : owner.bladeLen * 0.5, cd: new Map(), hit: owner.isPlayer ? (dmgK === 1 ? SABER_HIT : { ...SABER_HIT, dmg: SABER_HIT.dmg * dmgK }) : DISC_HIT });
   }
   // A charge thrown in an arc. It lands, arms with a visible ring, then bursts.
   lob(owner, x, y, tx, o = {}) {
@@ -210,7 +213,9 @@ export class Projectiles {
       if (f.team === p.team || f.dead || f.phantom || p.seen.has(f) || f.invuln > 0) continue;
       if (Math.abs(f.x - p.x) > p.w + 12 * f.scale || f.y < -380) continue;
       p.seen.add(f);
-      applyHit(world, null, f, { ...BLAST_HIT, dmg: p.dmg, ky: -520, dir: f.x >= p.x ? 1 : -1 }, f.x, f.cy);
+      const hit = { ...BLAST_HIT, dmg: p.dmg, ky: -520, dir: f.x >= p.x ? 1 : -1 };
+      if (p.team === 0) { hit.fromPlayer = true; hit.id = 'JUDGMENT'; hit.fam = 'power'; }
+      applyHit(world, null, f, hit, f.x, f.cy);
     }
     return false;
   }

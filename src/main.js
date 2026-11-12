@@ -3,13 +3,13 @@ import { Input } from './core/input.js';
 import { World } from './game/world.js';
 import { Director } from './game/encounters.js';
 import { Renderer } from './render/renderer.js';
-import { buildArena } from './render/arenas.js';
-import { Hud } from './ui/hud.js';
+import { buildArena, ARENA_IDS } from './render/arenas.js';
+import { Hud, draftCard } from './ui/hud.js';
 import { Touch } from './ui/touch.js';
 import { audio } from './audio/audio.js';
 import { BotInput } from './game/bot.js';
 import { clamp, pick } from './core/math.js';
-import { FLOORS, roman, parseSeed } from './game/gen.js';
+import { FLOORS, DIFFS, DIFF_IDS, parseSeed } from './game/gen.js';
 
 const canvas = document.getElementById('game');
 const input = new Input();
@@ -19,48 +19,59 @@ const hud = new Hud();
 const world = new World();
 world.input = input;
 
-// Progress is the highest floor reached. Storage can be unavailable (private windows), so every access is guarded.
-const SAVE_KEY = 'sticksaber.floor';
-const loadFloor = () => { try { return clamp(parseInt(localStorage.getItem(SAVE_KEY), 10) || 1, 1, FLOORS); } catch { return 1; } };
-const saveFloor = (n) => { try { if (n > loadFloor()) localStorage.setItem(SAVE_KEY, String(n)); } catch { /* play on without saving */ } };
-// `?seed=ABC123` pins the run so it can be replayed or shared; otherwise every run is new.
-const fixedSeed = parseSeed(new URLSearchParams(location.search).get('seed') || '');
+// The run in progress (seed, difficulty, floor, build) is saved at every floor, so a hundred floors
+// do not have to be climbed in one sitting. Storage can be unavailable (private windows), so every
+// access is guarded.
+const RUN_KEY = 'sticksaber.run', PREF_KEY = 'sticksaber.diff';
+const store = {
+  get(key) { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } },
+  set(key, v) { try { if (v === null) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(v)); } catch { /* play on without saving */ } },
+};
+const loadRun = () => { const s = store.get(RUN_KEY); return s && s.seed && s.floor >= 1 && s.floor <= FLOORS && DIFFS[s.diff] && Array.isArray(s.powers) && s.build ? s : null; };
+// `?seed=ABC123` pins the run so it can be replayed or shared, `?diff=easy|normal|hard` its
+// difficulty, and `?floor=40` starts there with the picks the run would have made on the way up.
+const query = new URLSearchParams(location.search);
+const fixedSeed = parseSeed(query.get('seed') || '');
+const fixedFloor = clamp(parseInt(query.get('floor'), 10) || 0, 0, FLOORS);
 
-const app = { state: 'menu', idx: 0, muted: false, menu: [], toast: null, manual: false, touch: false };
+const app = { state: 'menu', idx: 0, muted: false, menu: [], toast: null, manual: false, touch: false, diff: DIFFS[query.get('diff')] ? query.get('diff') : DIFFS[store.get(PREF_KEY)] ? store.get(PREF_KEY) : 'normal' };
 
 // Phones and tablets: taps drive the menus, an on-screen stick and buttons drive the fight.
 const taps = [], cmds = [];
 const touch = new Touch(input, canvas, renderer.view, { tap: (x, y) => taps.push({ x, y }), cmd: (name) => cmds.push(name) });
 const BURST_STATES = { hitstun: 1, stagger: 1, ragdoll: 1, getup: 1, recoil: 1 };
-const SPAWNS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit6', 'Digit7', 'Digit8', 'Digit5'];
+const SPAWNS = ['Digit1', 'Digit2', 'Digit3', 'BracketLeft', 'Digit4', 'Digit6', 'Digit7', 'BracketLeft', 'Digit8', 'Digit5', 'BracketRight'];
+const DIGITS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9'];
 let spawnIdx = 0;
 const live = () => app.state === 'play' || app.state === 'pause';
 
 // One arena is baked at a time: each floor is its own seeded variant, so the previous one is released.
+const STAND_IN = { garden: 'hall', vault: 'foundry', apex: 'causeway' };
 let arenaKey = '';
 const director = new Director(world, {
-  setArena(id, seed = 0) {
-    const key = `${id}:${seed}`;
+  setArena(id, seed = 0, hue = 0) {
+    if (!ARENA_IDS.includes(id)) id = STAND_IN[id] || 'causeway';
+    const key = `${id}:${seed}:${hue}`;
     if (key !== arenaKey) {
       renderer.arena?.dispose?.();
-      renderer.arena = buildArena(id, { seed });
+      renderer.arena = buildArena(id, { seed, hue });
       arenaKey = key;
     }
     return renderer.arena.width;
   },
-  onFloor(n) { if (live()) saveFloor(n); },
+  onFloor(state) { if (live()) store.set(RUN_KEY, state); },
 });
 
 // The fight behind the title screen is silent.
 world.sfxOut = (name, x, vol, pitch) => { if (live()) audio.play(name, { vol, pitch, pan: clamp((x - world.cam.x) / 720, -1, 1) }); };
 world.loopOut = (name, on) => audio.loop(name, on && live());
 
-function buildMenu() {
-  const saved = loadFloor();
+function buildMenu(keep) {
+  const saved = loadRun();
   app.menu = [{ id: 'run', label: 'ASCEND' }];
-  if (saved > 1) app.menu.push({ id: 'continue', label: `CONTINUE  ·  FLOOR ${roman(saved)}`, floor: saved });
-  app.menu.push({ id: 'train', label: 'TRAINING ROOM' }, { id: 'controls', label: 'CONTROLS' });
-  app.idx = saved > 1 ? 1 : 0;
+  if (saved) app.menu.push({ id: 'continue', label: `CONTINUE  ·  FLOOR ${saved.floor}`, saved });
+  app.menu.push({ id: 'diff', label: `DIFFICULTY  ·  ${DIFFS[app.diff].name}`, note: DIFFS[app.diff].blurb }, { id: 'train', label: 'TRAINING ROOM' }, { id: 'controls', label: 'CONTROLS' });
+  if (!keep) app.idx = saved ? 1 : 0;
 }
 
 // Title screen: a scripted player spars in the background.
@@ -74,12 +85,12 @@ function toMenu() {
   demoQueue.length = 0; demoGap = 0; demoAlive = 0;
   buildMenu();
 }
-// The title-screen fight is a showcase: a scripted player with a fast-filling Focus meter takes on
-// one small group after another and uses everything it has.
+// The title-screen fight is a showcase: a scripted player with a fast-filling Focus meter and every
+// power takes on one small group after another. Some of each group are strains generated for the occasion.
 const DEMO_WAVES = [
-  ['initiate', 'initiate', 'initiate'], ['initiate', 'initiate', 'marksman'], ['duelist', 'initiate'], ['bulwark', 'initiate', 'initiate'],
-  ['lancer', 'initiate', 'initiate'], ['wraith', 'drone', 'initiate'], ['initiate', 'initiate', 'initiate', 'initiate'],
-  ['drone', 'drone', 'initiate'], ['duelist', 'lancer'],
+  ['initiate', 'initiate', 'initiate'], ['initiate', '*', 'marksman'], ['duelist', '*'], ['bulwark', 'initiate', '*'],
+  ['lancer', '*', 'initiate'], ['wraith', 'drone', '*'], ['initiate', 'initiate', '*', 'initiate'],
+  ['drone', 'drone', '*'], ['duelist', 'lancer'], ['*', '*', 'initiate'],
 ];
 const demoQueue = [];
 let demoGap = 0, demoAlive = 0;
@@ -103,12 +114,18 @@ function demo(dt) {
   if (alive || demoQueue.length) { demoGap = 0.7; return; }
   if ((demoGap -= dt) > 0) return;
   let side = p.x > 0 ? -1 : 1;
+  const strains = director.run.roster.strains.flat().filter((id) => world.def(id).base !== 'brute');
   pick(DEMO_WAVES).forEach((kind, i) => {
-    demoQueue.push({ kind, dx: side * (380 + Math.random() * 160), t: i * 0.45, elite: kind !== 'initiate' && kind !== 'drone' && Math.random() < 0.25 ? pick(['swift', 'armored', 'volatile']) : null });
+    if (kind === '*') kind = strains[(Math.random() * strains.length) | 0];
+    const base = world.def(kind).base || kind;
+    demoQueue.push({ kind, dx: side * (380 + Math.random() * 160), t: i * 0.45, elite: base !== 'initiate' && base !== 'drone' && Math.random() < 0.25 ? pick(['swift', 'armored', 'volatile']) : null });
     side = -side;
   });
 }
-function startRun(floor = 1, seed = fixedSeed || undefined) { world.input = input; app.state = 'play'; director.startRun(floor - 1, seed); }
+function startRun(floor = 1, seed = fixedSeed || undefined, diff = app.diff, saved = null) {
+  world.input = input; app.state = 'play';
+  director.startRun(floor - 1, seed, diff, saved);
+}
 function startTraining() { world.input = input; app.state = 'play'; director.startTraining(); }
 const toast = (text) => { app.toast = { text, t: 1.8 }; };
 
@@ -124,17 +141,21 @@ function shell() {
   if (hit('KeyG')) { const m = MODES[(MODES.indexOf(renderer.mode) + 1) % MODES.length]; renderer.setMode(m); toast(`GRAPHICS  ${m.toUpperCase()}`); }
   let confirm = hit('Enter', 'NumpadEnter', 'Space') || (input.usedPad && app.state !== 'play' && input.consume('jump', 0.1));
   let back = hit('Escape');
+  const drafting = app.state === 'play' && director.state === 'draft';
   if (touch.enabled && !app.touch) { app.touch = true; renderer.touch = true; renderer.resize(); }
-  // Touch: a tap on a menu item picks it; a tap anywhere dismisses a screen that only needs acknowledging.
+  // Touch: a tap on a menu item or a draft card picks it; a tap anywhere dismisses a screen that only needs acknowledging.
   for (const t of taps) {
     if (app.state === 'menu') {
-      const n = app.menu.length, W = renderer.view.w, gap = Math.min(300, (W - 120) / n);
+      const n = app.menu.length, W = renderer.view.w, gap = Math.min(300, (W - 80) / n);
       const i = Math.round((t.x - W / 2) / gap + (n - 1) / 2);
       if (i >= 0 && i < n && t.y > renderer.view.h - 170) {
         app.idx = i; confirm = true;
         // Phones: take the whole screen and hold landscape where the browser allows it.
         document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {});
       }
+    } else if (drafting) {
+      const n = director.draft.options.length;
+      for (let i = 0; i < n; i++) { const c = draftCard(renderer.view.w, n, i); if (t.x >= c.x && t.x <= c.x + c.w && t.y >= c.y && t.y <= c.y + c.h) { director.draft.idx = i; confirm = true; } }
     } else confirm = true;
   }
   taps.length = 0;
@@ -153,8 +174,9 @@ function shell() {
       if (confirm) {
         audio.play('uiSelect');
         const item = app.menu[app.idx];
-        if (item.id === 'run') startRun(1);
-        else if (item.id === 'continue') startRun(item.floor);
+        if (item.id === 'run') startRun(fixedFloor || 1);
+        else if (item.id === 'continue') startRun(item.saved.floor, item.saved.seed, item.saved.diff, item.saved);
+        else if (item.id === 'diff') { app.diff = DIFF_IDS[(DIFF_IDS.indexOf(app.diff) + 1) % DIFF_IDS.length]; store.set(PREF_KEY, app.diff); buildMenu(true); }
         else if (item.id === 'train') startTraining();
         else app.state = 'controls';
       }
@@ -166,18 +188,28 @@ function shell() {
       else if (hit('KeyQ')) toMenu();
       break;
     case 'play':
-      if (director.state === 'dead') {
+      if (drafting) {
+        // Choosing an augment or a power: left and right move, a number or confirm takes it.
+        const d = director.draft, n = d.options.length;
+        if (hit('ArrowLeft', 'KeyA')) { d.idx = (d.idx + n - 1) % n; audio.play('uiMove'); }
+        if (hit('ArrowRight', 'KeyD')) { d.idx = (d.idx + 1) % n; audio.play('uiMove'); }
+        const num = DIGITS.findIndex((c) => hit(c));
+        if (num >= 0 && num < n) { d.idx = num; confirm = true; }
+        if (director.t > 0.45 && (confirm || hit('KeyJ'))) director.choose(d.idx);
+        else if (back) { app.state = 'pause'; audio.play('uiMove'); }
+      } else if (director.state === 'dead') {
         if (director.t > 1 && confirm) director.retry();
         else if (back) toMenu();
       } else if (director.state === 'victory') {
-        if (director.t > 1.2 && (confirm || back)) toMenu();
+        if (director.t > 1.2 && (confirm || back)) { store.set(RUN_KEY, null); toMenu(); }
       } else if (back || hit('KeyP')) { app.state = 'pause'; audio.play('uiMove'); }
-      for (const c of input.keysHit) director.trainingKey(c);
+      if (director.training) for (const c of input.keysHit) director.trainingKey(c);
+      else if (!drafting) { const num = DIGITS.findIndex((c) => hit(c)); if (num >= 0) world.selectPower(num); }
       break;
   }
 }
 
-let rainT = 0;
+let rainT = 0, theme = -1;
 function sound(dt) {
   const p = world.player, cam = world.cam, playing = app.state === 'play';
   if (app.state === 'menu' || app.state === 'controls') { audio.loop('heal', false); audio.loop('throw', false); }
@@ -193,7 +225,11 @@ function sound(dt) {
   }
   for (; n < 3; n++) audio.hum('e' + n, null);
   const boss = world.boss && !world.boss.dead ? world.boss : null;
-  const heat = clamp(0.25 + world.countEnemies() * 0.12 + world.style.rank * 0.08 + (boss && boss.ai.phase >= 2 ? 0.35 : 0) + (world.overdrive > 0 ? 0.4 : 0), 0, 1);
+  const drafting = director.state === 'draft';
+  const heat = drafting ? 0 : clamp(0.25 + world.countEnemies() * 0.12 + world.style.rank * 0.08 + (boss && boss.ai.phase >= 2 ? 0.35 : 0) + (world.overdrive > 0 ? 0.4 : 0), 0, 1);
+  // Each sector has its own musical theme.
+  const want = director.training ? 0 : director.stageDef.sector;
+  if (want !== theme && live()) { theme = want; audio.setTheme?.(theme); }
   audio.music(app.state === 'menu' || app.state === 'controls' ? 'menu' : director.music, heat);
   // Re-assert the ambience once a second: the first request can arrive before the audio context exists.
   if ((rainT -= dt) <= 0) { rainT = 1; audio.loop('rain', renderer.arena?.id === 'causeway'); }
@@ -210,16 +246,20 @@ function advance(dt, now) {
   if (app.toast && (app.toast.t -= dt) <= 0) app.toast = null;
   if (app.state === 'menu') demo(dt);
   if (app.state === 'play' || app.state === 'menu') {
-    // Sub-step so no sim step exceeds 1/120 s whatever the display refresh rate.
-    const n = Math.max(1, Math.ceil(dt * 120 - 0.01));
-    for (let i = 0; i < n; i++) world.step(dt / n);
+    // The fight holds still while a draft is open. Otherwise sub-step so no sim step exceeds 1/120 s
+    // whatever the display refresh rate.
+    if (director.state !== 'draft' || app.state === 'menu') {
+      const n = Math.max(1, Math.ceil(dt * 120 - 0.01));
+      for (let i = 0; i < n; i++) world.step(dt / n);
+    }
     director.update(dt);
   }
   if (touch.enabled) {
-    const fighting = app.state === 'play' && director.state !== 'dead' && director.state !== 'victory';
+    const fighting = app.state === 'play' && director.state !== 'dead' && director.state !== 'victory' && director.state !== 'draft';
     touch.setMode(fighting ? (director.training ? 'train' : 'play') : app.state === 'pause' ? 'pause' : 'off');
     touch.setReady(world.focus >= world.maxFocus && world.overdrive <= 0);
     const pl = world.player;
+    touch.setPower(world.power.short, world.powers.length > 1);
     touch.setBurst(fighting && pl && !pl.dead && BURST_STATES[pl.state] === 1 && world.focus >= 100 && world.time - world.lastBurst >= 1.5);
   }
   sound(dt);
@@ -239,5 +279,5 @@ function frame(now) {
 }
 
 toMenu();
-window.__game = { world, director, app, input, renderer, hud, audio, startRun, startTraining, tick(dt) { clock += dt; advance(dt, clock); } };
+window.__game = { world, director, app, input, renderer, hud, audio, startRun, startTraining, toMenu, tick(dt) { clock += dt; advance(dt, clock); } };
 requestAnimationFrame(frame);

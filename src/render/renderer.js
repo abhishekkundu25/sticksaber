@@ -219,7 +219,9 @@ export class Renderer {
         add(f.tx + (dx / d) * 1100, Math.min(0, f.ty + (dy / d) * 1100), 12);
       }
       if (f.elite) add(f.x, 0, 60);
+      if (f.ai.channel) add(f.cx, f.cy, 160);
     }
+    for (const o of world.orbs) add(o.x, o.y, 26);
     for (const p of world.projectiles.list) {
       if (p.type === 'pillar') { add(p.x, -20, 90); add(p.x, -560, 90); }
       else if (p.type === 'lob') add(p.x, p.y, p.landed ? p.r + 30 : 50);
@@ -235,6 +237,7 @@ export class Renderer {
     for (const s of fx.slashes) add(s.x, s.y, s.len * 0.62);
     for (const s of fx.ghosts) add(s.j[4], s.j[5], 170);
     for (const s of fx.beams) { add(s.x, 0, 40); add(s.x, -900, 40); }
+    for (const s of fx.zaps) add(s.x, s.y, s.r);
     if (B[2] < B[0]) { R.w = 0; R.h = 0; return R; }
     // World → device pixels, padded by the bloom spread, snapped outward so the edge never shimmers.
     const pad = 64 * k;
@@ -304,13 +307,20 @@ export class Renderer {
         g.lineWidth = 1.6;
         for (let i = 0; i < 6; i++) { const a = t * 1.4 + i * TAU / 6, r0 = 16 * s, r1 = 26 * s; line(g, hx + Math.cos(a) * r0, hy + Math.sin(a) * r0 * 0.3, hx + Math.cos(a) * r1, hy + Math.sin(a) * r1 * 0.3 - 4); }
       }
-      if (world.bossChannel > 0 && f.ai.channel) {
-        const cx = f.cx, cy = f.cy, r = 86 * s;
-        g.strokeStyle = '#7dffb0'; g.globalAlpha = 0.25; g.lineWidth = 3; g.beginPath(); g.arc(cx, cy, r, 0, TAU); g.stroke();
-        g.globalAlpha = 0.95; g.lineWidth = 6; g.beginPath(); g.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + world.bossChannel * TAU); g.stroke();
-        g.globalAlpha = 0.25 + Math.sin(t * 10) * 0.1; g.drawImage(glowSprite('#7dffb0'), cx - 150, cy - 150, 300, 300);
-      }
+    } else if (f.def.deco === 'crown') {
+      // A crown of light: three short rays over the head.
+      const hx = j[0], hy = j[1] - 13 * s;
+      g.globalAlpha = 0.85 * f.fade; g.strokeStyle = f.color; g.lineWidth = 2;
+      for (let i = -1; i <= 1; i++) line(g, hx + i * 6 * s, hy, hx + i * 9 * s, hy - (i ? 8 : 12) * s);
     }
+    if (world.bossChannel > 0 && f.ai.channel) {
+      // The healing ring closes around a kneeling boss.
+      const cx = f.cx, cy = f.cy, r = 86 * s;
+      g.strokeStyle = '#7dffb0'; g.globalAlpha = 0.25; g.lineWidth = 3; g.beginPath(); g.arc(cx, cy, r, 0, TAU); g.stroke();
+      g.globalAlpha = 0.95; g.lineWidth = 6; g.beginPath(); g.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + world.bossChannel * TAU); g.stroke();
+      g.globalAlpha = 0.25 + Math.sin(t * 10) * 0.1; g.drawImage(glowSprite('#7dffb0'), cx - 150, cy - 150, 300, 300);
+    }
+    if (f.burnT > 0) { g.globalAlpha = 0.35 + Math.sin(t * 30 + f.t) * 0.12; g.drawImage(glowSprite('#ff8a30'), f.cx - 44 * s, f.cy - 60 * s, 88 * s, 110 * s); }
     if (f.vent > 0) {
       // Venting hammer: a cold blue-white bloom marks the opening.
       const kq = Math.min(1, f.vent) * (0.6 + Math.sin(t * 14) * 0.2);
@@ -318,7 +328,7 @@ export class Renderer {
     }
     if (f.isPlayer && world.overdrive > 0) {
       // Overdrive aura: a pulsing halo and a ring on the floor that shrinks as the time runs out.
-      const kq = world.overdrive / 6, pulse = 0.7 + Math.sin(t * 16) * 0.3;
+      const kq = world.overdrive / world.odMax, pulse = 0.7 + Math.sin(t * 16) * 0.3;
       g.globalAlpha = 0.3 * pulse; g.drawImage(glowSprite('#56e9ff'), f.cx - 90, f.cy - 100, 180, 200);
       g.strokeStyle = '#56e9ff'; g.lineWidth = 3; g.globalAlpha = 0.8 * pulse;
       g.beginPath(); g.ellipse(f.x, f.y - 2, 26 + 46 * kq, (26 + 46 * kq) * 0.18, 0, 0, TAU); g.stroke();
@@ -407,6 +417,12 @@ export class Renderer {
 
   glowProjectiles(g, world) {
     const t = world.time;
+    // Orbs left by the fallen: green for health, cyan for focus.
+    for (const o of world.orbs) {
+      const col = o.kind === 'hp' ? '#7dffb0' : '#56e9ff', r = 15 + Math.sin(t * 9 + o.x) * 3;
+      g.globalAlpha = 0.85; g.drawImage(glowSprite(col), o.x - r, o.y - r, r * 2, r * 2);
+      g.globalAlpha = 1; g.fillStyle = '#ffffff'; g.fillRect(o.x - 1.6, o.y - 1.6, 3.2, 3.2);
+    }
     for (const p of world.projectiles.list) {
       g.strokeStyle = p.color; g.fillStyle = p.color;
       if (p.type === 'bolt') {
@@ -447,7 +463,8 @@ export class Renderer {
       } else if (p.type === 'pillar') {
         if (!p.fired) {
           const kq = 1 - p.delay / p.max, pulse = 0.5 + Math.sin(t * 30) * 0.25;
-          g.strokeStyle = '#ff2038'; g.lineWidth = 3 + kq * 3; g.globalAlpha = pulse * (0.4 + kq * 0.6);
+          // Red means danger to the player; the player's own pillars are marked in their colour.
+          g.strokeStyle = p.team === 0 ? p.color : '#ff2038'; g.lineWidth = 3 + kq * 3; g.globalAlpha = pulse * (0.4 + kq * 0.6);
           line(g, p.x - p.w, -2, p.x + p.w, -2);
           g.globalAlpha = kq * 0.5; g.drawImage(glowSprite(p.color), p.x - p.w * 1.5, -30, p.w * 3, 44);
         } else {
@@ -510,13 +527,14 @@ export class Renderer {
       ctx.globalAlpha = alpha; ctx.strokeStyle = body; ctx.lineWidth = lw; ctx.stroke();
     };
     group(FAR, 0.5);                     // far arm and leg, dimmer rim for depth
-    if (d.deco === 'bulwark' || d.deco === 'horns' || d.deco === 'forge') {
-      const r = (d.deco === 'bulwark' ? 10 : d.deco === 'forge' ? 15 : 13) * s;
+    const belly = d.belly ?? (d.deco === 'bulwark' ? 10 : d.deco === 'forge' ? 15 : d.deco === 'horns' ? 13 : 0);
+    if (belly) {
+      const r = belly * s;
       ctx.beginPath(); ctx.arc(j[2], j[3] + 2 * s, r, 0, TAU);
       ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = rim; ctx.lineWidth = 1.4; ctx.stroke();
     }
     group(TORSO, 1);                     // spine and near leg (or the whole ragdoll)
-    const hr = 9 * s * (d.deco === 'horns' || d.deco === 'forge' ? 0.8 : 1);
+    const hr = 9 * s * (d.deco === 'horns' || d.deco === 'forge' ? 0.8 : 1) * (d.prop?.head ?? 1);
     ctx.beginPath(); ctx.arc(j[0], j[1], hr, 0, TAU);
     ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = rim; ctx.lineWidth = 1.5; ctx.stroke();
     this.deco(ctx, f, hr, rim, body);
@@ -545,12 +563,21 @@ export class Renderer {
     if (f.rag) ang = Math.atan2(f.j[5] - f.j[3], f.j[4] - f.j[2]) - Math.PI / 2;
     ctx.save();
     ctx.translate(cx, cy); ctx.rotate(ang);
+    const k = f.scale / 0.55, shape = f.def.shape || 0;
+    ctx.scale(k, k);
     ctx.globalAlpha = f.fade;
-    const body = f.flash > 0 ? '#ffffff' : BODY, rim = f.tele > 0.2 ? '#ffffff' : f.def.outline;
+    const body = f.flash > 0 ? '#ffffff' : BODY, rim = f.tele > 0.2 ? '#ffffff' : f.elite ? AURA[f.elite] : f.def.outline;
     ctx.lineJoin = 'round';
-    ctx.beginPath(); ctx.moveTo(-22, 0); ctx.lineTo(-8, -9); ctx.lineTo(8, -9); ctx.lineTo(22, 0); ctx.lineTo(9, 9); ctx.lineTo(-9, 9); ctx.closePath();
-    ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = rim; ctx.lineWidth = 2; ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(-22, 0); ctx.lineTo(-33, -5); ctx.moveTo(22, 0); ctx.lineTo(33, -5); ctx.lineWidth = 2.4; ctx.stroke();
+    ctx.beginPath();
+    if (shape === 1) { ctx.moveTo(-18, 0); ctx.lineTo(0, -13); ctx.lineTo(18, 0); ctx.lineTo(0, 13); ctx.closePath(); }             // diamond
+    else if (shape === 2) { ctx.moveTo(-24, -4); ctx.lineTo(0, -10); ctx.lineTo(24, -4); ctx.lineTo(10, 8); ctx.lineTo(-10, 8); ctx.closePath(); } // manta
+    else if (shape === 3) ctx.arc(0, 0, 13, 0, TAU);                                                                           // orb
+    else { ctx.moveTo(-22, 0); ctx.lineTo(-8, -9); ctx.lineTo(8, -9); ctx.lineTo(22, 0); ctx.lineTo(9, 9); ctx.lineTo(-9, 9); ctx.closePath(); }
+    ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = rim; ctx.lineWidth = 2 / k; ctx.stroke();
+    ctx.beginPath();
+    if (shape === 3) { ctx.moveTo(-13, 0); ctx.lineTo(-26, 0); ctx.moveTo(13, 0); ctx.lineTo(26, 0); ctx.moveTo(0, -13); ctx.lineTo(0, -22); }
+    else { ctx.moveTo(-22, 0); ctx.lineTo(-33, -5); ctx.moveTo(22, 0); ctx.lineTo(33, -5); }
+    ctx.lineWidth = 2.4 / k; ctx.stroke();
     ctx.restore();
   }
 
@@ -576,6 +603,26 @@ export class Renderer {
         ctx.beginPath(); ctx.moveTo(hx - hr * 1.9, hy - hr * 0.25); ctx.lineTo(hx, hy - hr * 1.9); ctx.lineTo(hx + hr * 1.9, hy - hr * 0.25); ctx.closePath(); ctx.fill(); ctx.stroke(); break;
       case 'wraith': // tall cowl sweeping back
         ctx.beginPath(); ctx.moveTo(hx + fc * hr * 0.9, hy - hr * 0.5); ctx.lineTo(hx - fc * hr * 0.2, hy - hr * 1.6); ctx.lineTo(hx - fc * hr * 2.4, hy - hr * 0.9); ctx.lineTo(hx - fc * hr * 1.0, hy + hr * 0.7); ctx.closePath(); ctx.fill(); ctx.stroke(); break;
+      case 'mohawk': // a row of spikes front to back
+        ctx.beginPath();
+        for (let i = -1; i <= 1; i++) { const bx = hx + i * hr * 0.55; ctx.moveTo(bx - hr * 0.28, hy - hr * 0.8); ctx.lineTo(bx - fc * hr * 0.15, hy - hr * (1.9 - Math.abs(i) * 0.35)); ctx.lineTo(bx + hr * 0.28, hy - hr * 0.8); }
+        ctx.closePath(); ctx.fill(); ctx.stroke(); break;
+      case 'antlers':
+        ctx.lineWidth = 2 * s; ctx.lineCap = 'round'; ctx.strokeStyle = rim;
+        ctx.beginPath();
+        for (const sd of [-1, 1]) { ctx.moveTo(hx + sd * hr * 0.4, hy - hr * 0.8); ctx.lineTo(hx + sd * hr * 1.1, hy - hr * 2.2); ctx.moveTo(hx + sd * hr * 0.75, hy - hr * 1.5); ctx.lineTo(hx + sd * hr * 1.7, hy - hr * 1.8); }
+        ctx.stroke(); break;
+      case 'crown':
+        ctx.beginPath(); ctx.moveTo(hx - hr * 0.95, hy - hr * 0.55); ctx.lineTo(hx - hr * 0.95, hy - hr * 1.5); ctx.lineTo(hx - hr * 0.45, hy - hr * 1.05); ctx.lineTo(hx, hy - hr * 1.7); ctx.lineTo(hx + hr * 0.45, hy - hr * 1.05);
+        ctx.lineTo(hx + hr * 0.95, hy - hr * 1.5); ctx.lineTo(hx + hr * 0.95, hy - hr * 0.55); ctx.closePath(); ctx.fill(); ctx.stroke(); break;
+      case 'plume': // a tall feather sweeping back
+        ctx.beginPath(); ctx.moveTo(hx, hy - hr * 0.9); ctx.quadraticCurveTo(hx - fc * hr * 0.4, hy - hr * 2.9, hx - fc * hr * 2.2, hy - hr * 2.2); ctx.quadraticCurveTo(hx - fc * hr * 1.0, hy - hr * 1.8, hx - fc * hr * 0.6, hy - hr * 0.7);
+        ctx.closePath(); ctx.fill(); ctx.stroke(); break;
+      case 'mask': // a faceplate
+        ctx.beginPath(); ctx.moveTo(hx + fc * hr * 0.2, hy - hr * 1.1); ctx.lineTo(hx + fc * hr * 1.25, hy - hr * 0.7); ctx.lineTo(hx + fc * hr * 1.1, hy + hr * 0.9); ctx.lineTo(hx + fc * hr * 0.2, hy + hr * 1.15);
+        ctx.closePath(); ctx.fill(); ctx.stroke(); break;
+      case 'fin': // a dorsal blade
+        ctx.beginPath(); ctx.moveTo(hx + fc * hr * 0.6, hy - hr * 0.8); ctx.lineTo(hx - fc * hr * 0.9, hy - hr * 2.3); ctx.lineTo(hx - fc * hr * 1.0, hy - hr * 0.3); ctx.closePath(); ctx.fill(); ctx.stroke(); break;
       case 'forge': // flat mask with two stacks
         ctx.beginPath(); ctx.rect(hx - hr * 1.15, hy - hr * 1.05, hr * 2.3, hr * 1.5); ctx.fill(); ctx.stroke();
         ctx.beginPath(); ctx.rect(hx - hr * 1.0, hy - hr * 1.9, hr * 0.55, hr * 0.85); ctx.rect(hx + hr * 0.45, hy - hr * 1.9, hr * 0.55, hr * 0.85); ctx.fill(); ctx.stroke(); break;

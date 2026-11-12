@@ -95,24 +95,40 @@ export function applyHit(world, A, B, h, cx, cy) {
   if (read && A?.isPlayer && frontal && canDeflect(B)) return deflect(world, B, A, fam, cx, cy, dir);
 
   // ── damage ──
-  let dmg = h.dmg, post = h.post, fresh = false, punished = false;
+  let dmg = h.dmg, post = h.post, fresh = false, punished = false, crit = false;
+  const M = world.mods, mine = A?.isPlayer || !!h.fromPlayer;
   if (read) { dmg *= 0.4; post = 0; }
-  if (A?.isPlayer || h.fromPlayer) {
+  if (mine) {
     const id = A?.move?.id ?? h.id ?? 'x';
-    const r = world.style.land(id, od);
+    // The mirror image's hits ride along with the player's, and a power is paid for in focus: neither
+    // freshens nor stales anything, and a power earns no focus back.
+    const power = fam === 'power';
+    const r = world.style.land(id, od || power || !!A?.phantom);
     dmg *= r.mul; fresh = r.fresh;
     if (A?.charged) { dmg *= 1.6; post *= 1.8; }
+    // The build: flat bonuses by move family, then the chance effects.
+    const heavy = fam === 'heavy' || fam === 'spike' || fam === 'launch';
+    dmg *= M.dmg * (fam === 'light' ? M.light : heavy ? M.heavy : fam === 'riposte' ? M.riposte : 1) * (A && !A.onGround ? M.air : 1) * (A ? A.dmgMul : 1);
+    dmg *= 1 + world.style.rank * M.rankDmg + (fresh ? M.fresh : 0);
+    if (heavy) post *= M.post;
+    if (M.crit && rng() < M.crit) { dmg *= 2; crit = true; world.stats.crits++; }
     // Stale hits earn nothing: Focus is paid for with variety.
-    if (!r.stale) world.gainFocus(6 * r.mul * (fresh ? 1.5 : 1) * (1 + world.style.rank * 0.12));
+    if (!r.stale && !power) world.gainFocus(6 * r.mul * (fresh ? 1.5 : 1) * (1 + world.style.rank * 0.12));
     if (A) A.hitLanded = true;
-  } else dmg *= world.enemyDmg * (A ? A.dmgMul : 1);
+    if (M.burn) { if (B.burnT <= 0) world.sfx('burn', cx, 0.5); B.burnT = 2; B.burnDps = M.burn * (B.def.boss ? 0.5 : 1); }
+    if (M.execute && !B.def.boss && (B.hp - dmg) / B.maxHp < M.execute && B.hp - dmg > 0) { dmg = B.hp + 1; fx.text(cx, cy - 78, 'EXECUTED', '#ffd36b', 15, 0.8); }
+  } else dmg *= world.enemyDmg * (A ? A.dmgMul : 1) * (B.isPlayer ? M.taken : 1);
+  if (world.anom === 'glass') dmg *= 1.5;
   if (B.broken) dmg *= 1.5;
   const pm = B.move?.punish;
   if (pm && B.state === 'attack' && B.mt >= pm[0] && B.mt <= pm[1]) { post *= 1.8; dmg *= 1.25; punished = true; }
   if (B.state === 'custom' && B.ai.channel) { dmg *= 1.25; }
 
-  B.hp -= dmg; B.flash = 0.1; B.barT = 3.5; B.vib = h.stop + 0.06;
+  B.hp -= dmg; B.flash = 0.1; B.barT = 3.5; B.vib = h.stop + 0.06; B.sinceHurt = 0;
   world.onDamage(A, B, dmg, h, cx, cy, dir, { fresh, punished, glance: read });
+  if (crit) { fx.text(cx, cy - 94, 'CRIT', '#fff2a8', 17, 0.7); fx.ring(cx, cy, 6, 70, 0.22, '#fff2a8', 1, 3); world.sfx('crit', cx, 0.8); }
+  // Second Wind refuses one killing blow per floor.
+  if (B.isPlayer && B.hp <= 0 && M.secondWind && !world.windUsed) { world.secondWind(B); return 'hit'; }
 
   if (!B.isPlayer) {
     if (fam && B.def.adaptAt && !od) {
@@ -229,7 +245,10 @@ function parry(world, D, A, h, cx, cy, dir) {
   fx.text(D.x, D.j[1] - 40, 'PARRY', '#ffffff', 22, 0.8);
   world.sfx('parry', D.x); world.stop(0.12, true); world.slow(0.4, 0.28); world.shake(0.4); world.punch(0.035);
   D.parryT = 0.2; D.posture = Math.max(0, D.posture - 20); D.blockT = 0.1; D.pv[7] += 9; D.pv[3] -= 3;
-  if (D.isPlayer) { D.riposteT = 0.85; world.gainFocus(34); world.style.bonus(14); world.stats.parries++; }
+  if (D.isPlayer) {
+    D.riposteT = 0.85; world.gainFocus(34); world.style.bonus(14); world.stats.parries++;
+    if (world.mods.parryHeal) D.hp = Math.min(D.maxHp, D.hp + world.mods.parryHeal);
+  }
   if (!A || A.dead) return 'parry';
   world.lastParried = A;
   A.posture += A.def.parryPosture ?? 50; A.postureDelay = 3; A.barT = 3.5;
@@ -244,7 +263,7 @@ function block(world, D, A, h, cx, cy, dir) {
   fx.spark(cx - dir * 14, cy, dir > 0 ? Math.PI : 0, 1.0, 9, 420, D.def.shieldColor || D.color);
   fx.flash(cx - dir * 14, cy, 44, D.def.shieldColor || D.color, 0.1);
   world.sfx('block', D.x); world.stop(0.045); world.shake(0.12);
-  let post = h.post * (D.def.blockMul ?? 1);
+  let post = h.post * (D.def.blockMul ?? 1) * (D.isPlayer ? world.mods.block : 1);
   if (A?.charged) post *= 2.2;
   if (h.guardBreak && !D.isPlayer) post *= D.def.heavyBlockMul ?? 2;
   D.posture += post; D.postureDelay = 1.9; D.barT = 3.5;

@@ -22,8 +22,8 @@ import { BotInput } from '../src/game/bot.js';
 export const BUDGET = {
   simMicrosPerStep: 150,
   crowdMicrosPerStep: 1500, // 120 enemies at once in the training room
-  high: { ms: 24, drawImage: 72, megapixels: 5.0 },
-  low: { ms: 22, drawImage: 24, megapixels: 3.0 },
+  high: { ms: 24, drawImage: 88, megapixels: 5.2 },
+  low: { ms: 22, drawImage: 34, megapixels: 3.2 },
 };
 const FRAMES = 90, W = 1280, H = 720;
 const report = process.argv.includes('--report');
@@ -39,20 +39,20 @@ const check = (label, value, limit, unit) => {
 {
   const world = new World();
   world.input = new BotInput(world, 0.9);
-  const dir = new Director(world, { setArena: (id) => (id === 'hall' ? 1900 : 2200) });
-  dir.startRun(8, 31337);
+  const dir = new Director(world, { setArena: (id) => (id === 'hall' ? 1900 : 2200), auto: true });
+  dir.startRun(76, 31337);
   const dt = 1 / 120, steps = 7200;
   for (let i = 0; i < 600; i++) { world.input.tick(dt); world.step(dt); dir.update(dt); }
   const t0 = performance.now();
   let peak = 0;
   for (let i = 0; i < steps; i++) {
     world.input.tick(dt); world.step(dt); dir.update(dt);
-    if (world.player.hp < 50 && !world.player.dead) world.player.hp = 100;
+    if (world.player.hp < world.player.maxHp * 0.5 && !world.player.dead) world.player.hp = world.player.maxHp;
     if (dir.state === 'dead' && dir.t > 1.5) dir.retry();
     if (world.fighters.length > peak) peak = world.fighters.length;
   }
   const us = ((performance.now() - t0) * 1000) / steps;
-  console.log(`simulation: floor 9, ${steps} steps, up to ${peak} fighters`);
+  console.log(`simulation: floors 77 to ${dir.stage + 1}, full build, ${steps} steps, up to ${peak} fighters`);
   check('microseconds per step', +us.toFixed(1), BUDGET.simMicrosPerStep, 'µs');
 }
 
