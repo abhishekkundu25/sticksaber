@@ -34,6 +34,7 @@ export class Touch {
       + '<button class="sys resume" data-cmd="resume">RESUME</button><button class="sys quit" data-cmd="quit">QUIT</button>';
     document.body.appendChild(root);
     this.base = root.querySelector('.base'); this.knob = root.querySelector('.knob'); this.od = root.querySelector('[data-a="overdrive"]');
+    this.sp = root.querySelector('[data-a="special"]'); this.burst = false;
     const opts = { passive: false };
     root.addEventListener('touchstart', (e) => this.onStart(e), opts);
     root.addEventListener('touchmove', (e) => this.onMove(e), opts);
@@ -55,6 +56,13 @@ export class Touch {
     this.releaseAll();
   }
   setReady(on) { if (this.enabled) this.od.classList.toggle('ready', on); }
+  // The same button throws the saber and bursts. While a burst is available it says so and lights up.
+  setBurst(on) {
+    if (!this.enabled || on === this.burst) return;
+    this.burst = on;
+    this.sp.textContent = on ? 'BURST' : 'THROW';
+    this.sp.classList.toggle('ready', on);
+  }
 
   releaseAll() {
     for (const a of HELD) this.input.set(a, 'touch', false);

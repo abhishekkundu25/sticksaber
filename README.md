@@ -43,7 +43,7 @@ Hold the device in landscape. The first touch switches on the touch controls; a 
 
 - Tap a menu item to choose it.
 - The left thumb gets a stick that appears wherever it lands. Left and right move. Pulling down is the same as S: stick down plus HEAVY launches on the ground and plunges in the air.
-- The right thumb gets LIGHT, HEAVY, JUMP, DASH, GUARD, THROW and OVERDRIVE. THROW also bursts while you are being hit. OVERDRIVE lights up when the meter is full.
+- The right thumb gets LIGHT, HEAVY, JUMP, DASH, GUARD, THROW and OVERDRIVE. THROW also bursts while you are being hit: for that moment the button grows, glows and reads BURST. OVERDRIVE lights up when the meter is full.
 - The pause button is at the top centre. In the training room a SPAWN button adds an enemy.
 - Phones render at 720p internally.
 

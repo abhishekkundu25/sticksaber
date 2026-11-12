@@ -31,6 +31,7 @@ const app = { state: 'menu', idx: 0, muted: false, menu: [], toast: null, manual
 // Phones and tablets: taps drive the menus, an on-screen stick and buttons drive the fight.
 const taps = [], cmds = [];
 const touch = new Touch(input, canvas, renderer.view, { tap: (x, y) => taps.push({ x, y }), cmd: (name) => cmds.push(name) });
+const BURST_STATES = { hitstun: 1, stagger: 1, ragdoll: 1, getup: 1, recoil: 1 };
 const SPAWNS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit6', 'Digit7', 'Digit8', 'Digit5'];
 let spawnIdx = 0;
 const live = () => app.state === 'play' || app.state === 'pause';
@@ -218,6 +219,8 @@ function advance(dt, now) {
     const fighting = app.state === 'play' && director.state !== 'dead' && director.state !== 'victory';
     touch.setMode(fighting ? (director.training ? 'train' : 'play') : app.state === 'pause' ? 'pause' : 'off');
     touch.setReady(world.focus >= world.maxFocus && world.overdrive <= 0);
+    const pl = world.player;
+    touch.setBurst(fighting && pl && !pl.dead && BURST_STATES[pl.state] === 1 && world.focus >= 100 && world.time - world.lastBurst >= 1.5);
   }
   sound(dt);
   const t0 = performance.now();
