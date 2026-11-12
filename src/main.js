@@ -139,7 +139,9 @@ function demo(dt) {
   if (alive || demoQueue.length) { demoGap = 0.7; return; }
   if ((demoGap -= dt) > 0) return;
   let side = p.x > 0 ? -1 : 1;
-  const strains = director.run.roster.strains.flat().filter((id) => world.def(id).base !== 'brute');
+  // Strains and animals generated for the occasion, the heaviest ones left out.
+  const R = director.run.roster;
+  const strains = [...R.strains.flat(), ...R.beasts.filter(Boolean), ...R.beasts.filter(Boolean)].filter((id) => world.def(id).base !== 'brute' && world.def(id).gen.cost < 4);
   pick(DEMO_WAVES).forEach((kind, i) => {
     if (kind === '*') kind = strains[(Math.random() * strains.length) | 0];
     const base = world.def(kind).base || kind;

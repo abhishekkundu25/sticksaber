@@ -22,6 +22,8 @@ The second idea, added with the hundred floors, is that no two climbs should fee
 | Blade hits | The hit test sweeps the blade that is drawn, so a swing that visibly passes through a body connects. |
 | Input | Presses are buffered for 140 ms, jumps have 90 ms of coyote time, and most recoveries cancel into a dash, a jump (on hit) or the next attack. |
 | Assist | With no direction held, an attack turns toward the nearest enemy within 340 units. A step forward stops short of the target instead of pushing through it. |
+| Mouse | Left, right and middle buttons are light, heavy and power. The wheel switches power. Menu items, draft cards, pause buttons and the power list in the HUD highlight under the pointer and take clicks; a click on the HUD is not an attack. |
+| Rumble | A gamepad shakes on hits, parries, slams and boss kills, scaled to the event. |
 
 ### Ragdolls
 
@@ -46,6 +48,7 @@ Every fighter has 11 joints. The animated pose and the ragdoll use the same join
 | Tech | Dash as your body reaches the floor to stand up at once. |
 | Mercy | Enemies do not start an attack on a player who is down or standing up. You are invulnerable for 0.7 s after standing. |
 | Retry | A fall restarts the current wave with full health and the build intact. On Master it restarts the floor. |
+| Lesson | On floor 1, a player who has never passed it meets one instructor that cannot be hurt until it is parried once. The rest of the wave waits. It gives up after 45 seconds, and it is given once per browser. |
 
 ### Focus
 
@@ -137,6 +140,41 @@ The move generator has two operations. A tempo copy scales every time in a move 
 
 The floor that introduces a strain says what it is in one line, for example "EMBER HALBERDIER: a Lancer strain. It does not flinch during wind-ups. It has learned the Wraith's rising cut".
 
+### Animals
+
+From sector II each sector adds one animal species. Animals are not reskinned humanoids: they have their own rig, gaits and attacks. They do reuse the humanoid's eleven joints with a new meaning (shoulder, hip, two front limbs, two hind limbs, head), which is why the ragdoll, the cutting of bodies and hit detection work on them unchanged.
+
+| Plan | Silhouette | Behaviour | Answer | Cost |
+| --- | --- | --- | --- | --- |
+| Hound | Lean dog, glowing jaw | Paces at range, snaps or pounces. A packmate on your side leaps over you to come from the other. About 35 health | Parry the lunge, kill it fast | 0.8 to 1.7 |
+| Charger | Barrel body: bull, boar, rhino, ram or elk | Never flinches. Paws the ground, then charges along a red line and stuns itself on a wall. Gores, and rears for a stomp with shockwaves. Can be ridden | Jump or dash the charge, bait it into a wall | 3.6 to 6.5 |
+| Raptor | Biped with a long stiff tail | Fast. Hind-claw rake, a high leap that lands claws first, a snap. Can be ridden | Parry the rake, dash out from under the leap | 2.2 to 4.1 |
+| Stalker | Spider with arching legs | Creeps, then darts past you and lunges at your back | Turn with it and parry | 2.0 to 4.3 |
+| Scorpion | Low, pincers, a tail arched over its back | A white sting, a pincer snap, and a slow red impale | Parry the white sting, dash the red one | 2.4 to 4.6 |
+| Flyer | Bat, hawk or moth | Hovers out of reach, swoops or strafes at head height. Any hit drops it | Jump to meet it, or parry the swoop | 1.2 to 2.6 |
+| Ape | Knuckle-walking gorilla with glowing fists | A looping hook, a two-fist slam with shockwaves, a leap onto you | Jump the shockwave, punish the recovery | 3.5 to 6.4 |
+| Spitter | Toad or lizard with a swelling throat | Keeps 380 to 620 units away. An aimed bolt, a lobbed glob, a shove up close | Parry the spit back, then close in | 1.5 to 3.5 |
+
+Generation rolls the body (spine, legs, neck, head, girth, tail), the kind within a plan (five chargers, three flyers, three spitters), features (ears, ruff, crest, quills, frill, plates, extra legs), the natural weapon, line weight and colour. Health, posture and speed follow from size. Deeper animals learn a third move and take one or two traits. Their attacks go through the same generated-move rules as everything else, so each telegraphs at least 0.2 s ahead and every unblockable one shows red for at least 0.7 s.
+
+A run uses every plan before any repeats.
+
+### Bonds
+
+A bond is a relationship between enemies that spawn as a group. It exists so that a wave is a problem to read, not a queue: the bond decides which enemy to kill first. Each sector rolls two bonds from its own strains, its animal and the base roster, uses the same pairings throughout, and introduces each on its own floor with one line of text.
+
+| Bond | Rule | Shown by | Counter |
+| --- | --- | --- | --- |
+| Rider | A humanoid sits on a charger or raptor and fights from the saddle. The mount moves, the rider strikes | RIDER over the rider | A launch or a knockdown unseats the rider. Killing or staggering the mount throws it. A mount whose rider dies goes feral: 22% faster, 25% more damage |
+| Pack | A leader makes two or three pack members 12% faster | ALPHA over the leader | Kill the leader. The pack is staggered, backs off, and waits 80% longer between attacks |
+| Ward | The charge takes 35% damage and half posture damage while its warder lives | A blue thread, WARDED on hits | Kill the warder. The charge recoils and loses a third of its posture |
+| Mender | The partner heals 4.5% of its health a second | A green thread while it heals | Kill the mender |
+| Sworn | When one of the pair dies the other enrages and heals a quarter | An orange thread | Bring both low, then finish them together |
+| Cover | A shield carrier keeps itself between the player and the shooter it guards | Positioning | Dash through, jump over, or use a power that ignores shields |
+| Tandem | When one starts an attack the other is cleared to strike as it ends | Timing | Parry twice, or kill the opener |
+
+The chance that a generated wave contains a bonded group rises from 35% in sector II to 75%. A group is paid for from the wave's budget as one unit, at the sum of its members plus half a point.
+
 ## Bosses
 
 ### Champions (every fifth floor)
@@ -180,15 +218,34 @@ Hand-made, and always in the Examination Hall. 900 health before the floor's sca
 - Below 25% it leaves an afterimage behind when it attacks. The afterimage repeats the same strike 0.55 seconds later, cannot be hit, and deals 60% damage.
 - It adapts at five hits of one family.
 
+### The Twins (floor 60 or 70)
+
+Hand-made. Castor is quick and close, Pollux holds the range with a pike. They share one pool of health, shown as one bar, and only the lit twin can be hurt: hits on the other show UNLIT and do nothing. The unlit twin still attacks at 60% damage. They swap every six to nine seconds with a flash and a thread between them. Until half health only one of them attacks at a time. After that they stop taking turns. When the pool empties both fall.
+
+The lesson is target discipline: the nearest enemy is often the wrong one.
+
+### The Cartographer (floor 80 or 90)
+
+Hand-made, in a room with charged walls. It fights with a long pike, and between attacks it plants the pike and redraws the floor. An alarm sounds first.
+
+- Phase one: alternating strips of floor erupt after 1.2 seconds. The pattern flips each time.
+- Phase two, from 66%: a wall of fire walks across the room, one strip every 0.07 seconds, with two gaps in it. The gaps are visible from the start.
+- Phase three, from 33%: three light bridges appear and the whole floor is marked. It burns 1.9 seconds later for 0.9 seconds. Anything standing on the floor is hit once; a bridge or the air is safe.
+
+The lesson is to read the floor while fighting. It is also the one place where the bridges are not optional.
+
+### The finisher
+
+A killing blow on any champion or sector boss slows time to 12% for 2.4 seconds. The camera closes in on the falling body, a card names it, and four more cuts land on it a third of a second apart.
+
 ### More boss mechanics (proposed)
 
 | Examiner | Mechanic | What observation buys you |
 | --- | --- | --- |
 | The Archivist | Records your last combo and replays it at you as a ghost four seconds later. | Short, safe strings give it less to use. |
-| The Twins | Share one health bar. Only the one whose blade is lit can be hurt, and they swap on a visible cue. | Tracking the cue instead of the nearest target. |
-| The Cartographer | Changes the arena. Floor panels light before they drop or electrify. | Reading the floor while fighting. |
+| The Lamplighter | Fights from the ceiling and the light bridges, and puts out the bridges you stand on. | Fighting upward, and choosing where to stand. |
 
-The fourth idea that used to be listed here, a boss that fights with your moveset, became the Mirror power instead.
+The Twins and the Cartographer used to be on this list and are now built. A boss that fights with your moveset became the Mirror power instead.
 
 ## Structure and generation
 
@@ -199,9 +256,11 @@ A run is a hundred floors generated from one 32-bit seed and a difficulty. The s
 | Floor of the sector | Kind | Waves | Pays out |
 | --- | --- | --- | --- |
 | 1, 2 | Introduces one of the sector's two strains: the strain with light support and a hint, then a generated wave | 2 | An augment |
-| 3, 4 | Skirmish | 2 | An augment |
+| 3 | Introduces the sector's animal the same way | 2 | An augment |
+| 4 | Introduces the sector's first bond: the bonded group nearly alone, with a hint, then a generated wave | 2 | An augment |
 | 5 | Champion | 1 | A Focus power |
-| 6 to 9 | Skirmishes, one of them an event. From sector III, floor 3 or 4 is an event half the time | 1 to 3 | An augment, a rare one after an event |
+| 6 | A skirmish whose first wave introduces the second bond | 2 | An augment |
+| 7 to 9 | Skirmishes, one of them an event | 1 to 3 | An augment, a rare one and a technique after an event |
 | 10 | Sector boss | 1 | A legendary augment and 10 maximum health |
 
 Sector I is the school. Its eight ordinary floors each open with a hand-made wave that teaches one base enemy, and its hints teach the parry, Focus, the launcher, champions, powers and keepers.
@@ -248,6 +307,18 @@ From sector II a floor without a boss has a 17% chance of an anomaly. The first 
 | Unstable | Every enemy bursts when it dies |
 | Bounty | Three times the orbs |
 
+### Terrain
+
+About half the ordinary floors from sector II have terrain, a fifth of the teaching floors, and three in ten generated boss floors (vents or walls only).
+
+| Terrain | Rule | Why |
+| --- | --- | --- |
+| Light bridges | One to three one-way platforms 130 to 170 units up. Bodies and ragdolls land on them. A bridge that the player stands on for 3.2 seconds overloads, drops out for 4.5 seconds and returns | A breather and a launch point for plunges, not a refuge: melee enemies cannot follow, so the timer stops camping |
+| Vents | Two or three marked strips that arm for 0.95 seconds and erupt every five to seven and a half seconds. They burn everyone | A hazard to fight around and to knock enemies into |
+| Charged walls | A body knocked into the wall at speed takes 16 damage (before the floor's scaling) and a stagger, once every 0.8 seconds. A corpse is cut again | Rewards launches and knockbacks toward the edges |
+
+A kill by a vent, a wall or the Cartographer's floor pays 20 focus and a style bonus. Terrain positions are stored as fractions of the arena's width, because arenas differ in size. Terrain is drawn straight onto the frame instead of through the bloom layer, so it does not widen the area the bloom has to cover.
+
 ### Difficulty
 
 | | Student | Adept | Master |
@@ -286,6 +357,21 @@ Sustain comes from several small sources on purpose: 2 health per kill, the rall
 
 A fall keeps the build. On Student and Adept it restarts the wave, on Master the floor.
 
+### Weapon forms
+
+A run played by a person opens with a choice of blade, kept for the run and saved with it. A form is a blade and a complete move list on the same inputs, so the choice changes how the whole game is played, not a number.
+
+| Form | Blade | Character | Damage on one target, against the saber |
+| --- | --- | --- | --- |
+| Saber | 74 units | Four-hit string, Comet finisher | |
+| Twin blades | Two of 50, 10% faster on foot | A six-hit string that alternates hands, a five-hit air string, 5.5 hits a second at about 5 damage. Light on posture, so guards are its weak spot | 5% below on the ground, 6% above in the air |
+| Greatsword | 104, wide, 12% slower on foot | Three sweeping lights, every swing armoured against light hits, posture damage of 28 to 80 a hit, a chargeable overhead that cracks the floor | 3% above |
+| Staff | 62 at each end | Spins that hit in front and behind, long thrusts, a helicopter air move | 17% below, made up in a crowd |
+
+### Techniques
+
+Six augments of a fourth kind, one copy each, change what a move does: the launcher drags enemies within 300 units in first (Undertow), a parry sends most of the blocked damage back without being able to kill (Mirror Guard), the thrown saber stuns for 1.3 seconds (Nailing Throw), a dash cuts whatever it passes through for 12 (Razor Step), a plunge calls a pillar down where it lands (Meteor), and the player gets a second air jump and air dash (Aerialist). One is always on offer after an event floor, and each ordinary draft has a one in ten chance of showing one.
+
 ## Art direction
 
 The style is ink and neon. Fighters are near-black silhouettes with a thin coloured outline. Blades, sparks and impacts are the only bright things on screen. Each arena uses one dominant hue and one accent, and keeps the band behind the fighters calm so silhouettes read at a glance.
@@ -310,6 +396,7 @@ Colour also carries meaning. Cyan is the player, and no generated enemy may use 
 - That blend, and the floor reflection, cover only the screen rectangle that contains light this frame.
 - Blade cores are redrawn at full resolution on top so edges stay sharp.
 - A generated strain costs the same to draw as a base enemy: a few more lines for its head shape and one text label.
+- An animal costs the same as a humanoid to simulate and about twice as much to draw (9 to 10 microseconds against 4 to 5 in headless Chrome), because the big plans fill their bodies. A wave holds at most a handful.
 - Internal resolution is capped at 1080p. If the smoothed frame time passes 21 ms the renderer first drops the backdrop to half resolution, then lowers the whole canvas in steps down to 55%. It steps back up when frames are fast. G pins quality to high or low.
 - The simulation sub-steps so no step exceeds 1/120 s at any refresh rate.
 - Sparks are recycled from a pool, and the per-frame paths create no gradients.
@@ -331,9 +418,9 @@ The half-resolution backdrop tier cuts the pixels drawn per frame by 41% (3.83 t
 
 ## Tests
 
-`npm test` runs in about ten seconds.
+`npm test` runs in about ten seconds: 38 simulation tests in about two, then the benchmark.
 
-- Simulation tests (Node, about three seconds): the same seed replays a fight exactly; a run is a pure function of seed and difficulty; sixty generated runs obey the rules (sector shape, unlock order, strains never before their introduction, caps, one Forgemaster, every arena family used, no enemy in the player's colour); health, damage and budget rise with the floor and the difficulties are ordered; every move, generated ones included, is well formed and telegraphs in time; the whole roster of two seeds fights without errors; floor 1 can be cleared; a champion, three sector bosses, the Forgemaster and the Proctor can be beaten; augments, each of the nine powers, the draft, saved runs and strain traits behave.
+- Simulation tests (Node, about three seconds): the same seed replays a fight exactly; a run is a pure function of seed and difficulty; sixty generated runs obey the rules (sector shape, unlock order, strains never before their introduction, caps, one Forgemaster, every arena family used, no enemy in the player's colour); health, damage and budget rise with the floor and the difficulties are ordered; every move, generated ones included, is well formed and telegraphs in time; the whole roster of two seeds fights without errors; floor 1 can be cleared; a champion, three sector bosses, the Forgemaster and the Proctor can be beaten; augments, each of the nine powers, the draft, saved runs and strain traits behave; each bond does what it says and breaks the way it says; bridges hold and overload, vents burn and walls shock; techniques change their moves; the parry lesson holds the wave; every weapon form is complete, reachable and within its damage band, and clears floor 1; every animal plan generates for fifty seeds, fights, falls, dies and can be cut.
 - Benchmark: simulation cost per step on a late floor with a full build and in a crowd of 120, then rendering in headless Chrome with the GPU off. It asserts milliseconds per frame against a loose budget, and draw calls and megapixels per frame against tight ones, because those two do not depend on the machine.
 
 `npm run fuzz` is the slow soak. It drives random input through sample floors, champions and bosses, then sends scripted players of three skill levels up all hundred floors on each difficulty and prints where they fell.
@@ -352,7 +439,7 @@ A run takes a scripted player 80 to 130 minutes of game time. A script that only
 
 ## Sound
 
-Every sound is synthesized with the Web Audio API. A saber hum rises from 88 Hz to 115 Hz with swing speed. The parryable telegraph is a bright glint centred near 4.5 kHz and the unblockable one is a low buzz near 0.5 kHz, so the two are distinct by ear. Music is generative and its intensity follows the number of enemies and your style rank. Each sector has its own theme: the combat and boss tracks change key, tempo (within 10%), chord colour (dorian, phrygian, harmonic minor or a brighter major-led set), the timbre of the arpeggio and pad, and sometimes the kick pattern or swing. A theme change waits for the next downbeat. Sector I plays the tracks as they were written. The powers, the draft, orbs, champions and sector changes have their own sounds, 21 in all. Slow motion sweeps a low-pass filter over the mix. Nobody has listened to any of it yet. The balance was set from measurements, so expect to retune it by ear.
+Every sound is synthesized with the Web Audio API. A saber hum rises from 88 Hz to 115 Hz with swing speed. The parryable telegraph is a bright glint centred near 4.5 kHz and the unblockable one is a low buzz near 0.5 kHz, so the two are distinct by ear. Music is generative and its intensity follows the number of enemies and your style rank. Each sector has its own theme: the combat and boss tracks change key, tempo (within 10%), chord colour (dorian, phrygian, harmonic minor or a brighter major-led set), the timbre of the arpeggio and pad, and sometimes the kick pattern or swing. A theme change waits for the next downbeat. Sector I plays the tracks as they were written. The powers, the draft, orbs, champions and sector changes have their own sounds, 21 in all. A further 29 cover the animals (growl, bite, roar, screech, hooves, wings, hiss, stomp, built from saws and noise through vowel filters so they sound like throats), a swing for each weapon form, the terrain, the bonds, the room bosses and the finisher. Slow motion sweeps a low-pass filter over the mix. Nobody has listened to any of it yet. The balance was set from measurements, so expect to retune it by ear.
 
 ## Open questions
 
@@ -361,3 +448,6 @@ Every sound is synthesized with the Web Audio API. A saber hum rises from 88 Hz 
 3. Generated bosses. They share five schools and a set of set pieces. Do they feel like different fights, or does the sixth one feel like the second?
 4. Build balance. The scripts take the first card every time. A person choosing well will be stronger than they were, and some augments are certainly better than others.
 5. Tone of kills. Bodies are cut apart with glowing ends. Keep it, or hold dismemberment back for finishers only?
+6. Weapon forms. Their damage was balanced with a script, and the greatsword in particular needs a human's timing. Which one feels best, and is any of them a trap?
+7. Bonds. Are the threads and tags enough to read a bond in the middle of a fight, or does it need a stronger cue?
+8. Limp animals. A knocked-down or dead animal is drawn as thick bones, not with its living shape. It reads, but it loses the tail and head. Worth a proper limp drawing?

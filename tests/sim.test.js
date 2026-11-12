@@ -80,6 +80,8 @@ test('every generated run obeys the rules, across 60 seeds', () => {
           if (s === 0 && UNLOCK[sp.kind]) assert.ok(UNLOCK[sp.kind] <= fl.n, `${sp.kind} on floor ${fl.n}`);
           // A strain never turns up before the floor that introduces it.
           if (d.strain) { const q = +sp.kind[1], i = sp.kind[2] === 'a' ? 1 : 2; assert.ok(fl.n >= q * 10 + i, `${sp.kind} on floor ${fl.n}`); }
+          // Nor does an animal before the third floor of its sector.
+          if (d.beast) assert.ok(fl.n >= +sp.kind.slice(1) * 10 + 3, `${sp.kind} on floor ${fl.n}`);
           assert.ok(Math.abs(sp.dx) >= 300 && Math.abs(sp.dx) <= 760, `spawn offset ${sp.dx}`);
           assert.ok(sp.t >= 0 && sp.t < 12);
           if (sp.elite) assert.ok(fl.n > 10, `elite on floor ${fl.n}`);
@@ -102,6 +104,8 @@ test('every generated run obeys the rules, across 60 seeds', () => {
     assert.equal(floors.filter((f) => f.boss === 'twinA').length, 1, 'the Twins appear exactly once');
     assert.equal(floors.filter((f) => f.boss === 'cartographer').length, 1, 'the Cartographer appears exactly once');
     for (let q = 1; q < 10; q++) assert.ok(roster.rules[q].length >= 1, `sector ${q + 1} has no bond`);
+    assert.equal(roster.beasts.filter(Boolean).length, 9, 'one animal per sector from sector II');
+    for (let q = 1; q < 10; q++) assert.equal(floors[q * 10 + 2].kind, 'beast');
     assert.equal(floors[99].boss, 'proctor');
     // Enemy colours keep clear of the player's cyan.
     for (const d of Object.values(roster.defs)) {

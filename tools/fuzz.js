@@ -8,6 +8,7 @@ import { Director } from '../src/game/encounters.js';
 import { BotInput } from '../src/game/bot.js';
 import { rng } from '../src/core/math.js';
 import { generateRun } from '../src/game/gen.js';
+import { FORM_IDS } from '../src/game/forms.js';
 
 // The floor the Forgemaster keeps in the run with this seed.
 const generateForge = (seed) => generateRun(seed).floors.find((f) => f.boss === 'forgemaster').n;
@@ -35,7 +36,9 @@ function check(world, label) {
       if (!Number.isFinite(v)) throw new Error(`${label}: non-finite state on ${f.def.kind} in state ${f.state} move ${f.move?.id}`);
     }
     // Generated fighters are filed under what they are (strain, champion, warden) and the hand-made move behind the one they use.
-    const who = f.def.strain ? 'strain' : f.def.champion ? 'champion' : f.def.warden ? 'warden' : f.def.kind;
+    const who = f.def.beast ? 'beast' : f.def.strain ? 'strain' : f.def.champion ? 'champion' : f.def.warden ? 'warden' : f.def.kind;
+    if (f.riding) seen.rider = 1;
+    if (f.enraged) seen.enraged = 1;
     seen[`${who}:${f.state}${f.move ? ':' + f.move.src : ''}`] = 1;
     if (f.move && f.move.id !== f.move.src) seen[f.move.id.includes('+') ? 'generated:chain' : 'generated:tempo'] = 1;
   }
@@ -63,9 +66,9 @@ function soak(label, secs, setup, god) {
 }
 
 // Plays the whole ascent with a scripted player. Gives up after `maxFalls`, which is a wall, not a bug.
-function playthrough(skill, repeat, seed, diff, maxFalls = 80) {
+function playthrough(skill, repeat, seed, diff, maxFalls = 80, form = 'saber') {
   const { world, dir } = make((w) => new BotInput(w, skill));
-  world.input.repeat = repeat;
+  world.input.repeat = repeat; world.setForm(form);
   dir.startRun(0, seed, diff);
   const sec = Array.from({ length: 10 }, () => ({ falls: 0, t: 0 }));
   let mark = 0, deathsAt = 0, stage = 0, t = 0;
@@ -102,11 +105,13 @@ for (const diff of ['easy', 'normal', 'hard']) {
   }
 }
 console.log(`normal masher (light string only): ${playthrough(0.55, ['light', 'light', 'light', 'light'], 7000, 'normal')}`);
+for (const form of FORM_IDS) if (form !== 'saber') console.log(`normal skilled  ${form.padEnd(6)}: ${playthrough(0.9, null, 7000, 'normal', 80, form)}`);
 console.log(`ok: ${steps} steps, ${Object.keys(seen).length} distinct fighter states visited`);
 const want = ['player:attack:RIPOSTE', 'player:attack:PLUNGE_LAND', 'player:attack:COMET', 'player:attack:THROW', 'player:attack:CAST', 'player:attack:CRESCENT', 'player:custom', 'proctor:custom', 'proctor:attack:p_slam', 'proctor:attack:p_cyclone', 'proctor:stagger', 'echo:attack:p_verdict',
   'brute:attack:br_charge', 'brute:attack:br_land', 'brute:attack:br_sweep', 'brute:stagger', 'duelist:attack:d_counter', 'duelist:attack:d_dive', 'duelist:attack:d_throw', 'bulwark:stagger', 'bulwark:attack:b_charge',
   'initiate:attack:i_feint', 'initiate:attack:i_lunge', 'marksman:attack:m_burst', 'marksman:attack:m_lob', 'lancer:attack:ln_thrust', 'lancer:attack:ln_skewer', 'wraith:custom', 'wraith:attack:w_slash', 'drone:custom', 'drone:attack:dr_shot', 'drone:ragdoll',
   'forgemaster:attack:fm_string', 'forgemaster:attack:fm_quake', 'forgemaster:attack:fm_ember', 'forgemaster:attack:fm_erupt', 'forgemaster:custom',
-  'strain:attack:br_charge', 'strain:attack:d_throw', 'strain:stagger', 'strain:custom', 'shard:attack:i_slash', 'champion:custom', 'champion:stagger', 'warden:custom', 'warden:stagger', 'warden:attack:p_slam', 'warden:attack:fm_erupt~', 'warden:guard',
-  'generated:tempo', 'generated:chain'];
+  'strain:attack:br_charge', 'strain:attack:d_throw', 'strain:stagger', 'strain:custom', 'champion:custom', 'champion:stagger', 'warden:custom', 'warden:stagger', 'warden:attack:p_slam', 'warden:attack:fm_erupt~', 'warden:guard',
+  'generated:tempo', 'generated:chain', 'beast:attack:bt_hound_snap', 'beast:attack:bt_charger_charge', 'beast:attack:bt_raptor_leap', 'beast:attack:bt_ape_slam', 'beast:attack:bt_spit_shot', 'beast:custom', 'beast:ragdoll', 'beast:stagger',
+  'rider', 'enraged', 'twinA:attack:p_verdict', 'twinB:attack:ln_thrust', 'cartographer:custom', 'player:attack:TW_L1', 'player:attack:GS_H1', 'player:attack:ST_L1'];
 for (const k of want) if (!seen[k]) console.log('  NOT REACHED:', k);

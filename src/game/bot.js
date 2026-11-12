@@ -64,12 +64,13 @@ export class BotInput {
       const dist = Math.abs(e.x - p.x);
       for (let i = 0; i < e.move.hits.length; i++) {
         const h = e.move.hits[i], lead = h.t0 - e.mt, key = e.atkSerial * 10 + i;
-        const reach = h.sweepBody || e.move.src === 'br_charge' ? 900 : 190 * e.scale;
+        const charge = e.move.src === 'br_charge' || (!!e.move.run && h.unblockable);
+        const reach = h.sweepBody || charge ? 900 : 190 * e.scale;
         if (lead > 0.11 || lead < -0.02 || dist > reach) continue;
         if (this.seen.get(e) === key) continue;
         this.seen.set(e, key);
         if (rng() > this.skill) continue;
-        if (h.unblockable) { if (e.move.src === 'br_charge' || h.sweepBody) this.press('jump', 0.25); else { this.press(e.x > p.x ? 'left' : 'right', 0.25); this.press('dash'); } }
+        if (h.unblockable) { if (charge || h.sweepBody) this.press('jump', 0.25); else { this.press(e.x > p.x ? 'left' : 'right', 0.25); this.press('dash'); } }
         else { this.down[e.x > p.x ? 'right' : 'left'] = false; p.facing = e.x > p.x ? 1 : -1; this.press('guard', 0.22); }
         this.script.length = 0; this.wait = 0.2;
       }

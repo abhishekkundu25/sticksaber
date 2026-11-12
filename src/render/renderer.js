@@ -600,12 +600,20 @@ export class Renderer {
       ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = rim; ctx.lineWidth = 1.4; ctx.stroke();
     }
     group(TORSO, 1);                     // spine and near leg (or the whole ragdoll)
+    if (d.beast && rg) {
+      // A limp animal keeps the bulk of its body: the spine is drawn thick for as long as it is in one piece.
+      for (const [a, b] of rg.bones) {
+        if (a !== 1 || b !== 2) continue;
+        ctx.beginPath(); ctx.moveTo(rg.x[1], rg.y[1]); ctx.lineTo(rg.x[2], rg.y[2]);
+        ctx.strokeStyle = rim; ctx.lineWidth = lw * 2.3 + 2.6; ctx.stroke(); ctx.strokeStyle = body; ctx.lineWidth = lw * 2.3; ctx.stroke();
+      }
+    }
     const hr = 9 * s * (d.deco === 'horns' || d.deco === 'forge' ? 0.8 : 1) * (d.prop?.head ?? 1);
     ctx.beginPath(); ctx.arc(j[0], j[1], hr, 0, TAU);
     ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = rim; ctx.lineWidth = 1.5; ctx.stroke();
     this.deco(ctx, f, hr, rim, body);
     // Hilt, shaft or rifle, then the weapon arm on top.
-    if (f.armed) {
+    if (f.armed && !d.beast) {
       const dx = f.tx - f.bx, dy = f.ty - f.by, dl = Math.hypot(dx, dy) || 1, ux = dx / dl, uy = dy / dl;
       if (f.blade.gun) {
         ctx.beginPath(); ctx.moveTo(f.bx - ux * 12, f.by - uy * 12); ctx.lineTo(f.tx, f.ty);
@@ -743,7 +751,7 @@ export class Renderer {
     if (f.posture > 1) { ctx.fillStyle = '#ffd36b'; ctx.fillRect(x, y + 6, w * clamp(f.posture / f.maxPosture, 0, 1), 2); }
     if (f.tag) { ctx.fillStyle = f.enraged ? '#ff8a30' : '#ffd36b'; ctx.font = '700 10px ui-sans-serif, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(f.tag, f.x, y - 20); }
     // A strain carries its name, so the player learns which body does what.
-    const name = f.def.strain ? f.def.name.toUpperCase() : null;
+    const name = f.def.strain || f.def.beast ? f.def.name.toUpperCase() : null;
     const tag = f.reads ? 'READS ' + f.reads.toUpperCase() : f.elite ? (name ? `${f.elite.toUpperCase()}  ${name}` : f.elite.toUpperCase()) : name;
     if (tag) { ctx.fillStyle = f.reads ? f.color : f.elite ? AURA[f.elite] : f.def.outline; ctx.font = '700 10px ui-sans-serif, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(tag, f.x, y - 8); }
     ctx.globalAlpha = 1;
