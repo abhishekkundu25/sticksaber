@@ -43,6 +43,14 @@ export class Hud {
   constructor() {
     this.hpLag = 1; this.comboShown = 0; this.comboPop = 0; this.bossLag = 1; this.t = 0;
     this.vig = null; this.bars = 0; this.hpGrad = null; this.menuGrad = null; this.menuH = 0;
+    this.wrapped = new Map(); this.widths = new Map();
+  }
+  // Width of a short label, measured once.
+  width(ctx, s, size, spacing) {
+    const key = `${size}|${spacing}|${s}`;
+    let w = this.widths.get(key);
+    if (w === undefined) { ctx.font = `700 ${size}px ${FONT}`; if ('letterSpacing' in ctx) ctx.letterSpacing = `${spacing}px`; w = ctx.measureText(s).width; this.widths.set(key, w); }
+    return w;
   }
 
   text(ctx, s, x, y, size, color, align = 'left', weight = 600, spacing = 0) {
@@ -51,11 +59,16 @@ export class Hud {
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${spacing}px`;
     ctx.fillStyle = color; ctx.fillText(s, x, y);
   }
-  // Break `s` into lines no wider than `max` at the given size.
+  // Break `s` into lines no wider than `max` at the given size. Results are kept, because the same
+  // hint is drawn every frame and measuring text is not free.
   wrap(ctx, s, max, size, weight = 600, spacing = 0) {
+    const key = `${size}|${weight}|${spacing}|${Math.round(max)}|${s}`, hit = this.wrapped.get(key);
+    if (hit) return hit;
+    if (this.wrapped.size > 300) this.wrapped.clear();
     ctx.font = `${weight} ${size}px ${FONT}`;
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${spacing}px`;
     const lines = [];
+    this.wrapped.set(key, lines);
     let cur = '';
     for (const word of s.split(' ')) {
       const next = cur ? `${cur} ${word}` : word;
@@ -99,7 +112,7 @@ export class Hud {
         const lines = this.wrap(ctx, hint, W - 200, 15, 600, 1);
         const y = app.touch ? (bossUp ? 186 : 112) : (bossUp ? H - 122 : H - 46) - (lines.length - 1) * 22;
         let tw = 0;
-        for (const l of lines) tw = Math.max(tw, ctx.measureText(l).width);
+        for (const l of lines) tw = Math.max(tw, this.width(ctx, l, 15, 1));
         ctx.globalAlpha = a * 0.55; ctx.fillStyle = '#000';
         ctx.fillRect(W / 2 - tw / 2 - 22, y - 15, tw + 44, 8 + lines.length * 22);
         ctx.globalAlpha = a;
@@ -186,8 +199,7 @@ export class Hud {
     for (let i = 0; i < list.length; i++) {
       const P = POWERS[list[i]], sel = i === world.powerIdx, can = pips >= P.cost && world.overdrive <= 0;
       const label = sel ? P.name : P.short;
-      ctx.font = `700 ${sel ? 13 : 10}px ${FONT}`; if ('letterSpacing' in ctx) ctx.letterSpacing = sel ? '2px' : '1px';
-      const tw = ctx.measureText(label).width;
+      const tw = this.width(ctx, label, sel ? 13 : 10, sel ? 2 : 1);
       if (sel) {
         const kw = touch ? 0 : 20, w = kw + tw + 16 + P.cost * 9, pop = world.powerT > 1.1 ? (world.powerT - 1.1) * 14 : 0;
         ctx.fillStyle = '#000000aa'; ctx.fillRect(cx - 1, y - 11 - pop, w + 2, 22 + pop * 2);
@@ -278,6 +290,17 @@ export class Hud {
     this.text(ctx, b.title, W / 2 + slide, y, 46, '#ffffff', 'center', 700, 14);
     ctx.fillStyle = '#ffffff'; ctx.fillRect(W / 2 - 150 * a, y + 34, 300 * a, 1.5);
     if (b.sub) this.text(ctx, b.sub.toUpperCase(), W / 2 - slide, y + 56, 14, '#ffffffbb', 'center', 600, 5);
+    if (b.sector !== undefined) {
+      // The tower at a glance: ten sectors, the ones below you filled in.
+      for (let i = 0; i < 10; i++) {
+        const x = W / 2 + (i - 4.5) * 30, yy = y + 92, done = i < b.sector, here = i === b.sector;
+        ctx.globalAlpha = a * (here ? 1 : done ? 0.75 : 0.3);
+        ctx.fillStyle = here ? '#56e9ff' : '#ffffff';
+        ctx.save(); ctx.translate(x, yy); ctx.rotate(Math.PI / 4); const r = here ? 6.5 : 4.5;
+        if (done || here) ctx.fillRect(-r, -r, r * 2, r * 2); else { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.2; ctx.strokeRect(-r, -r, r * 2, r * 2); }
+        ctx.restore();
+      }
+    }
     ctx.globalAlpha = 1;
   }
 

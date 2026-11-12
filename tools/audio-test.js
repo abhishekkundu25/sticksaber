@@ -20,9 +20,14 @@ const GROUPS = {
   'Floors 4-10': ['thrust', 'blink', 'droneDive', 'lob', 'beep', 'explode', 'pillar', 'elite'],
   'Forge master': ['hammer', 'heatUp', 'vent', 'echo'],
   'Player & UI': ['hurt', 'death', 'perfectDodge', 'focus', 'rankUp', 'waveClear', 'victory', 'uiMove', 'uiSelect', 'heal'],
+  'Pickups & draft': ['pickupHealth', 'pickupFocus', 'draftOpen', 'draftPick', 'powerSwap'],
+  'Focus powers': ['powerNova', 'powerStasis', 'powerMend', 'powerArc', 'powerFlash', 'powerFlashEnd', 'powerMirror', 'powerJudgment', 'powerCrescent'],
+  'Run events': ['crit', 'burn', 'summon', 'championIntro', 'sectorUp', 'secondWind', 'anomaly'],
 };
 const LOOP_NAMES = ['heal', 'throw', 'rain'];
 const TRACK_NAMES = ['menu', 'combat', 'boss', 'boss2'];
+const THEMED = ['combat', 'boss', 'boss2'];
+const THEME_COUNT = 10;
 
 // Longest acceptable dry length (to -60 dBFS) per sound; anything unlisted gets DEFAULT_LIMIT.
 const DEFAULT_LIMIT = 1.2;
@@ -34,6 +39,10 @@ const LIMIT = {
   rankUp: 1.0, waveClear: 2.2, victory: 3.2, heal: 1.2,
   thrust: 0.5, blink: 0.5, droneDive: 0.65, lob: 0.4, beep: 0.08, explode: 0.8, pillar: 1.0, elite: 1.7,
   hammer: 1.4, heatUp: 0.7, vent: 1.5, echo: 0.7,
+  pickupHealth: 0.4, pickupFocus: 0.35, draftOpen: 0.9, draftPick: 0.7, powerSwap: 0.08,
+  powerNova: 0.9, powerStasis: 1.2, powerMend: 0.9, powerArc: 0.25, powerFlash: 0.15, powerFlashEnd: 0.7,
+  powerMirror: 0.7, powerJudgment: 0.6, powerCrescent: 0.5, crit: 0.4, burn: 0.35, summon: 1.0,
+  championIntro: 1.3, sectorUp: 1.9, secondWind: 1.1, anomaly: 0.7,
 };
 // Sequences the game plays; the soundboard has a button for each.
 const SEQUENCES = {
@@ -41,6 +50,11 @@ const SEQUENCES = {
   grenade: [[0, 'lob'], [0.45, 'beep'], [0.7, 'beep'], [0.9, 'beep'], [1.05, 'beep'], [1.15, 'beep'], [1.25, 'explode']],
   'hammer + vent': [[0, 'hammer'], [0.9, 'vent']],
   'blink out/in': [[0, 'blink'], [0.7, 'blink'], [0.9, 'thrust']],
+  'powerArc x4': [0, 1, 2, 3].map((i) => [i * 0.075, 'powerArc', { pitch: 1 + i * 0.12 }]),
+  'powerFlash x6 + end': [...[0, 1, 2, 3, 4, 5].map((i) => [i * 0.08, 'powerFlash', { pitch: 1 + i * 0.06 }]), [0.55, 'powerFlashEnd']],
+  'judgment + pillar': [[0, 'powerJudgment'], [0.5, 'pillar'], [0.56, 'pillar', { pan: 0.6 }]],
+  'hit + crit': [[0, 'hitHeavy'], [0, 'crit']],
+  'powerSwap slots': [1, 1.125, 1.25, 1.375, 1.5].map((p, i) => [i * 0.25, 'powerSwap', { pitch: p }]),
 };
 const SILENCE = 0.001; // -60 dBFS
 const WARM = 0.5;
@@ -77,6 +91,10 @@ async function runNode() {
     m.audio.play('hitHeavy', { vol: 1, pitch: 1, pan: 0 });
     m.audio.play('vent');
     m.audio.music('boss2', 0.5);
+    m.audio.setTheme(3);
+    m.audio.setTheme(-7);
+    m.audio.setTheme('x');
+    m.audio.play('sectorUp');
     m.audio.update(0.016);
     console.log('PASS  node import: every method is a silent no-op');
   } catch (err) {
@@ -113,6 +131,9 @@ async function runNode() {
       }
       console.log('\nMusic (full chain, 12 s render, from 2 s)');
       for (const m of r.music) console.log(`${m.track.padEnd(7)} I=${m.I.toFixed(1)}  rms ${fmtDb(m.rms).padStart(6)} dBFS  peak ${fmtDb(m.peak).padStart(6)} dBFS`);
+      console.log('\nThemes (full chain, 10 s render at I=0.7, from 2 s; theme 0 is the tracks as written)');
+      console.log('track  theme  root  bpm    mode      arp       pad       rms dBFS  peak dBFS');
+      for (const m of r.themes) console.log(`${m.track.padEnd(7)}${String(m.theme).padStart(4)}  ${String(m.root).padStart(5)}  ${m.bpm.toFixed(0).padStart(4)}   ${(m.mode || '-').padEnd(9)} ${m.arp.padEnd(9)} ${m.pad.padEnd(9)} ${fmtDb(m.rms).padStart(7)}  ${fmtDb(m.peak).padStart(8)}`);
       console.log('\nChecks');
       for (const c of r.checks) {
         console.log(`${c.ok ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? '  ' + c.detail : ''}`);
@@ -208,6 +229,8 @@ async function runPage() {
     };
     $('music').append(b);
   }
+  for (let n = 0; n < audioDev.themes; n++) $('theme').append(new Option(n ? `sector ${n}` : 'sector 0 (as written)', n));
+  $('theme').onchange = () => audio.setTheme(Number($('theme').value));
   $('humToggle').onclick = () => { start(); ui.lit = !ui.lit; $('humToggle').classList.toggle('on', ui.lit); };
   $('humSwing').onclick = () => { ui.swing = !ui.swing; $('humSwing').classList.toggle('on', ui.swing); };
   for (const id of ['vMaster', 'vSfx', 'vMusic']) {
@@ -260,7 +283,7 @@ async function runPage() {
 
   async function runChecks() {
     ui.testing = true;
-    const R = { checks: [], sounds: [], music: [], done: false };
+    const R = { checks: [], sounds: [], music: [], themes: [], done: false };
     const check = (name, ok, detail = '') => {
       R.checks.push({ name, ok: !!ok, detail });
       log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  ' + detail : ''}`);
@@ -272,7 +295,7 @@ async function runPage() {
     check('contract: one-shot names match the spec', same(names, expected),
       `missing [${expected.filter((n) => !names.includes(n))}] extra [${names.filter((n) => !expected.includes(n))}]`);
     check('contract: loops and tracks', same(audioDev.loops, LOOP_NAMES) && same(audioDev.tracks, TRACK_NAMES));
-    check('contract: api methods', ['init', 'play', 'hum', 'loop', 'music', 'setSlowmo', 'setVolumes', 'update'].every((k) => typeof audio[k] === 'function'));
+    check('contract: api methods', ['init', 'play', 'hum', 'loop', 'music', 'setTheme', 'setSlowmo', 'setVolumes', 'update'].every((k) => typeof audio[k] === 'function'));
 
     // Every one-shot, rendered offline.
     log('rendering one-shots offline...');
@@ -380,6 +403,49 @@ async function runPage() {
       check('vent: long enough to mark the punish window', by.vent.dryDur > 1 && by.vent.dryDur < 1.5, `${by.vent.dryDur.toFixed(2)} s`);
     }
 
+    // Sounds for the 100-floor run: the properties the game relies on.
+    {
+      const by = Object.fromEntries(R.sounds.map((s) => [s.name, s]));
+      const bright = async (name, o) => {
+        const r = await audioDev.render({ seconds: 0.6, dry: true, script: (a) => a.play(name, o) });
+        return (analyze(r.buffer).hf * r.buffer.sampleRate) / (2 * Math.PI);
+      };
+      const bh = await bright('pickupHealth'), bf = await bright('pickupFocus');
+      check('pickups: focus orb is clearly brighter than health orb', bf > bh * 1.5, `brightness ~${bh.toFixed(0)} vs ~${bf.toFixed(0)} Hz`);
+      const quietest = Math.max(by.pickupHealth.loud, by.pickupFocus.loud, by.burn.loud, by.powerSwap.loud);
+      check('frequent sounds (pickups, burn, powerSwap) sit well under a light hit', db(quietest) < db(by.hitLight.loud) - 8,
+        `loudest 50 ms: pickupHealth ${fmtDb(by.pickupHealth.loud)}, pickupFocus ${fmtDb(by.pickupFocus.loud)}, burn ${fmtDb(by.burn.loud)}, powerSwap ${fmtDb(by.powerSwap.loud)}, hitLight ${fmtDb(by.hitLight.loud)} dB`);
+      const s1 = await bright('powerSwap', { pitch: 1 }), s2 = await bright('powerSwap', { pitch: 1.5 });
+      check('powerSwap: pitch 1.5 is audibly higher than pitch 1', s2 > s1 * 1.3, `~${s1.toFixed(0)} -> ~${s2.toFixed(0)} Hz`);
+      const flash = await audioDev.render({ seconds: 1.4, dry: true, fps: 100, script: (a, t, i) => {
+        if (i < 48 && i % 8 === 0) a.play('powerFlash', { pitch: 1 + i / 80 });
+        if (i === 55) a.play('powerFlashEnd');
+      } });
+      check('powerFlash: 6 cuts 80 ms apart and the end hit all play', flash.engine.stats.played === 7 && !flash.engine.stats.limited && !flash.engine.stats.dropped && analyze(flash.buffer).peak < 1,
+        `${JSON.stringify(flash.engine.stats)} peak ${fmtDb(analyze(flash.buffer).peak)} dBFS`);
+      const arc = await audioDev.render({ seconds: 0.8, dry: true, fps: 100, script: (a, t, i) => i < 28 && i % 7 === 0 && a.play('powerArc', { pitch: 1 + i / 50 }) });
+      check('powerArc: 4 zaps within 0.3 s all play', arc.engine.stats.played === 4 && !arc.engine.stats.limited && analyze(arc.buffer).peak < 1,
+        `${JSON.stringify(arc.engine.stats)} peak ${fmtDb(analyze(arc.buffer).peak)} dBFS`);
+      const burns = await audioDev.render({ seconds: 2.4, fps: 20, script: (a, t, i) => i >= 10 && i % 4 === 0 && a.play('burn', { pan: Math.random() * 2 - 1 }) });
+      check('burn: five a second for two seconds stays quiet and unclipped', analyze(burns.buffer, WARM).peak < 0.25 && !burns.engine.stats.dropped,
+        `played ${burns.engine.stats.played}, peak ${fmtDb(analyze(burns.buffer, WARM).peak)} dBFS`);
+      // Fill all voices with ordinary sounds, then fire important and frequent ones.
+      const filler = names.filter((n) => !['footstep', 'uiMove', 'pickupHealth', 'pickupFocus', 'burn', 'powerSwap'].includes(n) && !/^power|^(kill|sever|parry|guardBreak|telegraph|telegraphRed|shockwave|slam|bossRoar|bossPhase|healInterrupt|adapt|stagger|blink|explode|pillar|hammer|heatUp|vent|elite|death|perfectDodge|waveClear|victory|summon|championIntro|sectorUp|secondWind)$/.test(n)).slice(0, 24);
+      let res = null;
+      await audioDev.render({ seconds: 0.5, dry: true, script: (a, t, i, e) => {
+        filler.forEach((n) => a.play(n));
+        const s0 = { ...e.stats };
+        for (const n of ['secondWind', 'sectorUp', 'powerNova']) a.play(n);
+        const s1 = { ...e.stats };
+        for (const n of ['burn', 'pickupHealth', 'pickupFocus', 'powerSwap']) a.play(n);
+        res = { filled: filler.length, important: s1.played - s0.played, frequent: e.stats.played - s1.played, dropped: e.stats.dropped - s1.dropped };
+      } });
+      check('priorities: under a full voice cap, secondWind/sectorUp/powerNova steal; pickups, burn, powerSwap yield',
+        res.filled === 24 && res.important === 3 && res.frequent === 0 && res.dropped === 4, JSON.stringify(res));
+      check('impact scale: powerFlashEnd lands harder than one powerFlash cut', by.powerFlashEnd.loud > by.powerFlash.loud,
+        `loudest 50 ms: ${fmtDb(by.powerFlash.loud)} vs ${fmtDb(by.powerFlashEnd.loud)} dB`);
+    }
+
     // Rate limit and polyphony.
     {
       const r = await audioDev.render({ seconds: 0.2, dry: true, script: (a) => { for (let i = 0; i < 10; i++) a.play('hitLight'); } });
@@ -463,6 +529,101 @@ async function runPage() {
       check("music: 'none' fades to silence", analyze(r2.buffer, 5.5, 7).peak < SILENCE, `peak ${fmtDb(analyze(r2.buffer, 5.5, 7).peak)} dBFS`);
     }
 
+    // Sector themes.
+    log('rendering themes offline...');
+    {
+      check('themes: audioDev reports the theme count', audioDev.themes === THEME_COUNT, `${audioDev.themes}`);
+      // A seeded Math.random makes two renders of the same graph sample-identical.
+      const seeded = async (fn) => {
+        const orig = Math.random;
+        let x = 0x2545f491;
+        Math.random = () => ((x = (Math.imul(x, 1664525) + 1013904223) >>> 0) / 4294967296);
+        try { return await fn(); } finally { Math.random = orig; }
+      };
+      const maxDiff = (a, b) => {
+        let m = 0;
+        for (let ch = 0; ch < 2; ch++) {
+          const x = a.getChannelData(ch), y = b.getChannelData(ch);
+          for (let i = 0; i < x.length; i++) m = Math.max(m, Math.abs(x[i] - y[i]));
+        }
+        return m;
+      };
+      for (const track of THEMED) {
+        const go = (pre) => seeded(() => audioDev.render({ seconds: 6, fps: 30, dry: true, script: (a, t, i) => { if (i === 0) pre(a); a.music(track, 0.8); } }));
+        const base = await go(() => {});
+        const again = await go(() => {});
+        const t0 = await go((a) => a.setTheme(0));
+        const t10 = await go((a) => { a.setTheme(4); a.setTheme(10); });
+        const tm = await go((a) => a.setTheme(-10));
+        const t1 = await go((a) => a.setTheme(1));
+        check(`themes: ${track} theme 1 renders differently from theme 0 under the same seed`, maxDiff(base.buffer, t1.buffer) > 0.01, `max sample difference ${fmtDb(maxDiff(base.buffer, t1.buffer))} dBFS`);
+        // Chrome's renderer is not bit-exact run to run (about -140 dBFS of float noise), so
+        // "identical" means within -100 dBFS; any changed note would differ by -40 dBFS or more.
+        const d = Math.max(maxDiff(base.buffer, t0.buffer), maxDiff(base.buffer, t10.buffer), maxDiff(base.buffer, tm.buffer));
+        const ctl = maxDiff(base.buffer, again.buffer);
+        check(`themes: ${track} theme 0 (and 10, -10) renders the same as no theme`, d < 1e-5 && analyze(base.buffer).rms > 0.004,
+          `max sample difference ${fmtDb(d)} dBFS (two renders with no theme: ${fmtDb(ctl)} dBFS)`);
+      }
+      const rms0 = {};
+      const seen = {};
+      for (const track of THEMED) {
+        for (let n = 0; n < THEME_COUNT; n++) {
+          const r = await audioDev.render({ seconds: 10, fps: 30, script: (a, t, i) => { if (i === 0) a.setTheme(n); a.music(track, 0.7); } });
+          const m = analyze(r.buffer, 2, 10), tr = r.engine.track;
+          if (n === 0) rms0[track] = m.rms;
+          const rel = db(m.rms) - db(rms0[track]);
+          const row = { track, theme: n, root: tr.root, bpm: 60 / tr.step / 4, mode: tr.modeName, arp: tr.arpType, pad: tr.padType, rms: m.rms, peak: m.peak };
+          R.themes.push(row);
+          (seen[track] ||= []).push(`${tr.root}|${tr.step.toFixed(5)}|${tr.arpType}|${tr.padType}|${tr.swing}|${tr.progs.length}`);
+          check(`themes: ${track} theme ${n} plays at a level close to theme 0`,
+            tr.themeN === n && m.rms > 0.004 && m.peak < 0.6 && Math.abs(rel) < 4 && !r.errors.length && r.engine.stats.tracks === 1,
+            `root ${tr.root} ${row.bpm.toFixed(0)} bpm ${tr.modeName || 'as written'}, rms ${fmtDb(m.rms)} (${rel >= 0 ? '+' : ''}${rel.toFixed(1)} dB) peak ${fmtDb(m.peak)} dBFS ${r.errors[0] || ''}`);
+        }
+        check(`themes: ${track} has ${THEME_COUNT} distinct key/tempo/timbre combinations`, new Set(seen[track]).size === THEME_COUNT && new Set(R.themes.filter((x) => x.track === track).map((x) => x.root)).size >= 8);
+      }
+      const bpms = R.themes.map((x) => x.bpm / R.themes.find((y) => y.track === x.track && y.theme === 0).bpm);
+      check('themes: tempo stays within 10% of the written tempo', bpms.every((k) => k >= 0.899 && k <= 1.101), `range ${Math.min(...bpms).toFixed(3)} to ${Math.max(...bpms).toFixed(3)}`);
+
+      // Mid-track changes land on a downbeat without a gap, a restart or a click.
+      for (const track of THEMED) {
+        const marks = [];
+        const r = await audioDev.render({ seconds: 14, fps: 30, script: (a, t, i, e) => {
+          a.music(track, 0.8);
+          if (i === 90) a.setTheme(4);
+          if (i === 240) a.setTheme(7);
+          const tr = e.track;
+          if (tr && tr.themedAt !== undefined && marks[marks.length - 1]?.at !== tr.themedAt) marks.push({ at: tr.themedAt, n: tr.themeN, step: tr.themedStep });
+        } });
+        const tr = r.engine.track, d0 = r.buffer.getChannelData(0), sr = r.buffer.sampleRate;
+        const jump = (from, to) => {
+          let m = 0;
+          for (let i = Math.max(1, Math.floor(from * sr)); i < Math.min(d0.length, Math.floor(to * sr)); i++) m = Math.max(m, Math.abs(d0[i] - d0[i - 1]));
+          return m;
+        };
+        const ok = marks.length === 2 && marks[0].n === 4 && marks[1].n === 7 && tr.themeN === 7 && r.engine.stats.tracks === 1 && !r.errors.length;
+        const det = [];
+        let smooth = ok;
+        for (const mk of marks) {
+          const before = analyze(r.buffer, mk.at - 1.5, mk.at), after = analyze(r.buffer, mk.at, mk.at + 1.5);
+          const jb = jump(mk.at - 0.03, mk.at + 0.03), jr = jump(1, mk.at - 0.1);
+          if (!(after.rms > before.rms * 0.5 && jb <= jr * 1.5 && mk.step % 16 === 0)) smooth = false;
+          det.push(`at ${mk.at.toFixed(2)} s (step ${mk.step}): rms ${fmtDb(before.rms)} -> ${fmtDb(after.rms)} dBFS, sample jump at the change ${jb.toFixed(3)} vs ${jr.toFixed(3)} max before`);
+        }
+        check(`themes: ${track} changes theme mid-track on a downbeat, no gap, click or restart`, ok && smooth, det.join('; ') || JSON.stringify(marks));
+      }
+
+      // A theme set while the menu plays waits for the next themed track.
+      let menuTheme = -1;
+      const mr = await audioDev.render({ seconds: 5, fps: 30, script: (a, t, i, e) => {
+        if (i === 0) a.music('menu', 0.5);
+        if (i === 30) a.setTheme(6);
+        if (i === 60) menuTheme = e.track.themeN;
+        if (i >= 75) a.music('combat', 0.5);
+      } });
+      check('themes: menu ignores the theme, the next combat track picks it up', menuTheme === 0 && mr.engine.track.themeN === 6 && mr.engine.track.root === 47,
+        `menu theme ${menuTheme}, combat theme ${mr.engine.track.themeN}, combat root ${mr.engine.track.root}`);
+    }
+
     // Slow-mo darkens.
     {
       const go = (k) => audioDev.render({ seconds: 1, dry: true, fps: 60, script: (a, t, i) => { a.setSlowmo(k); if (i === 15) a.play('hitHeavy'); } });
@@ -472,6 +633,10 @@ async function runPage() {
 
     // Real time, through the live context.
     log('real-time pass...');
+    // Set before init() on purpose: the engine must pick it up when it is created. (On the
+    // soundboard the engine may already exist, so this only proves something under ?auto.)
+    const hadEngine = !!audioDev.live();
+    audio.setTheme(13);
     audio.init();
     for (let i = 0; i < 40 && audioDev.stats()?.state !== 'running'; i++) await sleep(50);
     // Headless Chrome reports 'running' before its output clock settles; let it run a moment.
@@ -479,6 +644,8 @@ async function runPage() {
     await sleep(300);
     const st = audioDev.stats();
     check('live: AudioContext running after init()', st && st.state === 'running', st ? st.state : 'no engine');
+    check('live: setTheme before init() is remembered (13 wraps to 3)', audioDev.live() && audioDev.live().theme === 3, `engine theme ${audioDev.live()?.theme}${hadEngine ? ' (engine existed before)' : ''}`);
+    audio.setTheme(Number($('theme').value));
     if (st && st.state === 'running') {
       const ctx = audioDev.live().ctx, an = ctx.createAnalyser();
       an.fftSize = 2048;
@@ -558,6 +725,6 @@ async function runPage() {
   $('run').onclick = () => { $('log').textContent = ''; runChecks(); };
   if (new URLSearchParams(location.search).has('auto')) runChecks().catch((err) => {
     console.error(err);
-    window.__audioTest = { done: true, checks: [{ name: 'test harness', ok: false, detail: String(err) }], sounds: [], music: [] };
+    window.__audioTest = { done: true, checks: [{ name: 'test harness', ok: false, detail: String(err) }], sounds: [], music: [], themes: [] };
   });
 }

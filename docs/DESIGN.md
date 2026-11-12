@@ -290,7 +290,16 @@ A fall keeps the build. On Student and Adept it restarts the wave, on Master the
 
 The style is ink and neon. Fighters are near-black silhouettes with a thin coloured outline. Blades, sparks and impacts are the only bright things on screen. Each arena uses one dominant hue and one accent, and keeps the band behind the fighters calm so silhouettes read at a glance.
 
-ARENA_TABLE
+| Arena family | Palette | Mood | Set pieces |
+| --- | --- | --- | --- |
+| Causeway | Teal and indigo, magenta accent | Rain, a megacity below, a wet deck | Searchlights, twin spires, a moon |
+| Foundry | Charcoal and umber, amber glow | Crucibles, chains, drifting embers | A molten pour, hooks, a furnace mouth |
+| Hall | Violet and black, pale gold | An eclipse through a circular window, pillars, polished floor | Banners, lamps, a cracked window |
+| Hanging Gardens | Teal and green, amber lamps | A glass dome over silhouetted trees and vines, shallow water underfoot, fireflies | A great tree, waterfalls, lanterns |
+| Cryo Vault | Icy blue and white, red status lights | Rows of frosted stasis pods fading into fog, mist along the floor, falling ice dust | A reactor core, a breached pod venting frost, a gantry crane |
+| Storm Apex | Indigo and violet, electric white | A deck above a sea of clouds, antenna masts, lightning inside the storm cells | A ringed planet, a huge moon, a storm vortex |
+
+Each sector also rotates the whole palette by its own hue, so the same family reads as a different place: a rose-red Storm Apex, a green Cryo Vault. The rotation keeps perceived lightness, never adds saturation, and mutes anything that lands near red, so the band behind the fighters stays calm and the red telegraphs keep their meaning. With the three set pieces, the seeded layouts and nine hues, a family has far more looks than a run can show.
 
 Colour also carries meaning. Cyan is the player, and no generated enemy may use a hue near it. Each enemy type and strain owns one blade colour. Pure white and pure red are reserved for telegraphs. Green means healing. Gold, blue and orange rings mark elites. The player's own Judgment pillars are marked in pale gold, never red.
 
@@ -300,6 +309,7 @@ Colour also carries meaning. Cyan is the player, and no generated enemy may use 
 - Dynamic light comes from one half-resolution additive layer that holds blades, trails, sparks and telegraphs. The renderer downsamples it three times, sums the three bloom levels at quarter resolution, folds the sum back into the layer, and blends the result onto the screen once.
 - That blend, and the floor reflection, cover only the screen rectangle that contains light this frame.
 - Blade cores are redrawn at full resolution on top so edges stay sharp.
+- A generated strain costs the same to draw as a base enemy: a few more lines for its head shape and one text label.
 - Internal resolution is capped at 1080p. If the smoothed frame time passes 21 ms the renderer first drops the backdrop to half resolution, then lowers the whole canvas in steps down to 55%. It steps back up when frames are fast. G pins quality to high or low.
 - The simulation sub-steps so no step exceeds 1/120 s at any refresh rate.
 - Sparks are recycled from a pool, and the per-frame paths create no gradients.
@@ -314,6 +324,8 @@ Measured in headless Chrome on an Apple-silicon laptop, in the same crowded figh
 | GPU on, 1920x1080 | 0.88 ms | 0.69 ms |
 
 With the GPU off the game is about 2.5 times faster. With a working GPU it was already at 5% of the frame budget and barely changed. A little over half of the saving came from the arenas (merged layers and a baked floor reflection) and the rest from the glow compositing.
+
+After the hundred-floor work the same crowded fight, measured back to back with the previous version on the same machine, is between level and about 10% slower when only the saber throw is used. The extra is the larger HUD and the name labels. When a scripted player fires every power as fast as it can, the effects add up to another 10 draw calls per frame for as long as they last. The six arena families measure between 8.2 and 10.0 ms per frame at 720p with the GPU off, and the new three are within the range of the old three.
 
 The half-resolution backdrop tier cuts the pixels drawn per frame by 41% (3.83 to 2.25 megapixels at 720p) but saves little time in software raster, where it measured within noise of full resolution. It is kept as the first step down because it should matter on GPUs that are limited by fill rate. That has not been measured on such a machine.
 
@@ -340,7 +352,7 @@ A run takes a scripted player 80 to 130 minutes of game time. A script that only
 
 ## Sound
 
-Every sound is synthesized with the Web Audio API. A saber hum rises from 88 Hz to 115 Hz with swing speed. The parryable telegraph is a bright glint centred near 4.5 kHz and the unblockable one is a low buzz near 0.5 kHz, so the two are distinct by ear. Music is generative and its intensity follows the number of enemies and your style rank. Slow motion sweeps a low-pass filter over the mix. Nobody has listened to any of it yet. The balance was set from measurements, so expect to retune it by ear.
+Every sound is synthesized with the Web Audio API. A saber hum rises from 88 Hz to 115 Hz with swing speed. The parryable telegraph is a bright glint centred near 4.5 kHz and the unblockable one is a low buzz near 0.5 kHz, so the two are distinct by ear. Music is generative and its intensity follows the number of enemies and your style rank. Each sector has its own theme: the combat and boss tracks change key, tempo (within 10%), chord colour (dorian, phrygian, harmonic minor or a brighter major-led set), the timbre of the arpeggio and pad, and sometimes the kick pattern or swing. A theme change waits for the next downbeat. Sector I plays the tracks as they were written. The powers, the draft, orbs, champions and sector changes have their own sounds, 21 in all. Slow motion sweeps a low-pass filter over the mix. Nobody has listened to any of it yet. The balance was set from measurements, so expect to retune it by ear.
 
 ## Open questions
 

@@ -668,8 +668,10 @@ export class Renderer {
     ctx.globalAlpha = a * 0.7; ctx.fillStyle = '#000'; ctx.fillRect(x - 1, y - 1, w + 2, 6);
     ctx.globalAlpha = a; ctx.fillStyle = f.color; ctx.fillRect(x, y, w * clamp(f.hp / f.maxHp, 0, 1), 4);
     if (f.posture > 1) { ctx.fillStyle = '#ffd36b'; ctx.fillRect(x, y + 6, w * clamp(f.posture / f.maxPosture, 0, 1), 2); }
-    const tag = f.reads ? 'READS ' + f.reads.toUpperCase() : f.elite ? f.elite.toUpperCase() : null;
-    if (tag) { ctx.fillStyle = f.reads ? f.color : AURA[f.elite]; ctx.font = '700 10px ui-sans-serif, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(tag, f.x, y - 8); }
+    // A strain carries its name, so the player learns which body does what.
+    const name = f.def.strain ? f.def.name.toUpperCase() : null;
+    const tag = f.reads ? 'READS ' + f.reads.toUpperCase() : f.elite ? (name ? `${f.elite.toUpperCase()}  ${name}` : f.elite.toUpperCase()) : name;
+    if (tag) { ctx.fillStyle = f.reads ? f.color : f.elite ? AURA[f.elite] : f.def.outline; ctx.font = '700 10px ui-sans-serif, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(tag, f.x, y - 8); }
     ctx.globalAlpha = 1;
   }
 }

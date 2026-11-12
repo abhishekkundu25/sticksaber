@@ -11,15 +11,18 @@
 <body>
 <canvas id="c"></canvas>
 <script type="module">
-// Arena preview: ?arena=causeway&seed=0&x=0&y=-200&zoom=1&w=1280&t=0&figs=1&q=1&dpr=1
+// Arena preview: ?arena=causeway&seed=0&hue=0&x=0&y=-200&zoom=1&w=1280&t=0&figs=1&q=1&dpr=1
 //   bench=1  time drawBack+drawFront per frame with a 1-pixel readback after each frame (forces the raster)
 //   count=1  count drawImage calls and destination megapixels per frame over a sweep of the camera range
+//   hash=1   report an FNV-1a hash of the still frame's pixels (compare builds exactly, ideally in software raster)
+//   stress=30  build and dispose that many arenas (cycling ids, seeds and hues) and report leaks
 //   src=before  load tools/out/arenas-before.js instead of src/render/arenas.js (for before/after comparisons)
 const P = new URLSearchParams(location.search);
 const num = (k, d) => (P.has(k) ? Number(P.get(k)) : d);
 const mod = await import(P.get('src') === 'before' ? './out/arenas-before.js' : '../src/render/arenas.js');
 const id = P.get('arena') || 'causeway';
 const seed = num('seed', 0);
+const hue = num('hue', 0);
 const view = { w: num('w', 1280), h: 720 };
 const cam = { x: num('x', 0), y: num('y', -200), zoom: num('zoom', 1) };
 const t = num('t', 0);
@@ -70,7 +73,7 @@ const made = [];
 const ce = document.createElement.bind(document);
 document.createElement = (tag) => { const el = ce(tag); if (tag === 'canvas') made.push(el); return el; };
 const t0 = performance.now();
-const arena = mod.buildArena(id, { quality: num('q', 1), seed });
+const arena = mod.buildArena(id, P.has('hue') ? { quality: num('q', 1), seed, hue } : { quality: num('q', 1), seed });
 document.createElement = ce;
 const bakeMs = performance.now() - t0;
 // Canvas work may be deferred; include one flushed frame to get the real cost.
@@ -177,7 +180,15 @@ const m = ctx.getTransform();
 const ctxRestored = m.a === dpr && m.d === dpr && ctx.globalAlpha === 1 && ctx.globalCompositeOperation === 'source-over';
 
 const kept = made.filter((c) => c.width * c.height > 4);
-const result = { id, seed, setPiece: arena.setPiece, name: arena.name, palette: arena.palette, bakeMs: +bakeMs.toFixed(1), bakeFlushMs: +bakeFlushMs.toFixed(1),
+// hash=1: FNV-1a hash of the still frame's pixels, to compare two builds exactly (use with --soft).
+let pixelHash;
+if (num('hash', 0)) {
+  const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < d.length; i++) h = Math.imul(h ^ d[i], 0x01000193);
+  pixelHash = (h >>> 0).toString(16);
+}
+const result = { id, seed, hue: arena.hue, pixelHash, setPiece: arena.setPiece, name: arena.name, palette: arena.palette, bakeMs: +bakeMs.toFixed(1), bakeFlushMs: +bakeFlushMs.toFixed(1),
   canvases: kept.length, maxMP: +(Math.max(...kept.map((c) => c.width * c.height)) / 1e6).toFixed(2),
   totalMPcreated: +(kept.reduce((a, c) => a + c.width * c.height, 0) / 1e6).toFixed(1),
   calls: stat.calls, mp: +(stat.px / 1e6).toFixed(3), ...st, ctxRestored };
@@ -237,6 +248,35 @@ if (num('bench', 0)) {
 if (num('dispose', 0) && arena.dispose) {
   arena.dispose();
   result.disposedLeft = kept.filter((c) => c.width * c.height > 0).length;
+}
+
+if (num('stress', 0)) {
+  // Build, draw and dispose N arenas in a row: every canvas made must be released, nothing may throw.
+  // window.gc exists when Chrome runs with --js-flags=--expose-gc (arena-shot.js does that); without it
+  // the heap figures include garbage that has not been collected yet.
+  const N = num('stress', 30), ids = mod.ARENA_IDS;
+  const heap = async () => {
+    for (let k = 0; k < 2; k++) { await new Promise((r) => setTimeout(r, 20)); window.gc?.(); }
+    return performance.memory?.usedJSHeapSize ?? 0;
+  };
+  const list = [], errors = [], samples = [];
+  let heap0 = 0;
+  for (let i = 0; i < N; i++) {
+    const before = made.length;
+    document.createElement = (tag) => { const el = ce(tag); if (tag === 'canvas') made.push(el); return el; };
+    try {
+      const a = mod.buildArena(ids[i % ids.length], { seed: i * 7919, hue: (i * 47) % 360 });
+      frame({ x: 0, y: -200, zoom: 1 }, i);
+      a.dispose();
+      frame({ x: 0, y: -200, zoom: 1 }, i); // drawing a disposed arena must do nothing
+    } catch (e) { errors.push(String(e)); }
+    document.createElement = ce;
+    const mine = made.slice(before);
+    list.push(mine.filter((c) => c.width * c.height > 0).length);
+    if (i % 6 === 5) samples.push(+((await heap()) / 1e6).toFixed(1));
+  }
+  // Heap in MB after every sixth build (one round of all six families): a leak shows as a steady climb.
+  result.stress = { n: N, errors, liveCanvasesAfterDispose: list.reduce((a, b) => a + b, 0), gcExposed: !!window.gc, heapMB: samples };
 }
 
 window.__result = result;

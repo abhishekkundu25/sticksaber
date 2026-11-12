@@ -46,11 +46,10 @@ let spawnIdx = 0;
 const live = () => app.state === 'play' || app.state === 'pause';
 
 // One arena is baked at a time: each floor is its own seeded variant, so the previous one is released.
-const STAND_IN = { garden: 'hall', vault: 'foundry', apex: 'causeway' };
 let arenaKey = '';
 const director = new Director(world, {
   setArena(id, seed = 0, hue = 0) {
-    if (!ARENA_IDS.includes(id)) id = STAND_IN[id] || 'causeway';
+    if (!ARENA_IDS.includes(id)) id = 'causeway';
     const key = `${id}:${seed}:${hue}`;
     if (key !== arenaKey) {
       renderer.arena?.dispose?.();

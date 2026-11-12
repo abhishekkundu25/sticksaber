@@ -97,7 +97,7 @@ export class Director {
     this.state = 'intro'; this.t = 0; this.pending.length = 0;
     this.fade = 1; this.fadeDir = -1;
     this.music = def.music;
-    if (def.pos === 1 && def.sector > 0 && wave === 0) { w.banner(`SECTOR ${roman(def.sector + 1)}`, `${this.sector.name}  ·  ${def.title}`, 3); w.sfx('sectorUp', p.x); }
+    if (def.pos === 1 && wave === 0) { w.banner(`SECTOR ${roman(def.sector + 1)}`, `${this.sector.name}  ·  ${def.title}`, 3.2); w.bannerMsg.sector = def.sector; if (def.sector > 0) w.sfx('sectorUp', p.x); }
     else w.banner(def.title, def.sub, 2.6);
     if (def.anomaly) w.sfx('anomaly', p.x);
     this.hooks.onFloor?.({ seed: this.seed, diff: this.diff, floor: def.n, build: { ...this.build }, powers: [...w.powers], powerIdx: w.powerIdx, time: this.runTime, deaths: this.deaths });

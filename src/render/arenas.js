@@ -3,14 +3,18 @@
 // plus a small amount of ambient animation (rain, embers, dust motes).
 //
 // Contract:
-//   buildArena(id, { quality = 1, seed = 0 }) -> { id, name, width, palette, reflect, seed, setPiece,
+//   buildArena(id, { quality = 1, seed = 0, hue = 0 }) -> { id, name, width, palette, reflect, seed, hue, setPiece,
 //     drawBack(ctx, cam, view, t), drawFront(ctx, cam, view, t), dispose() }
 //   cam = { x, y, zoom } with x in [-width/2 - 200, width/2 + 200], y in [-460, -100], zoom in [0.8, 1.45]
 //   (plus up to 24 units of shake); view = { w: 960..1680, h: 720 }. ctx may carry any scale+translate
 //   transform (device or half-resolution scale): nothing reads the destination canvas size. Both draw
 //   calls restore ctx state. seed is an unsigned 32-bit integer: 0 is the base look, any other value a
-//   deterministic variant of the same family (layout, palette, weather, one set-piece). dispose()
-//   releases every baked canvas at once (width and height 0); later draws do nothing.
+//   deterministic variant of the same family (layout, palette, weather, one set-piece). hue is a
+//   rotation in degrees (any number, taken modulo 360) applied to every colour on top of the seed's
+//   variant, so one family can read as a different place; hue 0 renders exactly as if the option were
+//   absent. arena.hue is the rotation used, in [0, 360), and palette (fog included) holds the rotated
+//   colours. setPiece names the variant's set-piece; the three older families leave it undefined for
+//   seed 0. dispose() releases every baked canvas at once (width and height 0); later draws do nothing.
 //
 // Cost model (software raster): a filtered drawImage costs ~1.5 ms per full 1280x720 screen, an
 // unscaled integer-aligned copy ~0.2-0.4 ms, a solid fillRect almost nothing. So per frame:
@@ -25,17 +29,22 @@
 // where px and zf default to p (the backdrop has zf = 0). The floor is a sheared texture so its rows
 // slide with perspective-correct parallax (row y has horizontal parallax 1 + y / D).
 
-export const ARENA_IDS = ['causeway', 'foundry', 'hall'];
+export const ARENA_IDS = ['causeway', 'foundry', 'hall', 'garden', 'vault', 'apex'];
 
 // Per-frame drawImage budget (drawBack + drawFront together) for every seed, measured at view
 // 1280x720 on a context with scale 1: calls counted, destination area clipped to the canvas in
 // megapixels, maximum over the contract's camera range (x, y and zoom grids incl. both extremes).
-// Measured maxima over seeds 0-63 and a few large seeds: causeway 63 calls / 3.07 MP,
-// foundry 52 / 2.89, hall 51 / 2.70 (seed 0: 52 / 2.71, 41 / 2.75, 32 / 2.29). Values below add headroom.
+// Measured maxima over seeds 0-63, 1000003 and 4294967295: causeway 63 calls / 3.06 MP,
+// foundry 59 / 2.85, hall 51 / 2.72, garden 53 / 2.40, vault 35 / 2.63, apex 47 / 2.73
+// (seed 0: 54 / 2.70, 41 / 2.73, 32 / 2.29, 33 / 2.24, 24 / 2.27, 29 / 2.28). The hue option changes
+// neither (checked at hues 0, 90, 200 and 300 for seeds 0-7). Values below add headroom.
 export const ARENA_DRAW_BUDGET = {
   causeway: { calls: 72, megapixelsAt720p: 3.4 },
   foundry: { calls: 60, megapixelsAt720p: 3.2 },
   hall: { calls: 58, megapixelsAt720p: 3.0 },
+  garden: { calls: 62, megapixelsAt720p: 2.8 },
+  vault: { calls: 44, megapixelsAt720p: 3.0 },
+  apex: { calls: 56, megapixelsAt720p: 3.1 },
 };
 
 const TAU = Math.PI * 2;
@@ -62,14 +71,18 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const spreadR = (R, k) => (R() * 2 - 1) * k;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
-// Colour shift for seeded variants: set while a variant bakes, null for the base look.
+// Colour shift applied to every '#rrggbb' colour: while an arena bakes it is the seed variant's
+// shift followed by the hue option; while it draws it is the hue option alone (null for hue 0, so the
+// per-frame colours of a seeded variant stay as they were before the hue option existed). Each tint
+// function keeps its own cache, so several arenas with different hues can be alive at once.
 let TINT = null;
-const TINT_CACHE = new Map();
+let RUN_TINT = null; // the hue option's tint, captured by compose() for per-frame colours
 function rgb(c) {
   if (typeof c !== 'string') return c;
   if (TINT) {
-    let v = TINT_CACHE.get(c);
-    if (!v) { const n = parseInt(c.slice(1), 16); v = TINT([(n >> 16) & 255, (n >> 8) & 255, n & 255]); TINT_CACHE.set(c, v); }
+    const cache = TINT.cache || (TINT.cache = new Map());
+    let v = cache.get(c);
+    if (!v) { const n = parseInt(c.slice(1), 16); v = TINT([(n >> 16) & 255, (n >> 8) & 255, n & 255]); cache.set(c, v); }
     return v;
   }
   const n = parseInt(c.slice(1), 16);
@@ -102,6 +115,50 @@ function tintFn(hd, dd, ha, da, hf, light) {
     return o.map((v) => clamp(v * k, 0, 1) * 255);
   };
 }
+// The hue option: rotate every colour by `deg` in OKLCh, which keeps perceived lightness, so a
+// rotated floor band is as dark as the original. Chroma never grows: colours that leave the sRGB
+// gamut lose chroma (not lightness) until they fit, and colours that land in the red-to-magenta
+// range, which read brighter and closer to the red attack telegraphs, lose up to 18% more.
+const srgbToLin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+const linToSrgb = (v) => (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055);
+function toOklab(r, g, b) {
+  r = srgbToLin(r); g = srgbToLin(g); b = srgbToLin(b);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+}
+function fromOklab(L, a, b) {
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s];
+}
+function hueFn(deg) {
+  deg = ((Number(deg) || 0) % 360 + 360) % 360;
+  if (deg < 1e-9 || deg > 360 - 1e-9) return null;
+  const ca = Math.cos((deg * Math.PI) / 180), sa = Math.sin((deg * Math.PI) / 180);
+  const inGamut = (v) => v[0] >= -1e-4 && v[0] <= 1.0001 && v[1] >= -1e-4 && v[1] <= 1.0001 && v[2] >= -1e-4 && v[2] <= 1.0001;
+  const f = ([r, g, b]) => {
+    const [L, a, bb] = toOklab(r / 255, g / 255, b / 255);
+    if (a * a + bb * bb < 1e-8) return [r, g, b];
+    let a2 = a * ca - bb * sa, b2 = a * sa + bb * ca;
+    // OKLCh hue of the result: red sits near 29 degrees, magenta near 328
+    const h = (Math.atan2(b2, a2) * 180 / Math.PI + 360) % 360, dr = Math.min(Math.abs(h - 10), 360 - Math.abs(h - 10));
+    const k = 1 - 0.18 * clamp(1 - dr / 55, 0, 1);
+    a2 *= k; b2 *= k;
+    let lo = 0, hi = 1, out = fromOklab(L, a2, b2);
+    if (!inGamut(out)) {
+      for (let i = 0; i < 14; i++) { const m = (lo + hi) / 2; if (inGamut(fromOklab(L, a2 * m, b2 * m))) lo = m; else hi = m; }
+      out = fromOklab(L, a2 * lo, b2 * lo);
+    }
+    return out.map((v) => clamp(linToSrgb(clamp(v, 0, 1)), 0, 1) * 255);
+  };
+  f.deg = deg;
+  return f;
+}
+
 function col(c, a = 1) {
   const [r, g, b] = rgb(c);
   return `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${a})`;
@@ -786,9 +843,11 @@ function flatten(B, floorBase, refl) {
 //   A.front, A.fogFront (bands), A.fgTop/fgBot, A.vignette
 function compose(A) {
   A.track = TRACK || [];
+  A.tint = RUN_TINT;
   return {
     drawBack(ctx, cam, view, t) {
       if (A.disposed) return;
+      TINT = A.tint;
       const vw = view.w, vh = view.h, sg = (0 - cam.y) * cam.zoom + vh / 2;
       ctx.save();
       saveBase(ctx);
@@ -823,9 +882,11 @@ function compose(A) {
         if (step.fx) step.fx(ctx, cam, vw, vh, t, sg);
       }
       ctx.restore();
+      TINT = null;
     },
     drawFront(ctx, cam, view, t) {
       if (A.disposed) return;
+      TINT = A.tint;
       const vw = view.w, vh = view.h, sg = (0 - cam.y) * cam.zoom + vh / 2;
       ctx.save();
       saveBase(ctx);
@@ -839,6 +900,7 @@ function compose(A) {
       if (A.fgBot) drawFg(ctx, A.fgBot, cam, vw, vh, false);
       drawVignette(ctx, A.vignette, vw, vh);
       ctx.restore();
+      TINT = null;
     },
     dispose() {
       if (A.disposed) return;
@@ -866,10 +928,12 @@ function haze(B, q, color, stops, wisps, R) {
 // ======================================================================
 
 // Base hues per family: dominant, accent and fog (degrees), used by the palette shift.
-const HUES = { causeway: [186, 330, 192], foundry: [27, 197, 22], hall: [258, 41, 258] };
+const HUES = { causeway: [186, 330, 192], foundry: [27, 197, 22], hall: [258, 41, 258],
+  garden: [162, 33, 170], vault: [210, 355, 212], apex: [252, 212, 250] };
 // How far each family's dominant hue may turn (min, max degrees) and its accent (± degrees). The
 // foundry's orange turns blood red or olive quickly, so it gets a narrower, red-leaning range.
-const HUE_RANGE = { causeway: [-25, 25, 25], foundry: [-14, 8, 25], hall: [-25, 25, 22] };
+const HUE_RANGE = { causeway: [-25, 25, 25], foundry: [-14, 8, 25], hall: [-25, 25, 22],
+  garden: [-22, 20, 14], vault: [-18, 18, 10], apex: [-25, 22, 20] };
 
 // Everything a variant changes, generated deterministically from (id, seed). Seed 0 is the base look.
 function variant(id, seed) {
@@ -966,7 +1030,7 @@ function variant(id, seed) {
     V.tint = tintFn(hd, V.hue[0], ha, V.hue[1], hf, V.light);
     V.haze = Math.min(V.haze, 1.04);
     V.mouth = Math.floor(P() * nf);
-  } else {
+  } else if (id === 'hall') {
     V.piece = choose(['banners', 'lamps', 'cracked']);
     V.oculus = { x: Math.round(pick(-240, 240)), sy: pick(36, 100), r: Math.round(pick(215, 268)) };
     V.farStep = Math.round(pick(200, 270));
@@ -978,6 +1042,46 @@ function variant(id, seed) {
     V.pools = [-480, -170, 170, 480].map((x) => Math.round(x * wide + tilt + V.oculus.x * 0.4));
     V.dust = pick(0.5, 1.8);
     V.crack = { a: pick(0.35, Math.PI - 0.35), seed: (seed * 7919) >>> 0 }; // impact in the lower half, which is always in view
+  } else if (id === 'garden') {
+    V.piece = choose(['tree', 'falls', 'lanterns']);
+    V.dome = { x: Math.round(pick(-320, 320)), sy: pick(20, 70), k: pick(0.85, 1.15) };
+    const nt = 5 + Math.floor(P() * 4), ts = 2700 / nt;
+    V.trees = [];
+    for (let i = 0; i < nt; i++) V.trees.push([Math.round(-1350 + ts * (i + 0.5) + spread(ts * 0.3)), pick(0.75, 1.25), Math.round(pick(270, 350))]);
+    V.treeX = Math.round(pick(-460, 460));
+    V.fallX = Math.round((P() < 0.5 ? -1 : 1) * pick(520, 820));
+    V.vineStep = Math.round(pick(80, 130));
+    const inner = pick(500, 700), outer = inner + pick(640, 820);
+    V.near = [-outer + spread(40), -inner + spread(40), inner + spread(40), outer + spread(40)].map(Math.round);
+    V.dust = pick(0.5, 1.7);
+  } else if (id === 'vault') {
+    V.piece = choose(['core', 'breach', 'crane']);
+    V.coreX = Math.round(pick(-300, 300));
+    V.podStep = Math.round(pick(105, 145));
+    const gap = pick(300, 420), step = pick(240, 300);
+    V.mono = [];
+    for (let x = gap; x < 1500; x += step + spread(30)) V.mono.push(Math.round(x), -Math.round(x + spread(40)));
+    V.mono.sort((a, b) => a - b);
+    V.breach = V.mono[Math.floor(P() * V.mono.length)];
+    const inner = pick(520, 700), outer = inner + pick(620, 800);
+    V.near = [-outer + spread(40), -inner + spread(40), inner + spread(40), outer + spread(40)].map(Math.round);
+    V.dust = pick(0.5, 1.7);
+    V.mist = pick(0.8, 1.15);
+  } else if (id === 'apex') {
+    V.piece = choose(['planet', 'moon', 'eye']);
+    const side = P() < 0.5 ? -1 : 1;
+    V.orb = { x: Math.round(side * pick(180, 560)), sy: pick(70, 130), r: Math.round(pick(140, 190)) };
+    V.cells = [[Math.round(-side * pick(600, 1100)), pick(0.8, 1.2)], [Math.round(side * pick(900, 1300)), pick(0.7, 1)]];
+    V.masts = [];
+    for (let i = 0, n = 3 + Math.floor(P() * 3); i < n; i++) {
+      let x = Math.round(pick(-1500, 1500));
+      if (Math.abs(x) < 260) x = Math.sign(x || 1) * 260 + Math.round(x / 2);
+      V.masts.push([x, Math.round(pick(-160, 60))]);
+    }
+    const inner = pick(560, 760), outer = inner + pick(640, 860);
+    V.near = [-outer + spread(40), -inner + spread(40), inner + spread(40), outer + spread(40)].map(Math.round);
+    V.wind = pick(0.6, 1.7);
+    V.bolt = pick(4.5, 9);
   }
   return V;
 }
@@ -2355,24 +2459,1338 @@ function buildHall(q, V) {
 }
 
 // ======================================================================
+// HANGING GARDENS
+// ======================================================================
 
-const BUILDERS = { causeway: buildCauseway, foundry: buildFoundry, hall: buildHall };
+// Small glows: a radial blob is already soft, so it goes straight onto the layer without a blur pass.
+function glows(L, fn) {
+  const g = L.g;
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  fn(g);
+  g.restore();
+}
+
+// A pointed leaf from (x, y) along angle a, added to the current path.
+function leaf(g, x, y, len, a, w) {
+  const c = Math.cos(a), s = Math.sin(a), ex = x + c * len, ey = y + s * len;
+  const mx = x + c * len * 0.5, my = y + s * len * 0.5, nx = -s * w, ny = c * w;
+  g.moveTo(x, y);
+  g.quadraticCurveTo(mx + nx, my + ny, ex, ey);
+  g.quadraticCurveTo(mx - nx, my - ny, x, y);
+}
+// A hanging vine from (x, y0), `len` long, swaying by `sw`, with leaves in the current fill style.
+// Returns its tip.
+function vine(g, x, y0, len, sw, R, lw = 10, w = 1.6) {
+  const pts = [], n = Math.max(3, Math.round(len / 16));
+  for (let i = 0; i <= n; i++) { const t = i / n; pts.push([x + Math.sin(t * 2.6 + sw * 9) * sw * 26 * t, y0 + len * t]); }
+  g.lineWidth = w;
+  g.beginPath();
+  g.moveTo(pts[0][0], pts[0][1]);
+  for (const p of pts) g.lineTo(p[0], p[1]);
+  g.stroke();
+  g.beginPath();
+  for (let i = 1; i <= n; i++) {
+    const s = lw * (1 - 0.45 * i / n) * (0.7 + R() * 0.6), side = i & 1 ? 1 : -1;
+    leaf(g, pts[i][0], pts[i][1], s, Math.PI / 2 + side * (0.7 + R() * 0.5), s * 0.36);
+  }
+  g.fill();
+  return pts[n];
+}
+// A fern frond rising from (x, y) at angle a: a curved spine with leaflets on both sides.
+function frond(g, x, y, len, a, bend, R) {
+  let px = x, py = y, ang = a;
+  const n = Math.round(len / 9);
+  g.beginPath();
+  for (let i = 0; i < n; i++) {
+    const t = i / n, l = len / n, lf = len * 0.2 * Math.sin(Math.PI * (0.15 + 0.85 * t)) * (0.8 + R() * 0.4);
+    ang += bend / n;
+    const nx = px + Math.cos(ang) * l, ny = py + Math.sin(ang) * l;
+    leaf(g, nx, ny, lf, ang - 1.1, lf * 0.22);
+    leaf(g, nx, ny, lf, ang + 1.1, lf * 0.22);
+    g.moveTo(px, py); g.lineTo(nx + Math.cos(ang + 1.57) * 1.5, ny + Math.sin(ang + 1.57) * 1.5); g.lineTo(nx, ny);
+    px = nx; py = ny;
+  }
+  g.fill();
+}
+
+function buildGarden(q, V) {
+  const R = rng(0x9a4d ^ V.scatter);
+  const W = 2100;
+  const FOG = '#1b453e';
+  const pal = { key: '#5fe3b6', accent: '#ffb35c', fog: FOG, floor: '#030d0b', ambient: '#98d8c0' };
+  const LEAF = '#5fe3b6', AMBER = '#ffb35c', MINT = '#b8ffe4';
+  const PIECE = V.piece || 'tree';
+  const DOME = V.dome || { x: 0, sy: 40, k: 1 };
+  const TREE_X = V.treeX ?? -260, FALL_X = V.fallX ?? 640;
+
+  // Sky through the dome glass, the dome's ribs, the far grove and the haze wisps share one backdrop.
+  const B = backdrop(0.08, 0.7 * q, W);
+
+  // --- sky and dome -----------------------------------------------------------
+  const sky = B.part(0.02, 0.5 * q);
+  const crown = { x: DOME.x, y: sky.Y(DOME.sy) };
+  {
+    const L = sky, g = L.g, Y = L.Y;
+    vfill(L, [[Y(-80), '#010504'], [Y(90), '#030f0d'], [Y(240), '#06201b'], [Y(380), '#0d302a'], [Y(520), '#153f37'], [Y(720), '#153f37']]);
+    g.fillStyle = col('#d8fff0', 0.45);
+    for (let i = 0; i < 240; i++) g.fillRect(lerp(L.x0, L.x1, R()), Y(-80 + Math.pow(R(), 1.6) * 320), 1.2, 1.2);
+    // aurora ribbons high up, and the grove's warm glow rising from below
+    soft(L, 4, 8, (gg) => {
+      for (let i = 0; i < 7; i++) blob(gg, lerp(L.ox0, L.ox1, R()), Y(10 + R() * 130), 380 + R() * 320, 30 + R() * 40, R() < 0.3 ? '#2f7a50' : '#1d6a5a', 0.4);
+      for (let i = 0; i < 12; i++) blob(gg, lerp(L.ox0, L.ox1, R()), Y(520 + R() * 80), 260 + R() * 380, 110 + R() * 60, R() < 0.35 ? '#5a4220' : '#1c5446', 0.35);
+    }, 'lighter');
+    // the sun lamp hanging in the crown of the dome
+    const cx = crown.x, cy = crown.y, k = DOME.k;
+    soft(L, 4, 8, (gg) => blob(gg, cx, cy, 620 * k, 380 * k, '#7a5a26', 0.4), 'lighter');
+    soft(L, 2, 4, (gg) => blob(gg, cx, cy, 120 * k, 120 * k, '#ffcf8a', 0.7, 0.15), 'lighter');
+    // ribs: meridians fanning down from the crown ring, latitude rings bowed upward
+    const rg = g;
+    rg.lineCap = 'round';
+    const meridians = [], lats = [];
+    for (let i = -9; i <= 9; i++) {
+      const u = i / 9, bx = cx + u * 1700 * k, p = new Path2D();
+      p.moveTo(cx + u * 46 * k, cy + Math.abs(u) * 6);
+      p.bezierCurveTo(cx + u * 760 * k, cy + 20 * k, bx, cy + 300 * k, bx, Y(900));
+      meridians.push(p);
+    }
+    for (const d of [70, 150, 250, 370, 510]) {
+      const p = new Path2D(), rx = (260 + d * 2.6) * k, ry = (90 + d * 0.9) * k;
+      p.ellipse(cx, cy + d * k + ry, rx, ry, 0, Math.PI, TAU);
+      lats.push(p);
+    }
+    // glass sheen: a few panes catch the lamp
+    rg.save();
+    for (let i = 0; i < 26; i++) {
+      const a = -Math.PI / 2 + spreadR(R, 1.25), d = 90 + R() * 420;
+      blob(rg, cx + Math.cos(a) * d * 2.2 * k, cy + 40 + Math.abs(Math.sin(a + Math.PI / 2)) * d * 0.4 * k + d * 0.25, 70 + R() * 90, 22 + R() * 30, '#3a8a76', 0.14);
+    }
+    rg.restore();
+    for (const [w, c, a] of [[10, '#020a08', 1], [3, '#0a1f1b', 1]]) {
+      rg.strokeStyle = col(c, a); rg.lineWidth = w;
+      for (const p of meridians) rg.stroke(p);
+      rg.lineWidth = w * 0.7;
+      for (const p of lats) rg.stroke(p);
+    }
+    rg.save(); rg.translate(-1.5, -2);
+    rg.strokeStyle = col(LEAF, 0.22); rg.lineWidth = 1.1;
+    for (const p of meridians) rg.stroke(p);
+    rg.strokeStyle = col(AMBER, 0.16);
+    for (const p of lats) rg.stroke(p);
+    rg.restore();
+    // crown ring
+    rg.beginPath(); rg.arc(cx, cy, 50 * k, 0, TAU); rg.strokeStyle = col('#020a08'); rg.lineWidth = 12 * k; rg.stroke();
+    rg.beginPath(); rg.arc(cx, cy, 50 * k, 0.2, Math.PI - 0.2); rg.strokeStyle = col(AMBER, 0.6); rg.lineWidth = 2; rg.stroke();
+    glows(L, (gg) => blob(gg, cx, cy, 36 * k, 36 * k, '#fff2d6', 1, 0.4));
+    grain(L, 0.05, false);
+  }
+
+  // --- far grove ----------------------------------------------------------------
+  const far = B.part(0.08);
+  { const ob = layerBounds(0.08, W, 'back'); far.ox0 = ob.x0; far.ox1 = ob.x1; }
+  const canopy = (g, x, y, s, n, c) => {
+    g.fillStyle = col(c);
+    g.beginPath();
+    for (let i = 0; i < n; i++) {
+      const a = R() * TAU, d = Math.sqrt(R()) * 110 * s, r = (34 + R() * 46) * s;
+      const px = x + Math.cos(a) * d * 1.5, py = y + Math.sin(a) * d * 0.55;
+      g.moveTo(px + r, py); g.arc(px, py, r, 0, TAU);
+    }
+    g.fill();
+  };
+  const trunk = (g, x, y, s, c, bottom) => {
+    g.fillStyle = col(c);
+    poly(g, [x - 10 * s, y, x + 10 * s, y, x + 24 * s, bottom, x - 24 * s, bottom]);
+    g.fill();
+    g.strokeStyle = col(c); g.lineCap = 'round';
+    for (let i = 0; i < 4; i++) {
+      const side = i & 1 ? 1 : -1, by = y + (20 + i * 26) * s;
+      g.lineWidth = (7 - i) * s;
+      g.beginPath(); g.moveTo(x, by); g.quadraticCurveTo(x + side * 50 * s, by - 10 * s, x + side * (80 + R() * 40) * s, by - (40 + R() * 30) * s); g.stroke();
+    }
+  };
+  const fruit = [];
+  {
+    const L = far, Y = L.Y;
+    const trees = V.trees || [[-1150, 1, 300], [-720, 0.8, 340], [-300, 1.15, 290], [330, 0.9, 325], [800, 1.1, 290], [1240, 0.85, 335]];
+    const g = L.g; // the part is empty: paint straight into it
+    // back row: a continuous hedge of hazy crowns
+    for (let i = 0; i < 26; i++) {
+      const x = lerp(L.ox0, L.ox1, R()), s = 0.6 + R() * 0.5, y = Y(380 + R() * 40);
+      canopy(g, x, y, s, 8, mix(FOG, '#06140f', 0.35));
+      trunk(g, x, y + 30 * s, s * 0.8, mix(FOG, '#06140f', 0.35), Y(900));
+    }
+    g.save(); g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = col(FOG, 0.4); g.fillRect(L.x0, L.y0, L.x1 - L.x0, L.y1 - L.y0);
+    g.restore();
+    // front row: taller trees, darker, crowns lit from the dome above
+    for (const [x, s, top] of trees) {
+      canopy(g, x, Y(top), s, 14, '#05110e');
+      trunk(g, x, Y(top) + 40 * s, s, '#05110e', Y(900));
+    }
+    g.save(); g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = linGrad(g, 0, Y(180), 0, Y(400), [[0, '#2e7a64', 0.35], [1, '#2e7a64', 0]]);
+    g.fillRect(L.x0, L.y0, L.x1 - L.x0, L.y1 - L.y0);
+    g.restore();
+    // bioluminescent fruit in the crowns
+    glows(L, (gg) => {
+      for (const [x, s, top] of trees) {
+        for (let i = 0; i < 9; i++) {
+          const fx = x + spreadR(R, 140 * s), fy = Y(top) + spreadR(R, 50 * s);
+          blob(gg, fx, fy, 7, 7, R() < 0.4 ? AMBER : MINT, 0.7);
+        }
+      }
+    });
+    if (PIECE === 'tree') { // the great tree: a broad crown high over the arena, hung with amber lanterns
+      const x = TREE_X, top = Y(95), s = 1.9;
+      const tg = L.g;
+      tg.fillStyle = col('#030a08');
+      poly(tg, [x - 26 * s, top + 60, x + 26 * s, top + 60, x + 60 * s, Y(900), x - 60 * s, Y(900)]);
+      tg.fill();
+      // roots and buttresses
+      for (const side of [-1, 1]) poly(tg, [x + side * 20 * s, Y(380), x + side * 50 * s, Y(380), x + side * 140 * s, Y(900), x + side * 60 * s, Y(900)], col('#030a08'));
+      tg.strokeStyle = col('#030a08'); tg.lineCap = 'round';
+      for (let i = 0; i < 9; i++) {
+        const side = i & 1 ? 1 : -1, by = top + 60 + i * 16;
+        tg.lineWidth = (16 - i) * 1.2;
+        tg.beginPath(); tg.moveTo(x, by); tg.quadraticCurveTo(x + side * (120 + i * 20), by - 30, x + side * (220 + R() * 160), by - 70 - R() * 60); tg.stroke();
+      }
+      canopy(tg, x, top, s, 34, '#030a08');
+      tg.save(); tg.globalCompositeOperation = 'source-atop';
+      tg.fillStyle = linGrad(tg, 0, top - 150, 0, top + 60, [[0, '#3a8a70', 0.4], [1, '#3a8a70', 0]]);
+      tg.fillRect(x - 600, top - 200, 1200, 260);
+      tg.restore();
+      // glowing veins up the upper trunk, fading out well above the fighters
+      tg.lineWidth = 1.3;
+      for (let i = 0; i < 5; i++) {
+        let vx = x + spreadR(R, 16 * s), vy = Y(330);
+        tg.strokeStyle = linGrad(tg, 0, Y(330), 0, top + 60, [[0, LEAF, 0], [1, LEAF, 0.6]]);
+        tg.beginPath(); tg.moveTo(vx, vy);
+        while (vy > top + 70) { vx += spreadR(R, 8); vy -= 18 + R() * 14; tg.lineTo(vx, vy); }
+        tg.stroke();
+      }
+      soft(L, 2, 4, (gg) => {
+        blob(gg, x, top - 20, 420, 200, '#4a6a3a', 0.25);
+        for (let i = 0; i < 40; i++) {
+          const fx = x + spreadR(R, 300), fy = top + spreadR(R, 90) + 20;
+          blob(gg, fx, fy, 9, 12, AMBER, 0.9);
+          fruit.push([fx, fy]);
+        }
+        lineV(gg, x, top + 70, Y(260), 30, LEAF, 0.1);
+      }, 'lighter');
+      for (const [fx, fy] of fruit) rect(L.g, fx - 1.5, fy - 2, 3, 4, '#ffe0a8', 0.95);
+    }
+    grain(L, 0.04);
+    vfill(L, [[Y(300), FOG, 0.1], [Y(420), FOG, 0.6], [Y(560), FOG, 0.93]], 'source-atop');
+  }
+
+  // --- mid: trellis, hanging vines and planters ---------------------------------
+  const mid = backLayer(0.25, 0.75 * q, W);
+  const pods = [];
+  {
+    const L = mid, g = L.g, Y = L.Y, sg = g;
+    // the trellis beam and its lattice
+    rect(sg, L.x0, Y(-300), L.x1 - L.x0, Y(-30) - Y(-300), '#020807');
+    rect(sg, L.x0, Y(-30), L.x1 - L.x0, 14, '#030b09');
+    sg.strokeStyle = col('#030b09'); sg.lineWidth = 4;
+    sg.beginPath();
+    for (let x = Math.ceil(L.x0 / 60) * 60; x < L.x1; x += 60) { sg.moveTo(x, Y(-16)); sg.lineTo(x + 30, Y(14)); sg.lineTo(x + 60, Y(-16)); }
+    sg.stroke();
+    rect(sg, L.x0, Y(14), L.x1 - L.x0, 5, '#030b09');
+    rect(sg, L.x0, Y(-30), L.x1 - L.x0, 1.5, LEAF, 0.3);
+    // vines
+    sg.strokeStyle = col('#04100c'); sg.fillStyle = col('#04100c');
+    const step = V.vineStep ?? 100;
+    for (let x = Math.ceil(L.x0 / step) * step; x < L.x1; x += step) {
+      for (let k = 0; k < 3; k++) {
+        const len = 60 + Math.pow(R(), 1.4) * 230;
+        const tip = vine(sg, x + spreadR(R, step * 0.5), Y(18), len, spreadR(R, 1), R, 11);
+        if (R() < 0.3) pods.push(tip);
+      }
+    }
+    // hanging planters on chains, spilling fronds
+    for (let x = Math.ceil(L.x0 / 460) * 460 + 130; x < L.x1; x += 460) {
+      const py = Y(110 + R() * 50);
+      sg.fillStyle = col('#030b09');
+      for (let y = Y(18); y < py - 10; y += 9) sg.fillRect(x - 1.5, y, 3, 6);
+      sg.beginPath(); sg.ellipse(x, py, 46, 22, 0, 0, Math.PI); sg.fill();
+      rect(sg, x - 50, py - 4, 100, 6, '#030b09');
+      rect(sg, x - 50, py - 4, 100, 1.2, AMBER, 0.35);
+      sg.strokeStyle = col('#04100c'); sg.fillStyle = col('#04100c');
+      for (let k = 0; k < 5; k++) pods.push(vine(sg, x + spreadR(R, 40), py, 50 + R() * 120, spreadR(R, 1), R, 9));
+    }
+    if (PIECE === 'lanterns') { // strings of paper lanterns slung across the trellis
+      const lit = [];
+      for (let x0 = Math.ceil(L.x0 / 520) * 520 - 260; x0 < L.x1; x0 += 520) {
+        const sag = 60 + R() * 50, y0 = Y(30);
+        sg.strokeStyle = col('#030b09'); sg.lineWidth = 1.5;
+        sg.beginPath(); sg.moveTo(x0, y0); sg.quadraticCurveTo(x0 + 260, y0 + sag * 2, x0 + 520, y0); sg.stroke();
+        for (let u = 0.08; u < 0.95; u += 0.12) {
+          const lx = x0 + u * 520, ly = y0 + sag * 2 * 2 * u * (1 - u) + 6;
+          sg.fillStyle = col('#030b09');
+          sg.fillRect(lx - 1, ly - 6, 2, 6);
+          sg.beginPath(); sg.ellipse(lx, ly + 8, 8, 11, 0, 0, TAU); sg.fillStyle = col('#ffcf8a', 0.95); sg.fill();
+          rect(sg, lx - 6, ly + 1, 12, 2, '#3a2208', 0.8);
+          lit.push([lx, ly + 8]);
+        }
+      }
+      soft(L, 3, 4, (gg) => { for (const [x, y] of lit) blob(gg, x, y, 40, 44, AMBER, 0.4); }, 'lighter');
+    }
+    if (PIECE === 'falls') { // a cascade pouring from a high planter ledge
+      const x = FALL_X, top = Y(120);
+      const f = sub(L), fg = f.g;
+      fg.fillStyle = linGrad(fg, 0, top, 0, Y(520), [[0, '#d8fff2', 0.75], [0.35, '#7fe0c8', 0.4], [1, '#3a9a88', 0.15]]);
+      poly(fg, [x - 40, top, x + 40, top, x + 58, Y(900), x - 58, Y(900)]);
+      fg.fill();
+      fg.globalCompositeOperation = 'destination-out';
+      fg.fillStyle = col('#000000', 0.5);
+      for (let i = 0; i < 40; i++) { const sx = x - 40 + R() * 80; fg.fillRect(sx, top, 1 + R() * 3, Y(900) - top); }
+      fg.globalCompositeOperation = 'source-over';
+      rect(fg, x - 90, top - 26, 180, 26, '#030b09');
+      fg.beginPath(); fg.ellipse(x, top - 26, 90, 14, 0, Math.PI, TAU); fg.fillStyle = col('#030b09'); fg.fill();
+      rect(fg, x - 90, top - 3, 180, 1.5, LEAF, 0.5);
+      fg.strokeStyle = col('#04100c'); fg.fillStyle = col('#04100c');
+      for (let k = 0; k < 6; k++) vine(fg, x + spreadR(R, 100), top - 6, 40 + R() * 90, spreadR(R, 1), R, 9);
+      stamp(L, f.c);
+      soft(L, 3, 6, (gg) => { cone(gg, x, top, Y(420), 90, 260, '#5fe3b6', 0.2); blob(gg, x, top + 30, 140, 60, MINT, 0.3); }, 'lighter');
+    }
+    glows(L, (gg) => { for (const [x, y] of pods) blob(gg, x, y + 4, 10, 10, LEAF, 0.7); });
+    for (const [x, y] of pods) rect(g, x - 1.5, y + 2, 3, 3, MINT, 0.9);
+    grain(L, 0.05);
+    snapshot(L, [[Y(260), FOG, 0], [Y(440), FOG, 0.45]]);
+    vfill(L, [[Y(230), FOG, 0], [Y(390), FOG, 0.55], [Y(540), FOG, 0.92]], 'source-atop');
+  }
+
+  // --- near: iron dome columns wrapped in vines, with amber lamps ---------------
+  const near = backLayer(0.55, 0.9 * q, W);
+  const nearX = V.near || [-1320, -580, 600, 1340];
+  const lampsNear = [];
+  {
+    const L = near, Y = L.Y, g = L.g;
+    for (const x of nearX) {
+      const lit = x < 0 ? 1 : -1;
+      g.fillStyle = linGrad(g, x - 36, 0, x + 36, 0, lit > 0
+        ? [[0, '#020605'], [0.7, '#06120f'], [0.95, '#2a6a58'], [1, '#020605']]
+        : [[0, '#020605'], [0.05, '#2a6a58'], [0.3, '#06120f'], [1, '#020605']]);
+      g.fillRect(x - 36, Y(-400), 72, Y(900) - Y(-400));
+      for (let y = Y(-300); y < Y(900); y += 140) rect(g, x - 42, y, 84, 10, '#020605');
+      // the rib springing from the column top
+      g.strokeStyle = col('#020605'); g.lineWidth = 22;
+      g.beginPath(); g.moveTo(x, Y(-60)); g.quadraticCurveTo(x - lit * 40, Y(-200), x - lit * 260, Y(-280)); g.stroke();
+      // vines winding up
+      g.strokeStyle = col('#030a08'); g.lineWidth = 3;
+      g.beginPath();
+      for (let y = Y(560); y > Y(-200); y -= 6) { const u = (Y(560) - y) / 60; g.lineTo(x + Math.sin(u * 2.4) * 40, y); }
+      g.stroke();
+      g.fillStyle = col('#030a08');
+      g.beginPath();
+      for (let y = Y(540); y > Y(-200); y -= 22) { const u = (Y(560) - y) / 60, vx = x + Math.sin(u * 2.4) * 40; leaf(g, vx, y, 22 + R() * 10, R() * TAU, 6); }
+      g.fill();
+      g.strokeStyle = col('#030a08'); g.fillStyle = col('#030a08');
+      for (let k = 0; k < 4; k++) vine(g, x + spreadR(R, 60), Y(-60), 80 + R() * 150, spreadR(R, 1), R, 14, 2.2);
+      // lamp bracket
+      const ly = Y(170), lx = x + lit * 54;
+      rect(g, x, ly - 3, lit * 54, 5, '#020605');
+      poly(g, [lx - 12, ly, lx + 12, ly, lx + 8, ly + 22, lx - 8, ly + 22], col('#020605'));
+      rect(g, lx - 6, ly + 6, 12, 12, '#ffd59a', 0.95);
+      lampsNear.push([lx, ly + 12]);
+      // ferns at the foot
+      g.fillStyle = col('#030a08');
+      for (let k = 0; k < 6; k++) frond(g, x + spreadR(R, 50), Y(560), 120 + R() * 80, -Math.PI / 2 + spreadR(R, 1.1), spreadR(R, 1.2), R);
+    }
+    soft(L, 3, 4, (gg) => {
+      for (const [x, y] of lampsNear) { blob(gg, x, y, 70, 70, AMBER, 0.4); cone(gg, x, y + 8, Y(560), 30, 260, AMBER, 0.06); }
+    }, 'lighter');
+    grain(L, 0.04);
+    snapshot(L, [[Y(300), FOG, 0], [Y(460), FOG, 0.4]]);
+    vfill(L, [[Y(250), FOG, 0], [Y(400), FOG, 0.5], [Y(530), FOG, 0.88]], 'source-atop');
+  }
+
+  const hazeStops = [[-420, 0], [-280, 0.06], [-160, 0.24], [-60, 0.46], [0, 0.55]].map(([y, a]) => [y, a * V.haze]);
+  const hazeB = haze(B, q, '#2a6456', hazeStops, { n: 34, h: 250, c: '#4a8c7a', a: 0.12 }, R);
+
+  // --- floor: shallow water over stone, lily pads ---------------------------------
+  const D = 1200;
+  const floor = mkFloor(W, D, -42, 1.25 * q);
+  {
+    const L = floor, g = L.g;
+    vfill(L, [[-42, '#2c5c50', 0.9], [-38, '#13302a', 0.95], [-1, '#0a1c18', 0.94], [0, '#03100d', 0.28], [60, '#030e0b', 0.45], [180, '#020a08', 0.66], [420, '#010605', 0.86]]);
+    // stone flags under the water
+    const rows = [-28, -12, 16, 48, 100, 180, 300, 440];
+    for (const y of rows) rect(g, L.x0, y, L.x1 - L.x0, 1 + Math.max(0, y) / 240, '#000000', y < 0 ? 0.5 : 0.25);
+    g.strokeStyle = col('#000000', 0.25); g.lineWidth = 1.2;
+    g.beginPath();
+    for (let x = Math.ceil(L.x0 / 240) * 240; x < L.x1; x += 240) { g.moveTo(x * (1 - 42 / D), -42); g.lineTo(x * (1 + 440 / D), 440); }
+    g.stroke();
+    rect(g, L.x0, -42, L.x1 - L.x0, 1.5, LEAF, 0.4);
+    rect(g, L.x0, -40.5, L.x1 - L.x0, 3, '#000000', 0.35);
+    // caustic shimmer
+    for (let i = 0; i < 420; i++) {
+      const x = lerp(L.ox0, L.ox1, R()), y = R() * 380;
+      rect(g, x, y, 16 + R() * 90, 0.6 + y / 320, R() < 0.2 ? '#c8a060' : '#8fe0c8', 0.035);
+    }
+    // lily pads
+    for (let i = 0; i < 26; i++) {
+      const x = lerp(L.ox0, L.ox1, R()), y = 18 + Math.pow(R(), 1.3) * 340, rx = (20 + R() * 34) * (1 + y / 300), ry = rx * 0.16;
+      g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0.25, TAU - 0.05); g.lineTo(x, y); g.closePath();
+      g.fillStyle = col('#020907', 0.9); g.fill();
+      g.strokeStyle = col(LEAF, 0.12); g.lineWidth = 1; g.stroke();
+      if (R() < 0.25) blob(g, x + rx * 0.3, y - ry, 4, 3, '#ffd8e8', 0.7);
+    }
+    // amber lamp streaks on the water
+    soft(L, 4, 2, (gg) => {
+      for (const x of nearX) {
+        const fx = x * 0.62;
+        gg.fillStyle = linGrad(gg, 0, 0, 0, 260, [[0, AMBER, 0.4], [0.4, AMBER, 0.14], [1, AMBER, 0]]);
+        gg.beginPath(); gg.moveTo(fx - 8, 0); gg.lineTo(fx + 8, 0); gg.lineTo(fx * (1 + 260 / D) + 16, 260); gg.lineTo(fx * (1 + 260 / D) - 16, 260); gg.fill();
+        blob(gg, fx, 4, 150, 22, AMBER, 0.18);
+      }
+    }, 'lighter');
+    grain(L, 0.06);
+  }
+
+  const floorBase = col('#020a08');
+  // parts in z order: sky and dome, far grove, haze wisps
+  flatten(B, floorBase, [[0.6, 2, 3, 2], [0.6, 2, 4, 2], [0.5, 1, 2, 2]]);
+  const mirrors = [
+    [reflection(mid, 2, 4), 0.6],
+    [reflection(near, 2, 4), 0.55],
+  ];
+  mid.rects = cull(mid);
+  near.rects = cull(near);
+
+  // --- animation: fireflies and pollen, ripples, breathing pods ----------------------
+  const FLY = [col(AMBER), col('#c8ffe8')];
+  const flies = (n, seed, par, size, alpha, y0, y1) => (ctx, cam, vw, vh, t, sg) => {
+    ctx.globalCompositeOperation = 'lighter';
+    const Wd = vw + 160, ox = -cam.x * cam.zoom * par;
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.fillStyle = FLY[pass];
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      for (let i = pass; i < n; i += 2) {
+        const h1 = hash(seed + i * 5), h2 = hash(seed + i * 5 + 1), h3 = hash(seed + i * 5 + 2);
+        const wy = lerp(y0, y1, h2) + Math.sin(t * (0.3 + h3 * 0.4) + i) * 30 - ((t * (4 + h3 * 8)) % 80);
+        const y = sg + wy * cam.zoom * (par > 1 ? 1.2 : 1);
+        const x = ((h1 * Wd + ox + Math.sin(t * (0.2 + h2 * 0.3) + i * 1.7) * 60 + t * 6) % Wd + Wd) % Wd - 80;
+        const pulse = Math.sin(t * (1.1 + h3 * 1.6) + i * 2.3);
+        if (pulse < -0.2) continue;
+        const r = size * (0.6 + h3) * (0.4 + 0.6 * pulse) * cam.zoom;
+        ctx.rect(x - r / 2, y - r / 2, r, r);
+      }
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  };
+  const RIP = col('#a8f0dc'), NRIP = Math.round(9 + 5 * V.dust);
+  const rippleFx = (ctx, cam, vw, vh, t, sg) => {
+    if (sg > vh) return;
+    ctx.strokeStyle = RIP; ctx.lineWidth = 1; ctx.globalAlpha = 0.16;
+    ctx.beginPath();
+    for (let i = 0; i < NRIP; i++) {
+      const per = 2.2 + hash(i * 7 + 3) * 2;
+      const k = Math.floor(t / per + hash(i * 7 + 1)), ph = (t / per + hash(i * 7 + 1)) % 1;
+      const x = hash(i * 131 + k * 17) * vw, y = sg + (8 + hash(i * 37 + k * 11) * 200) * cam.zoom;
+      if (y > vh) continue;
+      const r = (6 + ph * 46) * cam.zoom * (0.6 + (y - sg) / 240);
+      ctx.moveTo(x + r, y); ctx.ellipse(x, y, r, r * 0.18, 0, 0, TAU);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  };
+  const sprPod = glowSprite('#7fffd6');
+  const podList = pods.filter((_, i) => i % 3 === 0).slice(0, 9);
+  const podFx = (ctx, cam, vw, vh, t) => {
+    ctx.globalCompositeOperation = 'lighter';
+    podList.forEach(([x, y], i) => {
+      layerToScreen(mid, x, y + 4, cam, vw, vh, TMP);
+      if (TMP.x < -30 || TMP.x > vw + 30) return;
+      const r = 18 * TMP.z;
+      ctx.globalAlpha = 0.25 + 0.25 * Math.sin(t * 0.9 + i * 1.9);
+      ctx.drawImage(sprPod, TMP.x - r, TMP.y - r, r * 2, r * 2);
+    });
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  };
+  let fallFx = null;
+  if (PIECE === 'falls') { // moving streaks down the bright top of the cascade
+    const { c, g } = mk(32, 256);
+    for (let i = 0; i < 26; i++) rect(g, R() * 30, R() * 256, 1.5, 20 + R() * 50, '#ffffff', 0.5 + R() * 0.4);
+    const tex = c;
+    fallFx = (ctx, cam, vw, vh, t) => {
+      layerToScreen(mid, FALL_X - 38, mid.Y(120), cam, vw, vh, TMP);
+      const w = 76 * TMP.z, h = 256 * TMP.z, off = ((t * 140) % 256) * TMP.z;
+      if (TMP.x > vw || TMP.x + w < 0) return;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.3;
+      ctx.drawImage(tex, 0, 256 - off / TMP.z, 32, off / TMP.z, TMP.x, TMP.y, w, off);
+      ctx.drawImage(tex, 0, 0, 32, 256 - off / TMP.z, TMP.x, TMP.y + off, w, h - off);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    };
+  }
+
+  // --- foreground ------------------------------------------------------------------
+  const fgTop = fgStrip(W, 120, (g, x0, x1) => {
+    g.strokeStyle = col('#010403'); g.fillStyle = col('#010403');
+    for (let x = Math.ceil(x0 / 760) * 760 + 200; x < x1; x += 760) {
+      rect(g, x - 120, -10, 240, 16, '#010403');
+      for (let k = 0; k < 4; k++) vine(g, x + spreadR(R, 110), 4, 50 + R() * 70, spreadR(R, 1), R, 18, 2.4);
+    }
+  });
+  const fgBot = fgStrip(W, 90, (g, x0, x1) => {
+    g.fillStyle = col('#010403');
+    for (let x = Math.ceil(x0 / 1500) * 1500 - 300; x < x1; x += 1500) {
+      for (let k = 0; k < 5; k++) frond(g, x + spreadR(R, 90), 100, 90 + R() * 60, -Math.PI / 2 + spreadR(R, 1.2), spreadR(R, 1.4), R);
+      for (let k = 0; k < 3; k++) frond(g, x + 560 + spreadR(R, 50), 100, 60 + R() * 40, -Math.PI / 2 + spreadR(R, 1), spreadR(R, 1.2), R);
+      // a stone kerb between the two clumps
+      rect(g, x + 80, 74, 420, 26, '#010403');
+      rect(g, x + 80, 73, 420, 1.5, AMBER, 0.22);
+    }
+  });
+
+  const A = {
+    backdrop: B,
+    back: [{ L: mid }, { fx: podFx }, ...(fallFx ? [{ fx: fallFx }] : []), { L: near }, { bands: hazeB }],
+    floorBase,
+    mirrors,
+    hazeRefl: bands('#2a6456', hazeStops.map(([y, a]) => [-y, a * 0.6]).reverse()),
+    floor,
+    onFloor: [{ fx: rippleFx }, { fx: flies(Math.round(56 * V.dust), 31, 0.6, 2.6, 0.75, -380, -30) }],
+    front: [flies(Math.round(14 * V.dust), 707, 1.3, 3.6, 0.6, -460, 60)],
+    fogFront: fogBands('#3f8a76', [[0, 0], [0.55, 0.85], [0.75, 1], [1, 0]], 200, 80, 0.09),
+    fgTop, fgBot,
+    vignette: vignette(0.72, '#010504'),
+  };
+  return { id: 'garden', name: 'HANGING GARDENS', width: W, palette: palette(pal), reflect: 0.6, setPiece: PIECE, ...compose(A) };
+}
+
+// ======================================================================
+// CRYO VAULT
+// ======================================================================
+
+// A capsule (rounded at both ends) path of width w from top y to y + h.
+function capsule(g, x, y, w, h) {
+  const r = w / 2;
+  g.beginPath();
+  g.arc(x, y + r, r, Math.PI, TAU);
+  g.lineTo(x + r, y + h - r);
+  g.arc(x, y + h - r, r, 0, Math.PI);
+  g.closePath();
+}
+
+function buildVault(q, V) {
+  const R = rng(0xc7a0 ^ V.scatter);
+  const W = 2000;
+  const FOG = '#253850';
+  const pal = { key: '#bfe4ff', accent: '#ff3b4c', fog: FOG, floor: '#04070c', ambient: '#a6c4dc' };
+  const ICE = '#d6efff', COOL = '#7cc8f0', RED = '#ff3b4c';
+  const PIECE = V.piece || 'core';
+  const CORE_X = V.coreX ?? 120;
+  const mono = V.mono || [-1380, -1110, -850, -590, 590, 850, 1110, 1380];
+  const BREACH = V.breach ?? -590;
+
+  // Back wall and ceiling, the far rows of pods and the haze wisps share one backdrop.
+  const B = backdrop(0.08, 0.7 * q, W);
+
+  // --- back wall, ceiling light ----------------------------------------------------
+  const wall = B.part(0.03, 0.5 * q);
+  {
+    const L = wall, g = L.g, Y = L.Y;
+    vfill(L, [[Y(-80), '#010206'], [Y(120), '#040912'], [Y(300), '#0b1524'], [Y(460), '#152437'], [Y(600), '#1d3046'], [Y(720), '#1d3046']]);
+    for (let x = Math.ceil(L.x0 / 210) * 210; x < L.x1; x += 210) {
+      g.fillStyle = linGrad(g, 0, Y(60), 0, Y(560), [[0, '#000000', 0.5], [1, '#000000', 0]]);
+      g.fillRect(x - 70, Y(60), 140, Y(560) - Y(60));
+      rect(g, x + 70, Y(60), 1.5, Y(540) - Y(60), '#7a9cc4', 0.1);
+      rect(g, x - 70, Y(200), 140, 1.2, '#7a9cc4', 0.06);
+    }
+    // the ceiling: a dark slab with a long cold light strip
+    rect(g, L.x0, Y(-80), L.x1 - L.x0, Y(34) - Y(-80), '#010309');
+    for (let x = Math.ceil(L.x0 / 90) * 90; x < L.x1; x += 90) rect(g, x, Y(-80), 2, Y(34) - Y(-80), '#0a1424');
+    const ly = Y(34);
+    soft(L, 4, 8, (gg) => {
+      rect(gg, L.x0, ly - 30, L.x1 - L.x0, 80, COOL, 0.22);
+      for (let x = Math.ceil(L.x0 / 280) * 280; x < L.x1; x += 280) cone(gg, x, ly + 6, Y(470), 160, 420, COOL, 0.07);
+    }, 'lighter');
+    rect(g, L.x0, ly, L.x1 - L.x0, 5, ICE, 0.9);
+    rect(g, L.x0, ly + 5, L.x1 - L.x0, 2, '#02050b');
+    for (let x = Math.ceil(L.x0 / 140) * 140; x < L.x1; x += 140) rect(g, x, ly - 1, 6, 8, '#02050b');
+    grain(L, 0.05, false);
+  }
+
+  // --- far: rows of stasis pods receding into the cold -----------------------------
+  const far = B.part(0.08);
+  { const ob = layerBounds(0.08, W, 'back'); far.ox0 = ob.x0; far.ox1 = ob.x1; }
+  const coreRings = [];
+  {
+    const L = far, Y = L.Y;
+    const step0 = V.podStep ?? 125;
+    // [scale, base row, fog wash after the row]
+    for (const [s, base, wash] of [[0.4, 420, 0.5], [0.6, 455, 0.4], [0.82, 500, 0]]) {
+      const g = L.g, step = step0 * s, pw = 58 * s, ph = 170 * s, top = Y(base) - ph;
+      const lit = [];
+      for (let x = Math.floor(L.ox0 / step) * step + R() * step; x < L.ox1; x += step) {
+        if (PIECE === 'core' && Math.abs(x - CORE_X) < 110 + pw) continue;
+        rect(g, x - pw * 0.7, Y(base) - 6 * s, pw * 1.4, Y(900) - Y(base), '#060b14');
+        capsule(g, x, top, pw, ph);
+        g.fillStyle = col('#0a1422'); g.fill();
+        capsule(g, x, top + 5 * s, pw - 10 * s, ph - 10 * s);
+        g.fillStyle = linGrad(g, 0, top, 0, top + ph, [[0, '#9fd6f4', 0.42], [0.5, '#5a9ac0', 0.22], [1, '#2a5070', 0.14]]);
+        g.fill();
+        // the sleeper: a dark shape behind the frost
+        g.fillStyle = col('#0a1626', 0.75);
+        g.beginPath(); g.arc(x, top + 26 * s, 8 * s, 0, TAU); g.fill();
+        g.fillRect(x - 9 * s, top + 36 * s, 18 * s, ph - 60 * s);
+        rect(g, x - pw / 2 + 4 * s, top + 8 * s, 3 * s, ph * 0.5, '#e8f6ff', 0.35);
+        if (R() < 0.45) rect(g, x + pw * 0.2, Y(base) - 2 * s, 3 * s, 2 * s, R() < 0.3 ? '#ff5060' : '#7fe8a0', 0.9);
+        lit.push(x);
+      }
+      soft(L, 4, 2, (gg) => { for (const x of lit) blob(gg, x, top + ph * 0.35, pw * 1.3, ph * 0.5, COOL, 0.1); }, 'lighter');
+      if (wash) vfill(L, [[L.y0, FOG, wash * 0.7], [Y(500), FOG, wash]], 'source-atop');
+    }
+    if (PIECE === 'core') { // the cryo core: a tall cylinder banded with coolant rings
+      const x = CORE_X, w = 110;
+      const g = L.g;
+      g.fillStyle = linGrad(g, x - w, 0, x + w, 0, [[0, '#04070d'], [0.15, '#2c4a66'], [0.3, '#0a1220'], [0.75, '#060a12'], [1, '#03050a']]);
+      g.fillRect(x - w, Y(-100), w * 2, Y(900) - Y(-100));
+      for (let sy = -60; sy < 560; sy += 46) {
+        g.beginPath(); g.ellipse(x, Y(sy), w + 6, 9, 0, 0, TAU); g.fillStyle = col('#03060c'); g.fill();
+        g.beginPath(); g.ellipse(x, Y(sy) + 2, w + 4, 7, 0, 0.1, Math.PI - 0.1);
+        g.strokeStyle = col(ICE, 0.9 * clamp((330 - sy) / 140, 0.08, 1)); g.lineWidth = 2.5; g.stroke();
+        coreRings.push(sy);
+      }
+      g.fillStyle = linGrad(g, 0, Y(180), 0, Y(360), [[0, '#9fdcff', 0.5], [1, '#9fdcff', 0]]);
+      g.fillRect(x - 8, Y(-100), 16, Y(360) - Y(-100));
+      g.fillStyle = linGrad(g, 0, Y(180), 0, Y(360), [[0, '#f0faff', 0.8], [1, '#f0faff', 0]]);
+      g.fillRect(x - 2, Y(-100), 4, Y(360) - Y(-100));
+      soft(L, 3, 6, (gg) => {
+        blob(gg, x, Y(100), w * 3, 300, COOL, 0.3);
+        lineV(gg, x, Y(-100), Y(260), 60, COOL, 0.25);
+      }, 'lighter');
+    }
+    grain(L, 0.04);
+    vfill(L, [[Y(270), FOG, 0.12], [Y(400), FOG, 0.62], [Y(520), FOG, 0.93]], 'source-atop');
+  }
+
+  // --- mid: archive monoliths, pipe bundle, gantry ----------------------------------
+  const mid = backLayer(0.25, 0.75 * q, W);
+  const status = [];
+  let crane = null;
+  {
+    const L = mid, Y = L.Y, g = L.g;
+    for (const x of mono) {
+      const w = 84, top = Y(70 + R() * 70), open = PIECE === 'breach' && x === BREACH;
+      g.fillStyle = linGrad(g, x - w / 2, 0, x + w / 2, 0, [[0, '#2c4864'], [0.06, '#0c1626'], [0.6, '#070d18'], [1, '#04070e']]);
+      g.fillRect(x - w / 2, top, w, Y(900) - top);
+      rect(g, x - w / 2 - 6, top - 10, w + 12, 12, '#05090f');
+      g.fillStyle = linGrad(g, 0, top - 12, 0, top + 30, [[0, ICE, 0.55], [1, ICE, 0]]);
+      g.fillRect(x - w / 2 - 6, top - 12, w + 12, 42);
+      if (open) { // the breached pod: door ajar, the inside glowing
+        g.fillStyle = linGrad(g, 0, top + 20, 0, Y(340), [[0, '#cfefff', 0.75], [0.6, '#5a9ac0', 0.3], [1, '#0c1626', 0.9]]);
+        capsule(g, x, top + 18, w - 24, Y(520) - top - 18);
+        g.fill();
+        poly(g, [x + w / 2, top + 14, x + w / 2 + 46, top + 34, x + w / 2 + 46, Y(530), x + w / 2, Y(520)], col('#05090f'));
+        rect(g, x + w / 2 + 44, top + 34, 2, Y(530) - top - 34, ICE, 0.4);
+      } else {
+        for (const dx of [-22, 0, 22]) rect(g, x + dx - 1, top + 22, 2, Y(520) - top - 22, COOL, dx ? 0.28 : 0.15);
+        g.fillStyle = col(ICE, 0.45);
+        for (let y = top + 26; y < Y(470); y += 9) for (const dx of [-30, -12, 12, 30]) if (R() < 0.18) g.fillRect(x + dx - 2, y, 4, 2);
+      }
+      const sy = top + 12 + R() * 30;
+      rect(g, x + w / 2 - 14, sy, 5, 4, RED, 0.95);
+      status.push([x + w / 2 - 11.5, sy + 2]);
+    }
+    // overhead pipe bundle with icicles
+    for (const [py, h] of [[-70, 16], [-46, 12], [-28, 10]]) {
+      rect(g, L.x0, Y(py), L.x1 - L.x0, h, '#060b14');
+      rect(g, L.x0, Y(py), L.x1 - L.x0, 1.6, ICE, 0.4);
+    }
+    for (let x = Math.ceil(L.x0 / 260) * 260; x < L.x1; x += 260) rect(g, x - 8, Y(-74), 16, 70, '#04070d');
+    g.fillStyle = col('#bfe0f8', 0.55);
+    g.beginPath();
+    for (let i = 0; i < 260; i++) { const x = lerp(L.x0, L.x1, R()), l = 6 + Math.pow(R(), 2) * 40; g.moveTo(x - 2, Y(-18)); g.lineTo(x + 2, Y(-18)); g.lineTo(x, Y(-18) + l); }
+    g.fill();
+    if (PIECE === 'crane') { // the gantry rail the crane runs along
+      rect(g, L.x0, Y(10), L.x1 - L.x0, 14, '#05090f');
+      rect(g, L.x0, Y(24), L.x1 - L.x0, 1.5, COOL, 0.45);
+      g.fillStyle = col(ICE, 0.8);
+      for (let x = Math.ceil(L.x0 / 70) * 70; x < L.x1; x += 70) g.fillRect(x, Y(17), 3, 2);
+    }
+    soft(L, 3, 4, (gg) => {
+      for (const [x, y] of status) blob(gg, x, y, 14, 14, RED, 0.5);
+      rect(gg, L.x0, Y(-20), L.x1 - L.x0, 8, COOL, 0.18);
+      if (PIECE === 'breach') { blob(gg, BREACH, Y(120), 160, 220, ICE, 0.35); blob(gg, BREACH + 40, Y(40), 220, 120, ICE, 0.2); }
+    }, 'lighter');
+    grain(L, 0.05);
+    snapshot(L, [[Y(260), FOG, 0], [Y(440), FOG, 0.45]]);
+    vfill(L, [[Y(240), FOG, 0], [Y(390), FOG, 0.55], [Y(540), FOG, 0.92]], 'source-atop');
+  }
+  if (PIECE === 'crane') { // the crane carriage with a pod in its claws, baked once and slid along the rail
+    const { c, g } = mk(160, 280);
+    g.translate(80, 0);
+    rect(g, -60, 0, 120, 26, '#04070d');
+    rect(g, -60, 25, 120, 1.5, COOL, 0.5);
+    rect(g, -6, 26, 12, 70, '#04070d');
+    rect(g, -40, 92, 80, 12, '#04070d');
+    for (const sd of [-1, 1]) poly(g, [sd * 36, 100, sd * 44, 100, sd * 38, 150, sd * 30, 150], col('#04070d'));
+    capsule(g, 0, 104, 52, 160); g.fillStyle = col('#0a1422'); g.fill();
+    capsule(g, 0, 110, 40, 148); g.fillStyle = linGrad(g, 0, 110, 0, 258, [[0, '#bfe6ff', 0.75], [1, '#4a7aa0', 0.3]]); g.fill();
+    g.fillStyle = col('#0a1626', 0.7); g.beginPath(); g.arc(0, 134, 7, 0, TAU); g.fill(); g.fillRect(-8, 144, 16, 90);
+    rect(g, 8, 8, 6, 5, RED, 1);
+    crane = c;
+  }
+
+  // --- near: frozen structural pillars with cold lamps -------------------------------
+  const near = backLayer(0.55, 0.9 * q, W);
+  const nearX = V.near || [-1280, -600, 620, 1300];
+  const lamps = [];
+  {
+    const L = near, Y = L.Y, g = L.g;
+    for (const x of nearX) {
+      const lit = x < 0 ? 1 : -1, w = 120;
+      g.fillStyle = linGrad(g, x - w / 2, 0, x + w / 2, 0, lit > 0
+        ? [[0, '#020409'], [0.7, '#060c16'], [0.95, '#4a6c90'], [1, '#020409']]
+        : [[0, '#020409'], [0.05, '#4a6c90'], [0.3, '#060c16'], [1, '#020409']]);
+      g.fillRect(x - w / 2, Y(-400), w, Y(900) - Y(-400));
+      for (let y = Y(-320); y < Y(900); y += 150) { rect(g, x - w / 2 - 8, y, w + 16, 16, '#020409'); rect(g, x - w / 2 - 8, y, w + 16, 1.5, ICE, 0.25); }
+      // frost on the lit edge
+      g.fillStyle = col('#dff2ff', 0.18);
+      for (let i = 0; i < 160; i++) { const y = lerp(Y(-400), Y(560), R()); g.fillRect(x + lit * (w / 2 - 4 - R() * 18), y, 1.5 + R() * 3, 1 + R() * 2); }
+      // a vertical coolant pipe beside it
+      rect(g, x - lit * (w / 2 + 16), Y(-400), 12, Y(900) - Y(-400), '#03060b');
+      rect(g, x - lit * (w / 2 + 16) + 5, Y(-400), 1.5, Y(900) - Y(-400), COOL, 0.3);
+      const ly = Y(150), lx = x + lit * (w / 2 + 10);
+      rect(g, lx - 14, ly - 6, 28, 12, '#020409');
+      rect(g, lx - 10, ly + 4, 20, 3, ICE, 1);
+      lamps.push([lx, ly + 6]);
+    }
+    soft(L, 3, 4, (gg) => {
+      for (const [x, y] of lamps) { blob(gg, x, y, 60, 30, COOL, 0.45); cone(gg, x, y, Y(560), 24, 280, COOL, 0.07); }
+    }, 'lighter');
+    grain(L, 0.04);
+    snapshot(L, [[Y(300), FOG, 0], [Y(460), FOG, 0.4]]);
+    vfill(L, [[Y(250), FOG, 0], [Y(400), FOG, 0.5], [Y(530), FOG, 0.88]], 'source-atop');
+  }
+
+  const hazeStops = [[-420, 0], [-280, 0.08], [-150, 0.28], [-50, 0.5], [0, 0.58]].map(([y, a]) => [y, a * V.haze]);
+  const hazeB = haze(B, q, '#3c5878', hazeStops, { n: 30, h: 220, c: '#6a8cb0', a: 0.12 }, R);
+
+  // --- floor: frosted steel ------------------------------------------------------------
+  const D = 1150;
+  const floor = mkFloor(W, D, -40, 1.25 * q);
+  {
+    const L = floor, g = L.g;
+    vfill(L, [[-40, '#40607e', 0.9], [-36, '#16243a', 0.94], [-1, '#0c1524', 0.94], [0, '#05090f', 0.4], [50, '#04080d', 0.55], [170, '#03060a', 0.74], [420, '#020408', 0.9]]);
+    // floor glows at quarter resolution with half the blur, as in the foundry: the largest canvas
+    soft(L, 4, 1, (gg) => {
+      for (let i = 0; i < 70; i++) {
+        const x = lerp(L.ox0, L.ox1, R()), y = R() * 360;
+        blob(gg, x, y, 60 + R() * 200, 4 + y * 0.04 + R() * 8, '#a8c8e8', 0.05);
+      }
+    });
+    const rows = [-26, -10, 12, 40, 84, 150, 250, 400];
+    for (const y of rows) {
+      rect(g, L.x0, y, L.x1 - L.x0, 1 + Math.max(0, y) / 220, '#000000', 0.55);
+      rect(g, L.x0, y + 1 + Math.max(0, y) / 220, L.x1 - L.x0, 0.7 + Math.max(0, y) / 400, '#8ab0d8', 0.08);
+    }
+    g.strokeStyle = col('#000000', 0.45); g.lineWidth = 1.3;
+    g.beginPath();
+    for (let x = Math.ceil(L.x0 / 200) * 200; x < L.x1; x += 200) { g.moveTo(x * (1 - 40 / D), -40); g.lineTo(x * (1 + 420 / D), 420); }
+    g.stroke();
+    rect(g, L.x0, -40, L.x1 - L.x0, 1.6, ICE, 0.5);
+    rect(g, L.x0, -38.4, L.x1 - L.x0, 3, '#000000', 0.35);
+    // cold pools under the pillar lamps, and a few red status strips on the floor edge
+    soft(L, 4, 2, (gg) => {
+      for (const x of nearX) blob(gg, x * 0.62, 10, 220, 34, COOL, 0.2);
+      for (let x = Math.ceil(L.x0 / 520) * 520 + 130; x < L.x1; x += 520) rect(gg, x - 18, -33, 36, 3, RED, 0.6);
+    }, 'lighter');
+    grain(L, 0.07);
+  }
+
+  const floorBase = col('#03050a');
+  // parts in z order: wall and ceiling, far pods, haze wisps
+  flatten(B, floorBase, [[0.5, 2, 3, 2], [0.5, 2, 4, 2], [0.45, 1, 2, 2]]);
+  const mirrors = [
+    [reflection(mid, 2, 4), 0.5],
+    [reflection(near, 2, 4), 0.45],
+  ];
+  mid.rects = cull(mid);
+  near.rects = cull(near);
+
+  // --- animation: ice dust, breathing floor mist, status blinks, set-piece motion ------
+  const DUST = [col(ICE), col('#9fc8ec')];
+  const dustFx = (n, seed, par, size, alpha) => (ctx, cam, vw, vh, t) => {
+    ctx.globalAlpha = alpha;
+    const Wd = vw + 80, H = vh + 80, ox = -cam.x * cam.zoom * par;
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.fillStyle = DUST[pass];
+      ctx.beginPath();
+      for (let i = pass; i < n; i += 2) {
+        const h1 = hash(seed + i * 5), h2 = hash(seed + i * 5 + 1), h3 = hash(seed + i * 5 + 2);
+        const sp = 14 + h3 * 26;
+        const y = (h2 * H + t * sp) % H - 40;
+        const x = ((h1 * Wd + ox + Math.sin(t * (0.3 + h3 * 0.5) + i) * 24 - t * 8) % Wd + Wd) % Wd - 40;
+        const r = size * (0.5 + h3) * cam.zoom;
+        ctx.rect(x, y, r, r);
+      }
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  };
+  // Ground mist: a soft strip 1600 units wide that drifts along the floor line and wraps.
+  const mist = (() => {
+    const { c, g } = mk(800, 70);
+    const M = rng(0x3157 ^ V.scatter);
+    for (let i = 0; i < 70; i++) {
+      const x = M() * 800, y = 30 + M() * 30, rx = 40 + M() * 110, ry = 10 + M() * 16;
+      for (const dx of [-800, 0, 800]) blob(g, x + dx, y, rx, ry, '#b8d4f0', 0.18 + M() * 0.2);
+    }
+    blur(c, 2);
+    return c;
+  })();
+  const MIST = V.mist ?? 1;
+  const mistFx = (alpha, speed, rise) => (ctx, cam, vw, vh, t, sg) => {
+    const z = cam.zoom, w = 1600 * z, h = 140 * z, top = sg - rise * z;
+    if (top > vh || top + h < 0) return;
+    ctx.globalAlpha = alpha * MIST * (0.75 + 0.25 * Math.sin(t * 0.5));
+    let x = (((-cam.x * z + t * speed * z) % w) + w) % w - w;
+    for (; x < vw; x += w) ctx.drawImage(mist, x, top, w, h);
+    ctx.globalAlpha = 1;
+  };
+  const sprRed = glowSprite('#ff5464'), sprIce = glowSprite('#bfe6ff');
+  const blinks = status.filter((_, i) => i % 2 === 0).slice(0, 6);
+  const statusFx = (ctx, cam, vw, vh, t) => {
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < blinks.length; i++) {
+      const ph = (t / (1.7 + i * 0.23) + i * 0.37) % 1;
+      layerToScreen(mid, blinks[i][0], blinks[i][1], cam, vw, vh, TMP);
+      if (TMP.x < -20 || TMP.x > vw + 20) continue;
+      const r = 10 * TMP.z;
+      ctx.globalAlpha = ph < 0.5 ? 0.9 : 0.15;
+      ctx.drawImage(sprRed, TMP.x - r, TMP.y - r, r * 2, r * 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  };
+  let pieceFx = null;
+  if (PIECE === 'core') { // pulses climbing the core
+    pieceFx = (ctx, cam, vw, vh, t) => {
+      ctx.globalCompositeOperation = 'lighter';
+      for (let k = 0; k < 2; k++) {
+        const u = (t / 3.2 + k * 0.5) % 1, sy = 380 - u * 440;
+        layerToScreen(far, CORE_X, far.Y(sy), cam, vw, vh, TMP);
+        const r = 70 * TMP.z;
+        ctx.globalAlpha = 0.5 * Math.sin(u * Math.PI) * clamp((380 - sy) / 160, 0, 1);
+        ctx.drawImage(sprIce, TMP.x - r * 1.6, TMP.y - r * 0.35, r * 3.2, r * 0.7);
+      }
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    };
+  } else if (PIECE === 'breach') { // frost venting from the open pod
+    pieceFx = (ctx, cam, vw, vh, t) => {
+      ctx.globalCompositeOperation = 'lighter';
+      for (let k = 0; k < 4; k++) {
+        const u = (t / 4 + k / 4) % 1;
+        layerToScreen(mid, BREACH + 30 + u * 140, mid.Y(200 - u * 180), cam, vw, vh, TMP);
+        const r = (30 + u * 90) * TMP.z;
+        ctx.globalAlpha = 0.22 * Math.sin(u * Math.PI);
+        ctx.drawImage(sprIce, TMP.x - r, TMP.y - r * 0.6, r * 2, r * 1.2);
+      }
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    };
+  } else if (PIECE === 'crane') { // the crane carrying a pod along the gantry, back and forth
+    const span = W * 0.9;
+    pieceFx = (ctx, cam, vw, vh, t) => {
+      const u = 0.5 - 0.5 * Math.cos((t / 26) * TAU);
+      layerToScreen(mid, -span / 2 + u * span - 80, mid.Y(10), cam, vw, vh, TMP);
+      const w = 160 * TMP.z;
+      if (TMP.x > vw || TMP.x + w < 0) return;
+      ctx.drawImage(crane, TMP.x, TMP.y, w, 280 * TMP.z);
+    };
+  }
+
+  // --- foreground --------------------------------------------------------------------
+  const fgTop = fgStrip(W, 110, (g, x0, x1) => {
+    rect(g, x0, 0, x1 - x0, 16, '#010206');
+    rect(g, x0, 16, x1 - x0, 1.5, ICE, 0.25);
+    g.fillStyle = col('#010206');
+    for (let x = Math.ceil(x0 / 980) * 980 + 300; x < x1; x += 980) {
+      rect(g, x - 260, 0, 520, 30, '#010206');
+      g.beginPath();
+      for (let i = 0; i < 40; i++) { const ix = x - 250 + R() * 500, l = 10 + Math.pow(R(), 2) * 70; g.moveTo(ix - 3, 30); g.lineTo(ix + 3, 30); g.lineTo(ix, 30 + l); }
+      g.fill();
+    }
+  });
+  const fgBot = fgStrip(W, 80, (g, x0, x1) => {
+    for (let s0 = Math.ceil(x0 / 1500) * 1500 - 600; s0 < x1; s0 += 1500) {
+      const s1 = s0 + 560;
+      rect(g, s0, 24, s1 - s0, 10, '#010206');
+      rect(g, s0, 23, s1 - s0, 1.5, ICE, 0.3);
+      for (let x = s0; x <= s1; x += 280) rect(g, x - 8, 24, 16, 80, '#010206');
+      rect(g, s0, 54, s1 - s0, 7, '#010206');
+      rect(g, s0 + 120, 40, 8, 4, RED, 0.6);
+    }
+  });
+
+  const A = {
+    backdrop: B,
+    back: [
+      ...(PIECE === 'core' ? [{ fx: pieceFx }] : []), { L: mid }, { fx: statusFx },
+      ...(PIECE !== 'core' ? [{ fx: pieceFx }] : []), { L: near }, { bands: hazeB },
+      { fx: dustFx(Math.round(60 * V.dust), 41, 0.5, 2, 0.4) },
+    ],
+    floorBase,
+    mirrors,
+    hazeRefl: bands('#3c5878', hazeStops.map(([y, a]) => [-y, a * 0.55]).reverse()),
+    floor,
+    onFloor: [{ fx: mistFx(0.45, 14, 110) }],
+    front: [dustFx(Math.round(22 * V.dust), 913, 1.25, 3, 0.55)],
+    fogFront: fogBands('#7090b4', [[0, 0], [0.55, 0.85], [0.75, 1], [1, 0]], 160, 80, 0.1),
+    fgTop, fgBot,
+    vignette: vignette(0.74, '#01030a'),
+  };
+  return { id: 'vault', name: 'CRYO VAULT', width: W, palette: palette(pal), reflect: 0.5, setPiece: PIECE, ...compose(A) };
+}
+
+// ======================================================================
+// STORM APEX
+// ======================================================================
+
+function buildApex(q, V) {
+  const R = rng(0xa9e7 ^ V.scatter);
+  const W = 2300;
+  const FOG = '#29224e';
+  const pal = { key: '#cfe0ff', accent: '#8f74ff', fog: FOG, floor: '#05040b', ambient: '#aea6e6' };
+  const VOLT = '#9fd4ff', VIO = '#8f74ff', PALE = '#e6eeff';
+  const PIECE = V.piece || 'planet';
+  const ORB = V.orb || { x: -420, sy: 100, r: 165 };
+  const CELLS = V.cells || [[760, 1], [-1150, 0.85]];
+
+  // Sky, the cloud sea with its storm cells, distant spires and the haze wisps share one backdrop.
+  const B = backdrop(0.08, 0.6 * q, W);
+
+  // --- sky and the set piece ----------------------------------------------------------
+  const sky = B.part(0.02, 0.5 * q);
+  const orbY = sky.Y(ORB.sy);
+  {
+    const L = sky, g = L.g, Y = L.Y;
+    vfill(L, [[Y(-80), '#010009'], [Y(100), '#05031a'], [Y(240), '#0d0a2c'], [Y(350), '#1a1440'], [Y(430), '#261e4c'], [Y(720), '#261e4c']]);
+    // stars, denser and brighter toward the top, and a faint band of the galaxy
+    soft(L, 4, 8, (gg) => {
+      gg.save(); gg.translate(ORB.x * -0.6, Y(60)); gg.rotate(-0.25);
+      for (let i = 0; i < 16; i++) blob(gg, spreadR(R, 1300), spreadR(R, 40), 160 + R() * 200, 40 + R() * 30, R() < 0.4 ? '#4a3a8a' : '#2a3a7a', 0.3);
+      gg.restore();
+    }, 'lighter');
+    for (let i = 0; i < 520; i++) {
+      const y = Y(-80 + Math.pow(R(), 1.7) * 420), b = R();
+      g.fillStyle = col(b < 0.1 ? '#ffffff' : b < 0.5 ? '#c8d0ff' : '#8f98d8', 0.3 + R() * 0.5);
+      const s = b < 0.06 ? 2 : 1.1;
+      g.fillRect(lerp(L.x0, L.x1, R()), y, s, s);
+    }
+    const ox = ORB.x, oy = orbY, r = ORB.r;
+    if (PIECE === 'planet') { // a ringed giant, lit from the right
+      const ring = (front) => {
+        g.save(); g.translate(ox, oy); g.rotate(-0.2); g.scale(1, 0.2);
+        g.beginPath(); front ? g.arc(0, 0, r * 2, 0.05, Math.PI - 0.05) : g.arc(0, 0, r * 2, Math.PI, TAU);
+        g.strokeStyle = col(PALE, 0.35); g.lineWidth = r * 0.14; g.stroke();
+        g.beginPath(); front ? g.arc(0, 0, r * 1.7, 0.05, Math.PI - 0.05) : g.arc(0, 0, r * 1.7, Math.PI, TAU);
+        g.strokeStyle = col(VIO, 0.3); g.lineWidth = r * 0.2; g.stroke();
+        g.restore();
+      };
+      soft(L, 4, 8, (gg) => blob(gg, ox, oy, r * 3, r * 2.2, '#3a3080', 0.5), 'lighter');
+      ring(false);
+      g.save();
+      g.beginPath(); g.arc(ox, oy, r, 0, TAU); g.clip();
+      g.fillStyle = linGrad(g, ox - r, 0, ox + r, 0, [[0, '#0a0820'], [0.55, '#2a2260'], [1, '#6a5cb0']]);
+      g.fillRect(ox - r, oy - r, r * 2, r * 2);
+      for (let k = -6; k <= 6; k++) rect(g, ox - r, oy + k * r * 0.15 + spreadR(R, 4), r * 2, r * (0.04 + R() * 0.06), k & 1 ? '#000000' : PALE, k & 1 ? 0.18 : 0.07);
+      g.fillStyle = linGrad(g, ox - r, 0, ox + r * 0.4, 0, [[0, '#020108', 0.9], [1, '#020108', 0]]);
+      g.fillRect(ox - r, oy - r, r * 2, r * 2);
+      g.restore();
+      g.beginPath(); g.arc(ox, oy, r - 1, -1.1, 1.1); g.strokeStyle = col(VOLT, 0.7); g.lineWidth = 2; g.stroke();
+      ring(true);
+    } else if (PIECE === 'moon') { // a vast moon low over the storm
+      const m = r * 1.35, my = oy + 40;
+      soft(L, 4, 8, (gg) => blob(gg, ox, my, m * 2.6, m * 2.2, '#4a4a9a', 0.35), 'lighter');
+      g.save();
+      g.beginPath(); g.arc(ox, my, m, 0, TAU); g.clip();
+      g.fillStyle = linGrad(g, 0, my - m, 0, my + m, [[0, '#b4b8e0'], [0.6, '#8086bc'], [1, '#4a4a88']]);
+      g.fillRect(ox - m, my - m, m * 2, m * 2);
+      for (let i = 0; i < 16; i++) blob(g, ox + spreadR(R, m * 0.8), my + spreadR(R, m * 0.8), m * (0.06 + R() * 0.16), m * (0.05 + R() * 0.12), '#5a5a98', 0.45);
+      g.fillStyle = linGrad(g, ox - m, 0, ox + m, 0, [[0, '#0a0820', 0.55], [0.5, '#0a0820', 0], [1, '#0a0820', 0]]);
+      g.fillRect(ox - m, my - m, m * 2, m * 2);
+      g.restore();
+    } else { // the eye of the storm: a slow spiral of cloud with a lit core
+      soft(L, 2, 4, (gg) => {
+        for (let arm = 0; arm < 3; arm++) {
+          for (let i = 0; i < 70; i++) {
+            const u = i / 70, a = arm * TAU / 3 + u * 5.2, d = 40 + u * 640;
+            const x = ox + Math.cos(a) * d * 1.5, y = oy + Math.sin(a) * d * 0.45;
+            blob(gg, x, y, 60 + u * 140, 18 + u * 40, '#05031a', 0.6);
+            blob(gg, x, y - 8 - u * 10, 50 + u * 120, 8 + u * 16, '#4a3c90', 0.18 * (1 - u * 0.6));
+          }
+        }
+      });
+      soft(L, 3, 6, (gg) => { blob(gg, ox, oy, 220, 90, VIO, 0.45); blob(gg, ox, oy, 70, 30, PALE, 0.7); }, 'lighter');
+    }
+    grain(L, 0.04, false);
+  }
+
+  // --- the cloud sea and its storm cells -------------------------------------------------
+  const clouds = B.part(0.05, 0.5 * q);
+  {
+    const L = clouds, Y = L.Y, g = L.g;
+    // storm cells: towers of cloud with anvil heads, standing out of the sea
+    for (const [x, s] of CELLS) {
+      g.fillStyle = col('#100c28');
+      g.beginPath();
+      for (let i = 0; i < 46; i++) {
+        const u = R(), y = lerp(Y(400), Y(170), u), w = (90 + u * 60) * s, cx = x + spreadR(R, w), rr = (40 + R() * 50) * s;
+        g.moveTo(cx + rr, y); g.arc(cx, y, rr, 0, TAU);
+      }
+      for (let i = 0; i < 24; i++) {
+        const u = R(), cx = x + spreadR(R, 340 * s) * (0.5 + u * 0.5) + 80 * s, y = Y(150) + spreadR(R, 10) + (1 - u) * 26 * s, rr = (24 + R() * 30) * s;
+        g.moveTo(cx + rr * 1.8, y); g.ellipse(cx, y, rr * 1.8, rr * (0.5 + R() * 0.4), 0, 0, TAU);
+      }
+      g.fill();
+    }
+    // volume: billows lit from above, shadowed underneath
+    g.save(); g.globalCompositeOperation = 'source-atop';
+    for (const [x, s] of CELLS) {
+      for (let i = 0; i < 60; i++) {
+        const y = lerp(Y(130), Y(400), R()), up = (Y(400) - y) / (Y(400) - Y(130));
+        blob(g, x + spreadR(R, 200 * s) + 40 * s * up, y, (30 + R() * 50) * s, (16 + R() * 26) * s, R() < 0.35 + up * 0.4 ? '#4a3e88' : '#05031a', 0.35);
+      }
+    }
+    g.restore();
+    g.save(); g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = linGrad(g, 0, Y(130), 0, Y(300), [[0, '#5a4c9a', 0.45], [1, '#5a4c9a', 0]]);
+    g.fillRect(L.x0, L.y0, L.x1 - L.x0, L.y1 - L.y0);
+    g.restore();
+    // the sea: rows of billows, back to front
+    for (let row = 0; row < 6; row++) {
+      const y0 = Y(388 + row * 30), tone = mix('#1c1640', '#0d0a22', row / 5);
+      g.fillStyle = col(tone);
+      g.beginPath();
+      for (let x = L.x0 - 40; x < L.x1 + 40; x += 40 + R() * 60) {
+        const rr = 30 + R() * 60 + row * 8, cy = y0 + rr * 0.4;
+        g.moveTo(x + rr, cy); g.ellipse(x, cy, rr * 1.6, rr * 0.7, 0, 0, TAU);
+      }
+      g.rect(L.x0, y0 + 30, L.x1 - L.x0, Y(900) - y0);
+      g.fill();
+      // moonlit rims on the billow tops
+      g.save(); g.globalCompositeOperation = 'source-atop';
+      g.fillStyle = linGrad(g, 0, y0 - 40, 0, y0 + 20, [[0, '#7a6cc0', 0.3 - row * 0.04], [1, '#7a6cc0', 0]]);
+      g.fillRect(L.x0, y0 - 80, L.x1 - L.x0, 100);
+      g.restore();
+    }
+    // light trapped inside the clouds
+    soft(L, 4, 8, (gg) => {
+      for (const [x, s] of CELLS) blob(gg, x, Y(320), 260 * s, 140 * s, VIO, 0.25);
+      for (let i = 0; i < 6; i++) blob(gg, lerp(L.ox0, L.ox1, R()), Y(440 + R() * 60), 300, 50, '#3a3080', 0.25);
+    }, 'lighter');
+    grain(L, 0.04);
+  }
+
+  // --- far: other spires piercing the clouds ---------------------------------------------
+  const far = B.part(0.08);
+  const spireTips = [];
+  {
+    const L = far, g = L.g, Y = L.Y;
+    for (let i = 0; i < 4; i++) {
+      const x = lerp(L.x0 + 200, L.x1 - 200, (i + 0.3 + R() * 0.4) / 4), top = Y(230 + R() * 120), w = 14 + R() * 16;
+      if (Math.abs(x - ORB.x) < ORB.r * 1.2 && PIECE !== 'eye') continue;
+      g.fillStyle = linGrad(g, x - w, 0, x + w, 0, [[0, '#0c0a20'], [0.8, '#151236'], [1, '#3a3478']]);
+      poly(g, [x - 2, top, x + 2, top, x + w, Y(480), x - w, Y(480)]);
+      g.fill();
+      rect(g, x - 0.6, top - 40, 1.2, 40, '#151236');
+      spireTips.push([x, top - 40]);
+    }
+    vfill(L, [[Y(300), FOG, 0.15], [Y(420), FOG, 0.6], [Y(480), FOG, 0.9]], 'source-atop');
+    glows(L, (gg) => { for (const [x, y] of spireTips) blob(gg, x, y, 6, 6, '#ff6a7a', 0.8); });
+  }
+
+  // --- mid: antenna masts and guy wires --------------------------------------------------
+  const mid = backLayer(0.25, 0.75 * q, W);
+  const beacons = [];
+  {
+    const L = mid, Y = L.Y;
+    const masts = V.masts || [[-1080, -120], [-640, 30], [720, -60], [1180, 60]];
+    const g = L.g;
+    const M = '#07061a';
+    for (const [x, topS] of masts) {
+      const top = Y(topS), bot = Y(900), w0 = 34, w1 = 6;
+      const at = (y) => lerp(w1, w0, (y - top) / (bot - top));
+      // guy wires
+      g.strokeStyle = col('#0c0a26', 0.9); g.lineWidth = 1.2;
+      g.beginPath();
+      for (const sd of [-1, 1]) for (const k of [0.15, 0.45]) { const y = lerp(top, Y(560), k); g.moveTo(x, y); g.lineTo(x + sd * (260 + k * 400), Y(600)); }
+      g.stroke();
+      g.strokeStyle = col(M); g.lineWidth = 3;
+      g.beginPath();
+      g.moveTo(x - w1, top); g.lineTo(x - w0, bot); g.moveTo(x + w1, top); g.lineTo(x + w0, bot);
+      let side = 1;
+      for (let y = top; y < bot; y += 34) { g.moveTo(x - side * at(y), y); g.lineTo(x + side * at(y + 34), y + 34); side = -side; }
+      g.stroke();
+      g.lineWidth = 2;
+      g.beginPath();
+      for (let y = top + 60; y < Y(300); y += 110) { g.moveTo(x - 50, y); g.lineTo(x + 50, y); g.moveTo(x - 50, y); g.lineTo(x - 50, y - 26); g.moveTo(x + 50, y); g.lineTo(x + 50, y - 20); }
+      g.moveTo(x, top); g.lineTo(x, top - 90);
+      g.stroke();
+      // a dish on one side
+      g.save(); g.translate(x + 40, top + 120); g.rotate(-0.5);
+      g.beginPath(); g.ellipse(0, 0, 26, 9, 0, 0, Math.PI); g.fillStyle = col(M); g.fill();
+      g.beginPath(); g.ellipse(0, 0, 26, 9, 0, Math.PI, TAU); g.strokeStyle = col(VOLT, 0.35); g.lineWidth = 1.2; g.stroke();
+      g.restore();
+      lineV(g, x + w1, top, Y(400), 1, VOLT, 0.25);
+      beacons.push([x, top - 92]);
+      rect(g, x - 3, top - 96, 6, 6, '#ff5a6a', 0.95);
+    }
+    grain(L, 0.05);
+    snapshot(L, [[Y(260), FOG, 0], [Y(440), FOG, 0.45]]);
+    vfill(L, [[Y(240), FOG, 0], [Y(400), FOG, 0.55], [Y(540), FOG, 0.92]], 'source-atop');
+  }
+
+  // --- near: lightning rods and sagging cables -------------------------------------------
+  const near = backLayer(0.55, 0.9 * q, W);
+  const nearX = V.near || [-1400, -660, 680, 1420];
+  const rods = [];
+  {
+    const L = near, Y = L.Y, g = L.g;
+    // cables between the rods, high
+    g.strokeStyle = col('#04030c'); g.lineWidth = 3;
+    g.beginPath();
+    for (let i = 0; i < nearX.length - 1; i++) {
+      const a = nearX[i], b = nearX[i + 1], y = Y(-90), sag = Math.min(260, (b - a) * 0.18);
+      g.moveTo(a, y); g.quadraticCurveTo((a + b) / 2, y + sag * 2, b, y);
+    }
+    g.stroke();
+    for (const x of nearX) {
+      const lit = x < 0 ? 1 : -1, w = 64;
+      g.fillStyle = linGrad(g, x - w / 2, 0, x + w / 2, 0, lit > 0
+        ? [[0, '#020108'], [0.7, '#0a0820'], [0.95, '#5a5aa8'], [1, '#020108']]
+        : [[0, '#020108'], [0.05, '#5a5aa8'], [0.3, '#0a0820'], [1, '#020108']]);
+      poly(g, [x - 14, Y(-160), x + 14, Y(-160), x + w / 2, Y(900), x - w / 2, Y(900)]);
+      g.fill();
+      for (let y = Y(-100); y < Y(900); y += 130) rect(g, x - w / 2 - 4, y, w + 8, 10, '#020108');
+      // insulator stack and the rod
+      for (let k = 0; k < 6; k++) { g.beginPath(); g.ellipse(x, Y(-170) - k * 12, 16 - k, 5, 0, 0, TAU); g.fillStyle = col('#05041a'); g.fill(); }
+      rect(g, x - 2, Y(-420), 4, Y(-240) - Y(-420), '#05041a');
+      rect(g, x - 0.8, Y(-420), 1.6, Y(-240) - Y(-420), VOLT, 0.5);
+      rods.push([x, Y(-250)]);
+      // warning light midway
+      rect(g, x + lit * (w / 2 - 6) - 3, Y(100), 6, 5, '#ff5a6a', 0.9);
+    }
+    soft(L, 3, 4, (gg) => {
+      for (const [x, y] of rods) { blob(gg, x, y, 40, 110, VOLT, 0.3); blob(gg, x, Y(-170), 50, 30, VIO, 0.35); }
+    }, 'lighter');
+    grain(L, 0.04);
+    snapshot(L, [[Y(300), FOG, 0], [Y(460), FOG, 0.4]]);
+    vfill(L, [[Y(260), FOG, 0], [Y(410), FOG, 0.5], [Y(530), FOG, 0.88]], 'source-atop');
+  }
+
+  const hazeStops = [[-420, 0], [-280, 0.06], [-160, 0.24], [-60, 0.48], [0, 0.56]].map(([y, a]) => [y, a * V.haze]);
+  const hazeB = haze(B, q, '#3c3270', hazeStops, { n: 40, h: 260, c: '#5a4c98', a: 0.14 }, R);
+
+  // --- floor: storm-wet deck plates --------------------------------------------------------
+  const D = 1150;
+  const floor = mkFloor(W, D, -30, 1.25 * q);
+  {
+    const L = floor, g = L.g;
+    vfill(L, [[-30, '#2a2456', 0.95], [-1, '#120e2a', 0.93], [0, '#06050e', 0.35], [50, '#05040c', 0.55], [160, '#04030a', 0.76], [420, '#020107', 0.92]]);
+    soft(L, 4, 1, (gg) => {
+      for (let i = 0; i < 50; i++) {
+        const x = lerp(L.ox0, L.ox1, R()), y = 6 + Math.pow(R(), 1.5) * 300;
+        blob(gg, x, y, 60 + R() * 200, 3 + y * 0.05 + R() * 8, '#000000', 0.5);
+      }
+    }, 'destination-out');
+    const rows = [-16, 8, 30, 64, 116, 190, 300, 440];
+    for (const y of rows) {
+      rect(g, L.x0, y, L.x1 - L.x0, 1 + Math.max(0, y) / 220, '#000000', 0.5);
+      rect(g, L.x0, y + 1 + Math.max(0, y) / 220, L.x1 - L.x0, 0.8 + Math.max(0, y) / 400, '#9a90e0', 0.07);
+    }
+    g.strokeStyle = col('#000000', 0.4); g.lineWidth = 1.4;
+    g.beginPath();
+    for (let x = Math.ceil(L.x0 / 190) * 190; x < L.x1; x += 190) { g.moveTo(x * (1 - 30 / D), -30); g.lineTo(x * (1 + 440 / D), 440); }
+    g.stroke();
+    // landing ring and chevrons
+    g.save(); g.translate(0, 80); g.scale(1, 0.12);
+    g.beginPath(); g.arc(0, 0, 460, 0, TAU); g.strokeStyle = col(VOLT, 0.14); g.lineWidth = 10; g.stroke();
+    g.restore();
+    rect(g, L.x0, -30, L.x1 - L.x0, 1.6, VOLT, 0.5);
+    rect(g, L.x0, -28.4, L.x1 - L.x0, 3, '#000000', 0.35);
+    for (let i = 0; i < 400; i++) { const x = lerp(L.ox0, L.ox1, R()), y = R() * 360; rect(g, x, y, 20 + R() * 120, 0.6 + y / 300, '#a8a0f0', 0.03); }
+    // edge lights on the deck lip
+    soft(L, 4, 2, (gg) => { for (let x = Math.ceil(L.x0 / 300) * 300; x < L.x1; x += 300) blob(gg, x, -24, 60, 8, VOLT, 0.5); }, 'lighter');
+    g.fillStyle = col('#e0f0ff', 0.9);
+    for (let x = Math.ceil(L.x0 / 300) * 300; x < L.x1; x += 300) g.fillRect(x - 3, -27, 6, 2);
+    grain(L, 0.07);
+  }
+
+  const floorBase = col('#040309');
+  // parts in z order: sky, cloud sea, far spires, haze wisps
+  flatten(B, floorBase, [[0.45, 2, 3, 2], [0.45, 2, 4, 2], [0.45, 2, 4, 2], [0.4, 1, 2, 2]]);
+  const mirrors = [
+    [reflection(mid, 2, 4), 0.45],
+    [reflection(near, 2, 4), 0.42],
+  ];
+  // Guy wires and cables cross wide stretches of empty sky: coarse cells keep the rectangle count down.
+  mid.rects = cull(mid, 64, 0.5);
+  near.rects = cull(near, 64, 0.5);
+  for (const [M] of mirrors) M.rects = cull(M, 64, 0.5);
+
+  // --- animation: lightning, wind, beacons ----------------------------------------------------
+  // Strikes come every V.bolt seconds or so, each a quick double flicker.
+  const EVERY = V.bolt ?? 6.5;
+  const strike = (t) => {
+    const k = Math.floor(t / EVERY), ph = t - k * EVERY - hash(k * 3 + 1) * EVERY * 0.6;
+    if (ph < 0 || ph > 0.5) return [0, k];
+    const a = ph < 0.05 ? 1 : ph < 0.1 ? 0.25 : ph < 0.16 ? 0.8 : 0.8 * (1 - (ph - 0.16) / 0.34);
+    return [a, k];
+  };
+  const flashB = bands('#b8c8ff', [[-1500, 0.5], [-700, 0.45], [-380, 0.15], [-260, 0]]);
+  const flashA = (t) => 0.1 * strike(t)[0];
+  const bolt = (() => {
+    const { c, g } = mk(96, 384);
+    const pts = [[48, 0]];
+    let x = 48;
+    for (let y = 0; y < 384; y += 18 + R() * 20) { x = clamp(x + spreadR(R, 16), 10, 86); pts.push([x, y]); }
+    const branch = pts.slice(5, 9).map(([px, py], i) => [px + i * 9, py + i * 14]);
+    for (const [w, a] of [[8, 0.25], [3.5, 0.6]]) {
+      g.strokeStyle = col(VOLT, a); g.lineWidth = w; g.lineJoin = 'round';
+      g.beginPath(); pts.forEach(([px, py], i) => (i ? g.lineTo(px, py) : g.moveTo(px, py))); branch.forEach(([px, py], i) => (i ? g.lineTo(px, py) : g.moveTo(px, py))); g.stroke();
+      if (w > 4) blur(c, 2);
+    }
+    g.strokeStyle = col('#ffffff', 0.95); g.lineWidth = 1.4;
+    g.beginPath(); pts.forEach(([px, py], i) => (i ? g.lineTo(px, py) : g.moveTo(px, py))); g.stroke();
+    return c;
+  })();
+  const sprVolt = glowSprite(VOLT, 64, 1.4), sprRed = glowSprite('#ff5a6a');
+  const boltFx = (ctx, cam, vw, vh, t) => {
+    const [a, k] = strike(t);
+    if (a <= 0) return;
+    const [cx, s] = CELLS[k % CELLS.length];
+    layerToScreen(clouds, cx + spreadR(() => hash(k * 7 + 3), 80 * s), clouds.Y(230), cam, vw, vh, TMP);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = a * 0.5;
+    const r = 220 * s;
+    ctx.drawImage(sprVolt, TMP.x - r, TMP.y - r * 0.7, r * 2, r * 1.4);
+    if (hash(k * 5 + 2) < 0.6) { ctx.globalAlpha = a; ctx.drawImage(bolt, TMP.x - 48 * s, TMP.y - 40 * s, 96 * s, 384 * s * 0.55); }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  };
+  const lights = [...beacons.map(([x, y]) => [mid, x, y]), ...rods.map(([x, y]) => [near, x, y])];
+  const beaconFx = (ctx, cam, vw, vh, t) => {
+    ctx.globalCompositeOperation = 'lighter';
+    lights.forEach(([L, x, y], i) => {
+      const ph = (t / (1.9 + (i % 3) * 0.3) + i * 0.29) % 1;
+      layerToScreen(L, x, y, cam, vw, vh, TMP);
+      if (TMP.x < -30 || TMP.x > vw + 30) return;
+      const red = L === mid, r = (red ? 12 : 22) * TMP.z;
+      ctx.globalAlpha = red ? (ph < 0.15 ? 0.95 : 0.12) : 0.3 + 0.25 * Math.sin(t * 7 + i * 3) * Math.sin(t * 1.3 + i);
+      ctx.drawImage(red ? sprRed : sprVolt, TMP.x - r, TMP.y - r, r * 2, r * 2);
+    });
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  };
+  const WIND = V.wind ?? 1;
+  const WC = col('#c8d0ff');
+  const windFx = (n, seed, par, alpha, width) => (ctx, cam, vw, vh, t) => {
+    ctx.strokeStyle = WC; ctx.globalAlpha = alpha; ctx.lineWidth = width;
+    ctx.beginPath();
+    const W2 = vw + 400, H2 = vh, ox = -cam.x * cam.zoom * par;
+    for (let i = 0; i < n; i++) {
+      const h1 = hash(seed + i * 3), h2 = hash(seed + i * 3 + 1), h3 = hash(seed + i * 3 + 2);
+      const sp = (700 + h3 * 900) * WIND, l = 60 + h3 * 140;
+      const x = ((h1 * W2 + ox - t * sp) % W2 + W2) % W2 - 200;
+      const y = h2 * H2 + Math.sin(t * 0.7 + i) * 10;
+      ctx.moveTo(x, y); ctx.lineTo(x + l, y - l * 0.05);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  };
+
+  // --- rail on the deck lip --------------------------------------------------------------
+  const railRow = -30;
+  const rail = mkLayer(1, 1.25 * q, (() => {
+    const b = layerBounds(1, W, 'full', 1 + railRow / D);
+    return { x0: b.x0, x1: b.x1, y0: railRow - 44, y1: railRow + 4 };
+  })(), 1 + railRow / D);
+  {
+    const L = rail, g = L.g, top = railRow - 28;
+    for (let x = Math.ceil(L.x0 / 150) * 150; x < L.x1; x += 150) {
+      rect(g, x - 2, top, 4, railRow - top, '#03020a');
+      rect(g, x - 2, top, 1, railRow - top, '#8a84d8', 0.25);
+    }
+    rect(g, L.x0, top - 3, L.x1 - L.x0, 4, '#03020a');
+    rect(g, L.x0, top - 3, L.x1 - L.x0, 1, VOLT, 0.45);
+    rect(g, L.x0, top + 12, L.x1 - L.x0, 2, '#03020a');
+  }
+
+  // --- foreground ---------------------------------------------------------------------------
+  const fgTop = fgStrip(W, 90, (g, x0, x1) => {
+    g.strokeStyle = col('#010006'); g.lineWidth = 5;
+    g.beginPath();
+    for (let x = Math.ceil(x0 / 1100) * 1100; x < x1; x += 1100) { g.moveTo(x - 600, -6); g.quadraticCurveTo(x, 110, x + 600, -6); }
+    g.stroke();
+    for (let x = Math.ceil(x0 / 1100) * 1100; x < x1; x += 1100) { rect(g, x - 8, 44, 16, 22, '#010006'); rect(g, x - 2, 66, 4, 6, '#ff5a6a', 0.6); }
+  });
+  const fgBot = fgStrip(W, 90, (g, x0, x1) => {
+    for (let s0 = Math.ceil(x0 / 1700) * 1700 - 700; s0 < x1; s0 += 1700) {
+      const s1 = s0 + 640;
+      rect(g, s0, 26, s1 - s0, 8, '#010006');
+      rect(g, s0, 25, s1 - s0, 1.5, VOLT, 0.3);
+      for (let x = s0; x <= s1; x += 320) rect(g, x - 7, 26, 14, 80, '#010006');
+      rect(g, s0, 58, s1 - s0, 6, '#010006');
+      // a bent antenna stub
+      g.strokeStyle = col('#010006'); g.lineWidth = 4;
+      g.beginPath(); g.moveTo(s1 + 200, 100); g.lineTo(s1 + 210, 10); g.lineTo(s1 + 240, -20); g.stroke();
+    }
+  });
+
+  const A = {
+    backdrop: B,
+    back: [
+      { bands: flashB, op: 'lighter', a: flashA }, { fx: boltFx }, { L: mid }, { fx: beaconFx }, { L: near },
+      { fx: windFx(Math.round(30 * WIND), 17, 0.5, 0.07, 1) }, { bands: hazeB },
+    ],
+    floorBase,
+    mirrors: [...mirrors, [reflection(rail, 2, 3, 2), 0.45, railRow]],
+    hazeRefl: bands('#3c3270', hazeStops.map(([y, a]) => [-y, a * 0.55]).reverse()),
+    floor,
+    onFloor: [{ L: rail }],
+    front: [windFx(Math.round(10 * WIND), 503, 1.3, 0.1, 1.4)],
+    fogFront: fogBands('#6a5cb0', [[0, 0], [0.55, 0.85], [0.75, 1], [1, 0]], 200, 80, 0.09),
+    fgTop, fgBot,
+    vignette: vignette(0.72, '#020108'),
+  };
+  return { id: 'apex', name: 'STORM APEX', width: W, palette: palette(pal), reflect: 0.45, setPiece: PIECE, ...compose(A) };
+}
+
+// ======================================================================
+
+const BUILDERS = { causeway: buildCauseway, foundry: buildFoundry, hall: buildHall, garden: buildGarden, vault: buildVault, apex: buildApex };
 
 export function buildArena(id, opts = {}) {
   const b = BUILDERS[id];
   if (!b) throw new Error(`unknown arena: ${id}`);
   const q = clamp(opts.quality ?? 1, 0.25, 1);
   const V = variant(id, opts.seed ?? 0);
+  const H = hueFn(opts.hue ?? 0);
   TRACK = [];
-  TINT = V.tint;
-  TINT_CACHE.clear();
+  TINT = H ? (V.tint ? (c) => H(V.tint(c)) : H) : V.tint;
+  RUN_TINT = H;
   try {
     const arena = b(q, V);
     arena.seed = V.seed;
+    arena.hue = H ? H.deg : 0;
     if (V.piece) arena.setPiece = V.piece;
     return arena;
   } finally {
     TRACK = null;
     TINT = null;
+    RUN_TINT = null;
   }
 }

@@ -851,6 +851,183 @@ const SFX = {
     [76, 81, 85, 88].forEach((m, i) => v.bell(m, { at: 0.05 + i * 0.08, d: 0.5, g: 0.05 }));
     v.noise({ gp: [[0, 0], [0.3, 1], [0.7, 0]], g: 0.05, hp: 6000 });
   } },
+
+  // ----- Pickups and the upgrade draft -----
+  // Health orb: a soft major third in the middle register, rounded off by a lowpass.
+  pickupHealth: { vary: 0.03, pri: 0, rev: 0.15, fn(v) {
+    v.tone({ type: 'triangle', f: mtof(72), a: 0.006, d: 0.16, g: 0.2, lp: 1800 });
+    v.tone({ at: 0.045, type: 'triangle', f: mtof(76), a: 0.006, d: 0.24, g: 0.2, lp: 1800 });
+    v.tone({ at: 0.045, f: mtof(64), a: 0.02, d: 0.22, g: 0.12 });
+  } },
+  // Focus orb: two high FM glints a fourth apart over a quick upward sine flick.
+  pickupFocus: { vary: 0.03, pri: 0, rev: 0.2, fn(v) {
+    v.tone({ f: 1600, to: 3000, ft: 0.06, a: 0.003, d: 0.07, g: 0.05 });
+    v.fm({ f: mtof(93), ratio: 2, index: 0.7, index1: 0.05, a: 0.001, d: 0.12, g: 0.1 });
+    v.fm({ at: 0.04, f: mtof(98), ratio: 2, index: 0.6, index1: 0.05, a: 0.001, d: 0.2, g: 0.1 });
+    v.noise({ at: 0.03, a: 0.002, d: 0.08, g: 0.02, hp: 8000 });
+  } },
+  // Draft screen: a rising air band under a climbing run of soft bells and a pad swell.
+  draftOpen: { vary: 0, rev: 0.4, fn(v) {
+    v.noise({ gp: [[0, 0], [0.45, 1], [0.6, 0]], g: 0.14, bp: { pts: [[0, 1200], [0.55, 7000]], q: 1.5 } });
+    [69, 74, 76, 81, 86].forEach((m, i) => v.bell(m, { at: i * 0.07, d: 0.3, g: 0.06 }));
+    v.chord([57, 64, 69], { gp: [[0, 0], [0.4, 1], [0.6, 0]], g: 0.02, lp: { pts: [[0, 400], [0.55, 2400]] } });
+    v.tone({ at: 0.35, f: mtof(98), unison: [0, 11], a: 0.03, d: 0.25, g: 0.02, am: { rate: 13, depth: 0.4 } });
+  } },
+  // Upgrade chosen: a firm low knock, a bright major stab and one bell on top.
+  draftPick: { vary: 0, rev: 0.3, fn(v) {
+    v.click({ g: 0.3, hp: 2500, d: 0.008 });
+    v.thump(170, 85, 0.12, 0.6, { drive: 0.3 });
+    for (const m of [69, 73, 76, 81]) v.tone({ type: 'triangle', f: mtof(m), a: 0.004, h: 0.05, d: 0.38, g: 0.07 });
+    v.chord([57, 64], { a: 0.004, h: 0.04, d: 0.3, g: 0.025, lp: { f: 2600, to: 600 } });
+    v.bell(93, { at: 0.04, d: 0.42, g: 0.07 });
+  } },
+  // Power slot cycled: a dry tick whose pitch the game sets per slot.
+  powerSwap: { vary: 0, pri: 0, fn(v) {
+    v.tone({ type: 'triangle', f: 1500, a: 0.0005, d: 0.03, g: 0.3 });
+    v.tone({ f: 3000, a: 0.0005, d: 0.015, g: 0.06 });
+    v.click({ g: 0.06, hp: 5000, d: 0.003 });
+  } },
+
+  // ----- Focus powers -----
+  // Ring of blades: a deep burst, an outward-opening noise band and ringing inharmonic steel.
+  powerNova: { vary: 0.03, pri: 2, rev: 0.3, fn(v) {
+    v.click({ g: 0.6, hp: 2000, d: 0.012 });
+    v.thump(150, 48, 0.3, 0.8, { drive: 0.5 });
+    v.noise({ gp: [[0, 0], [0.01, 1], [0.2, 0.5], [0.6, 0]], g: 0.4, bp: { pts: [[0, 800], [0.25, 6000], [0.6, 3500]], q: 1.2 } });
+    v.fm({ f: 880, ratio: 1.41, index: 4, index1: 0.4, it: 0.4, a: 0.001, d: 0.7, g: 0.14 });
+    v.fm({ f: 1320, ratio: 2.76, index: 2.5, index1: 0.2, a: 0.001, d: 0.5, g: 0.09 });
+    v.tone({ f: 2637, unison: [0, 13], a: 0.002, d: 0.55, g: 0.04, am: { rate: 16, depth: 0.4 } });
+    v.shards(10, 0.15, 3000, 8000, 0.07, 0.02);
+  } },
+  // Time stop: a fast downward sweep, a soft sub drop, then a held glassy beating shimmer.
+  powerStasis: { vary: 0.02, pri: 2, rev: 0.4, fn(v) {
+    const S = 0.18;
+    v.tone({ type: 'sawtooth', unison: [-10, 10], fp: [[0, 2600], [S, 160]], gp: [[0, 0], [0.01, 1], [S, 0.6], [S + 0.03, 0]], g: 0.1, bp: { pts: [[0, 3000], [S, 300]], q: 2 } });
+    v.noise({ gp: [[0, 0], [0.01, 1], [S, 0]], g: 0.3, bp: { pts: [[0, 7000], [S, 500]], q: 1.5 } });
+    v.thump(110, 40, 0.3, 0.6, { at: S - 0.02 });
+    v.tone({ at: S, f: 1760, unison: [0, 9], a: 0.04, h: 0.35, d: 0.42, g: 0.05, am: { rate: 7, depth: 0.35 } });
+    v.tone({ at: S, f: 2637, a: 0.05, h: 0.3, d: 0.4, g: 0.025 });
+    v.fm({ at: S, f: 1318.5, ratio: 3.5, index: 0.8, index1: 0.2, a: 0.03, h: 0.3, d: 0.45, g: 0.05 });
+    v.noise({ at: S, gp: [[0, 0], [0.1, 1], [0.6, 0.6], [0.8, 0]], g: 0.025, hp: 7000 });
+  } },
+  // Player heal: a warm major swell with a breathy top, gentler than the boss's heal sounds.
+  powerMend: { vary: 0.01, pri: 2, rev: 0.4, fn(v) {
+    const gp = [[0, 0], [0.28, 1], [0.7, 0]];
+    for (const m of [62, 66, 69, 74]) v.tone({ type: 'triangle', f: mtof(m), unison: [-5, 5], gp, g: 0.06, lp: 1600 });
+    v.tone({ f: mtof(50), gp, g: 0.18 });
+    v.tone({ fp: [[0, 440], [0.6, 880]], gp, g: 0.04 });
+    v.noise({ gp, g: 0.04, hp: 5000 });
+    v.bell(86, { at: 0.22, d: 0.45, g: 0.04 });
+  } },
+  // Chain lightning: a crushed falling zap with a crackle burst. Retriggers with rising pitch.
+  powerArc: { vary: 0.04, pri: 2, rev: 0.12, fn(v) {
+    v.crackle({ d: 0.14, g: 0.6, bp: { f: 3500, q: 0.7 } });
+    v.tone({ type: 'square', f: 1900, to: 500, ft: 0.1, a: 0.001, d: 0.12, g: 0.1, curve: 'crush', bp: { f: 2200, q: 1.5 }, vib: { rate: 60, depth: 300 } });
+    v.noise({ a: 0.0005, d: 0.04, g: 0.25, hp: 4000 });
+    v.thump(220, 120, 0.05, 0.25);
+  } },
+  // One teleport cut: a narrow high noise slice and a short FM ring. Retriggers at ~80 ms.
+  powerFlash: { vary: 0.03, pri: 2, fn(v) {
+    v.noise({ a: 0.001, d: 0.06, g: 0.5, bp: { f: 6500, to: 3500, q: 3 } });
+    v.fm({ f: 2400, ratio: 2.414, index: 2, index1: 0.2, a: 0.0008, d: 0.1, g: 0.09 });
+    v.click({ g: 0.25, hp: 4000, d: 0.004 });
+  } },
+  // The resolving hit after the cuts: a heavy slash, a deep thump and a bright ringing tail.
+  powerFlashEnd: { vary: 0.03, pri: 2, rev: 0.3, fn(v) {
+    v.click({ g: 0.7, hp: 1800, d: 0.012 });
+    v.noise({ a: 0.002, d: 0.3, g: 0.55, bp: { pts: [[0, 8000], [0.25, 1800]], q: 3 } });
+    v.thump(140, 40, 0.35, 0.95, { drive: 0.6, at: 0.01, h: 0.02 });
+    v.fm({ f: 1568, ratio: 2.414, index: 3, index1: 0.25, a: 0.001, d: 0.5, g: 0.1 });
+    v.crackle({ d: 0.35, g: 0.35, bp: { f: 3000, q: 0.7 } });
+  } },
+  // Mirror image: a short swell into a beating glass tone, repeated a moment later.
+  powerMirror: { vary: 0.02, pri: 2, rev: 0.4, fn(v) {
+    v.noise({ gp: [[0, 0], [0.08, 1], [0.1, 0]], g: 0.15, bp: { pts: [[0, 2000], [0.08, 6000]], q: 2 } });
+    for (const [at, g] of [[0.08, 1], [0.15, 0.6]]) {
+      v.fm({ at, f: 1318.5, ratio: 3.5, index: 1, index1: 0.1, a: 0.003, d: 0.35, g: 0.07 * g });
+      v.tone({ at, f: 1975.5, unison: [-14, 14], a: 0.003, d: 0.3, g: 0.04 * g });
+    }
+  } },
+  // Floor marks: a low dissonant swell that opens up and stops short, leaving room for `pillar`.
+  powerJudgment: { vary: 0.02, pri: 2, rev: 0.3, fn(v) {
+    const gp = [[0, 0], [0.42, 1], [0.5, 0]];
+    v.chord([38, 44, 45], { gp, g: 0.06, lp: { pts: [[0, 200], [0.45, 2200]], q: 2 } });
+    v.tone({ f: mtof(38), gp, g: 0.3 });
+    v.fm({ f: mtof(86), ratio: 1.5, index: 1.5, gp, g: 0.03, vib: { rate: 5, depth: 25 } });
+    v.noise({ color: 'pink', gp, g: 0.12, bp: { pts: [[0, 300], [0.45, 2600]], q: 2 } });
+  } },
+  // Energy wave: an airy whoosh with a filtered saw riding the same arc and a thin top whistle.
+  powerCrescent: { vary: 0.05, pri: 2, rev: 0.15, fn(v) {
+    const d = 0.38, pk = d * 0.35, gp = [[0, 0], [pk, 1], [d, 0]];
+    v.whoosh({ d, g: 0.55, lo: 700, hi: 3600, end: 1500, q: 1.3, peak: 0.35 });
+    v.tone({ type: 'sawtooth', unison: [-9, 9], fp: [[0, 300], [pk, 640], [d, 420]], gp, g: 0.09, bp: { pts: [[0, 800], [pk, 2600], [d, 1200]], q: 2.5 } });
+    v.tone({ fp: [[0, 1300], [pk, 2500], [d, 1900]], gp, g: 0.04 });
+  } },
+
+  // ----- Combat extras -----
+  // Critical hit: a bright high ping layered on top of the normal hit.
+  crit: { vary: 0.03, rev: 0.15, fn(v) {
+    v.click({ g: 0.3, hp: 5000, d: 0.005 });
+    v.fm({ f: 3136, ratio: 2, index: 1.2, index1: 0.05, a: 0.0008, d: 0.25, g: 0.14 });
+    v.tone({ f: 4699, a: 0.0008, d: 0.12, g: 0.05 });
+  } },
+  // Set alight: a quiet high sizzle with a few crackles.
+  burn: { vary: 0.1, pri: 0, fn(v) {
+    v.noise({ gp: [[0, 0], [0.03, 1], [0.25, 0]], g: 0.3, hp: 3500, am: { rate: 30, depth: 0.4 } });
+    v.crackle({ d: 0.2, g: 0.3, bp: { f: 4500, q: 0.8 } });
+  } },
+  // Reinforcements: a two-note low horn call through a vowel-ish formant bank.
+  summon: { vary: 0.02, pri: 2, rev: 0.35, fn(v) {
+    const bank = v.bank([[[[0, 600]], 5, 1.6], [[[0, 1050]], 6, 0.9], [[[0, 2400]], 8, 0.3]]);
+    for (const [at, m, len] of [[0, 43, 0.3], [0.32, 50, 0.45]]) {
+      const gp = [[0, 0], [0.06, 1], [len * 0.7, 0.85], [len, 0]];
+      v.tone({ at, type: 'sawtooth', unison: [-8, 8], fp: [[0, mtof(m) * 0.96], [0.06, mtof(m)]], gp, g: 0.5, vib: { rate: 5, depth: 12 }, dest: bank });
+      v.tone({ at, f: mtof(m - 12), gp, g: 0.2 });
+    }
+  } },
+  // Mid-boss arrival: a two-hit low dissonant stab ("dun, DUN") with a tense high tail.
+  championIntro: { vary: 0, pri: 2, rev: 0.35, fn(v) {
+    for (const [at, g] of [[0, 0.6], [0.18, 1]]) {
+      v.thump(85, 32, 0.4, 0.8 * g, { at, drive: 0.5 });
+      v.chord([40, 46, 47], { at, a: 0.005, h: 0.05, d: at ? 0.75 : 0.15, g: 0.055 * g, drive: 0.4, lp: { f: 2400, to: 300 } });
+    }
+    v.tone({ at: 0.18, f: mtof(28), a: 0.01, h: 0.15, d: 0.6, g: 0.3 });
+    v.fm({ at: 0.2, f: mtof(83), ratio: 2.414, index: 1.2, index1: 0.05, a: 0.02, d: 0.75, g: 0.04, vib: { rate: 6, depth: 20 } });
+  } },
+  // New sector: a short rising brass-ish call that lands on a held major chord with bells.
+  sectorUp: { vary: 0, pri: 2, rev: 0.4, fn(v) {
+    [67, 72, 76].forEach((m, i) => {
+      v.tone({ at: i * 0.12, type: 'sawtooth', unison: [-7, 7], f: mtof(m), a: 0.01, h: 0.05, d: 0.15, g: 0.05, lp: { f: 2600, to: 1200 } });
+      v.tone({ at: i * 0.12, f: mtof(m - 12), a: 0.01, d: 0.18, g: 0.08 });
+    });
+    v.chord([60, 64, 67, 72], { at: 0.36, a: 0.02, h: 0.35, d: 0.8, g: 0.035, lp: { f: 3000, to: 900 } });
+    v.tone({ at: 0.36, f: mtof(48), a: 0.01, h: 0.3, d: 0.8, g: 0.22 });
+    v.thump(90, 40, 0.5, 0.4, { at: 0.36 });
+    [84, 88, 91].forEach((m, i) => v.bell(m, { at: 0.36 + i * 0.06, d: 0.9, g: 0.06 }));
+  } },
+  // Survived a killing blow: a reversed swell cut off into two heartbeat thuds.
+  secondWind: { vary: 0, pri: 2, rev: 0.3, fn(v) {
+    const S = 0.42, gp = [[0, 0], [S * 0.7, 0.4], [S, 1], [S + 0.01, 0]];
+    v.noise({ gp, g: 0.4, bp: { pts: [[0, 300], [S, 3500]], q: 1.4 } });
+    v.tone({ fp: [[0, 200], [S, 900]], gp, g: 0.1 });
+    v.tone({ type: 'sawtooth', unison: [-9, 9], fp: [[0, 100], [S, 220]], gp, g: 0.06, lp: { pts: [[0, 300], [S, 2400]] } });
+    v.thump(80, 36, 0.16, 1, { at: S, drive: 0.4 });
+    v.thump(70, 32, 0.24, 0.75, { at: S + 0.24, drive: 0.4 });
+    v.bell(88, { at: S, d: 0.4, g: 0.05 });
+  } },
+  // Floor modifier: crushed bleeps at random pitches, a gated noise stutter and a warbling tone.
+  anomaly: { vary: 0.05, rev: 0.2, fn(v) {
+    for (let i = 0; i < 5; i++) {
+      v.tone({ at: i * 0.055, type: 'square', f: mtof(v.r(70, 96)), a: 0.001, h: 0.025, d: 0.03, g: 0.07, curve: 'crush', lp: 5000 });
+    }
+    const gate = [[0, 0]];
+    for (let i = 0; i < 7; i++) {
+      const t = 0.08 + i * v.r(0.03, 0.05);
+      gate.push([t, 0], [t + 0.001, 1], [t + 0.015, 1], [t + 0.016, 0]);
+    }
+    v.noise({ gp: gate, g: 0.12, bp: { f: v.r(1500, 3500), q: 2 }, curve: 'crush' });
+    v.fm({ f: v.r(300, 400), ratio: 1.37, index: 3, index1: 1, a: 0.01, h: 0.15, d: 0.3, g: 0.06, vib: { rate: 13, depth: 200 } });
+  } },
 };
 
 // Mix: per-sound voice gain, set from measured dry peaks (node tools/audio-test.js) toward
@@ -866,6 +1043,9 @@ const MIX = {
   bolt: .69, boltReflect: .85, shockwave: .53, slam: .36, bossRoar: .39, bossPhase: .56, healDone: 1, healInterrupt: .58, adapt: 1, stagger: .56,
   thrust: 1.13, blink: 1.3, droneDive: 1.2, lob: .34, beep: .75, explode: .32, pillar: .54, hammer: .4, heatUp: .85, vent: .68, echo: .83, elite: .42,
   hurt: .47, death: .41, perfectDodge: 1.1, focus: 1.28, rankUp: 1.84, waveClear: 1.53, victory: .95, uiMove: .5, uiSelect: .74, heal: 1.76,
+  pickupHealth: .47, pickupFocus: 1.38, draftOpen: 1.7, draftPick: .48, powerSwap: .48,
+  powerNova: .48, powerStasis: .98, powerMend: .95, powerArc: 1, powerFlash: 1.8, powerFlashEnd: .6, powerMirror: 1.86, powerJudgment: 1.07, powerCrescent: .95,
+  crit: 1.55, burn: .25, summon: 1, championIntro: .51, sectorUp: .9, secondWind: .58, anomaly: 2,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -1190,11 +1370,51 @@ class LoopVoice {
 const CH = {
   i: [0, 3, 7], III: [3, 7, 10], iv: [5, 8, 12], v: [7, 10, 14], V: [7, 11, 14],
   VI: [8, 12, 15], VII: [10, 14, 17], bII: [1, 5, 8],
+  // Used only by sector themes.
+  IV: [5, 9, 12], ii: [2, 5, 9], vii: [10, 13, 17], viio: [11, 14, 17],
 };
 const ARPS = [
   [0, 1, 2, 3, 0, 1, 2, 3], [0, 1, 2, 3, 4, 3, 2, 1], [5, 4, 3, 2, 1, 0, 1, 2],
   [0, 3, 1, 3, 2, 3, 1, 3], [0, 2, 1, 3, 2, 4, 3, 5], [0, 1, 0, 2, 0, 3, 2, 1],
 ];
+
+// Sector themes restyle the combat, boss and boss2 tracks (setTheme). Theme 0 is the tracks as
+// written. A theme sets the key (semitones, folded up an octave if the root would drop below
+// MIDI 40), the tempo factor, a mode (chord colour plus extra progressions), and optionally
+// the arp timbre, the pad oscillator, the kick and arp pattern pools and an eighth-note swing.
+const MODES = {
+  // Major IV and minor ii: brighter, folky.
+  dorian: { chords: { iv: CH.IV }, progs: [['i', 'IV', 'i', 'IV'], ['i', 'IV', 'VII', 'i'], ['i', 'ii', 'IV', 'i'], ['i', 'VII', 'IV', 'i'], ['IV', 'i', 'VII', 'v']] },
+  // Flat second everywhere, minor seventh chord: dark and tense.
+  phrygian: { chords: { VII: CH.vii }, progs: [['i', 'bII', 'i', 'VII'], ['i', 'bII', 'III', 'bII'], ['i', 'iv', 'bII', 'i'], ['VI', 'bII', 'i', 'i'], ['i', 'VII', 'bII', 'i']] },
+  // Raised leading tone: major V and a diminished seventh-degree chord.
+  harmonic: { chords: { v: CH.V, VII: CH.viio }, progs: [['i', 'iv', 'V', 'i'], ['i', 'VI', 'V', 'i'], ['i', 'iv', 'viio', 'i'], ['VI', 'iv', 'V', 'V'], ['i', 'bII', 'V', 'i']] },
+  // Same chords as written, heroic major-chord-led progressions.
+  epic: { chords: {}, progs: [['VI', 'VII', 'III', 'i'], ['i', 'VI', 'III', 'VII'], ['III', 'VII', 'i', 'VI'], ['i', 'III', 'VII', 'VI'], ['VI', 'III', 'VII', 'VII']] },
+};
+const KICKS = {
+  four: ['x...x...x...x...', 'x...x...x...x.x.', 'x...x...x..xx...'],
+  broken: ['x..x..x...x.....', 'x.....x..x..x...', 'x..x...x..x...x.'],
+};
+const ARPS_ALT = [[0, 2, 4, 2, 0, 2, 4, 5], [0, 0, 2, 1, 3, 1, 4, 2], [2, 1, 0, 1, 3, 2, 1, 0], [0, 4, 2, 4, 1, 4, 3, 4]];
+const ARP_POOLS = { alt: ARPS_ALT, mix: [...ARPS, ...ARPS_ALT] };
+// Level trims that keep a swapped oscillator near the written one's loudness.
+const ARP_G = { square: 1, sawtooth: 1, triangle: 1.6, glass: 1.2 };
+const PAD_G = { sawtooth: 1, square: 0.7, triangle: 1.5 };
+const THEMES = [
+  { key: 0, tempo: 1 },
+  { key: 3, tempo: 1.05, mode: 'dorian', arp: 'triangle', kicks: 'four' },
+  { key: -2, tempo: 0.94, mode: 'phrygian', arp: 'glass', pad: 'square', arps: 'alt' },
+  { key: 5, tempo: 1.07, mode: 'harmonic', kicks: 'broken', arps: 'mix' },
+  { key: -4, tempo: 0.96, mode: 'epic', arp: 'triangle', pad: 'triangle', swing: 0.12 },
+  { key: 1, tempo: 1.03, mode: 'phrygian', arp: 'sawtooth', kicks: 'four', arps: 'alt' },
+  { key: -3, tempo: 0.95, mode: 'dorian', arp: 'glass', pad: 'square', swing: 0.1 },
+  { key: 4, tempo: 1.09, mode: 'harmonic', arp: 'triangle', kicks: 'broken', arps: 'alt' },
+  { key: 2, tempo: 1.02, mode: 'epic', arp: 'glass', kicks: 'four', arps: 'mix', swing: 0.08 },
+  { key: -1, tempo: 1.1, mode: 'harmonic', arp: 'sawtooth', pad: 'square', kicks: 'broken' },
+];
+const wrapTheme = (n) => ((Math.floor(n) % THEMES.length) + THEMES.length) % THEMES.length;
+
 const arpNote = (ch, i) => ch[i % 3] + 12 * Math.floor(i / 3);
 const bassNote = (c, ch) => (c === 'O' ? ch[0] + 12 : c === 'F' ? ch[0] + 7 : c === 'T' ? ch[1] : ch[0]);
 
@@ -1232,7 +1452,8 @@ const INST = {
     for (const m of midis) v.tone({ type, unison, f: mtof(m), gp: [[0, 0], [dur * 0.25, 1], [dur * 0.8, 0.8], [dur * 1.15, 0]], g });
   },
   pluck(tr, t, midi, vel, dest, type = 'square') {
-    tr.voice(t, dest).tone({ type, f: mtof(midi), a: 0.002, d: 0.18, g: 0.055 * vel, lp: { f: 2600, to: 500, ft: 0.15 } });
+    if (type === 'glass') tr.voice(t, dest).fm({ f: mtof(midi), ratio: 3.5, index: 1.4, index1: 0.1, a: 0.002, d: 0.2, g: 0.055 * vel });
+    else tr.voice(t, dest).tone({ type, f: mtof(midi), a: 0.002, d: 0.18, g: 0.055 * vel, lp: { f: 2600, to: 500, ft: 0.15 } });
   },
   bell(tr, t, midi, vel, dest) {
     const v = tr.voice(t, dest), f = mtof(midi);
@@ -1266,12 +1487,14 @@ function filterNode(c, type, f, q = 0) {
   return b;
 }
 
-// Feedback delay (dotted eighth) for arps and bells.
-function delayLine(tr, time, fb, wet) {
+// Feedback delay `steps` 16ths long (3 = dotted eighth) for arps and bells. A theme's tempo
+// change retimes it.
+function delayLine(tr, steps, fb, wet) {
   const c = tr.e.ctx;
   const inp = tr.node(gainNode(c, 1)), d = tr.node(c.createDelay(2)), f = tr.node(gainNode(c, fb));
   const lp = tr.node(filterNode(c, 'lowpass', 2400)), w = tr.node(gainNode(c, wet));
-  d.delayTime.value = time;
+  d.delayTime.value = steps * tr.step;
+  tr.delays.push([d, steps]);
   inp.connect(d);
   d.connect(lp);
   lp.connect(f);
@@ -1282,24 +1505,25 @@ function delayLine(tr, time, fb, wet) {
 }
 
 // Shared phrase logic for the tempo tracks.
-function phraseBar(tr, bar) {
-  const d = tr.def;
-  if (bar % 4 === 0) {
-    const phrase = bar / 4;
-    let prog = pick(d.progs);
-    while (prog === tr.prog && d.progs.length > 1) prog = pick(d.progs);
+// Bars count from the last theme change (`tr.pb`), so a new theme starts a fresh phrase.
+function phraseBar(tr) {
+  const d = tr.def, pb = tr.pb, progs = tr.progs;
+  if (pb % 4 === 0) {
+    const phrase = pb / 4;
+    let prog = pick(progs);
+    while (prog === tr.prog && progs.length > 1) prog = pick(progs);
     if (!tr.prog || Math.random() > 0.2) tr.prog = prog;
     tr.section = phrase > 0 && phrase % 4 === 3 && Math.random() < 0.65 ? 'break' : 'main';
-    tr.arpPat = pick(ARPS);
+    tr.arpPat = pick(tr.arps);
     tr.arpOct = Math.random() < 0.3 ? 12 : 0;
-    tr.kickPat = pick(d.kicks);
+    tr.kickPat = pick(tr.kicks);
     tr.basePat = pick(d.bassPats(tr.I));
   }
-  tr.chord = CH[tr.prog[bar % 4]];
+  tr.chord = tr.chords[tr.prog[pb % 4]];
   tr.bassPat = Math.random() < 0.25 ? pick(d.bassPats(tr.I)) : tr.basePat;
-  tr.fill = bar % 4 === 3 && Math.random() < 0.55;
-  tr.drop = tr.section === 'main' && bar % 8 === 7 && Math.random() < 0.2;
-  if (tr.section === 'break' && bar % 4 === 3) INST.riser(tr, tr.next, tr.barDur, tr.L.pad);
+  tr.fill = pb % 4 === 3 && Math.random() < 0.55;
+  tr.drop = tr.section === 'main' && pb % 8 === 7 && Math.random() < 0.2;
+  if (tr.section === 'break' && pb % 4 === 3) INST.riser(tr, tr.next, tr.barDur, tr.L.pad);
 }
 
 const TRACKS = {
@@ -1328,7 +1552,7 @@ const TRACKS = {
       tr.padIn = tr.node(filterNode(c, 'lowpass', 900));
       tr.padIn.connect(tr.L.pad);
       tr.bellIn = tr.L.bells;
-      tr.bellDelay = delayLine(tr, tr.def.step * 3, 0.4, 0.5);
+      tr.bellDelay = delayLine(tr, 3, 0.4, 0.5);
       tr.L.bells.connect(tr.bellDelay);
       tr.lastBell = t;
       tr.queue = [];
@@ -1362,7 +1586,7 @@ const TRACKS = {
   },
 
   combat: {
-    step: 60 / 112 / 4, rev: 0.2, root: 50,
+    step: 60 / 112 / 4, rev: 0.2, root: 50, themed: true, arp: 'square',
     layers: ['pad', 'bass', 'hats', 'drums', 'arp', 'perc'],
     trim: { pad: 1.4, bass: 0.62, hats: 2.5, drums: 0.39, arp: 2.5, perc: 0.6 },
     progs: [['i', 'VI', 'III', 'VII'], ['i', 'VI', 'iv', 'V'], ['i', 'iv', 'VII', 'III'], ['i', 'VII', 'VI', 'V'], ['VI', 'VII', 'i', 'i'], ['i', 'i', 'VI', 'VII'], ['iv', 'VI', 'V', 'i'], ['i', 'III', 'iv', 'V']],
@@ -1382,16 +1606,16 @@ const TRACKS = {
       tr.padIn.connect(tr.L.pad);
       tr.bassIn = tr.L.bass;
       tr.arpIn = tr.L.arp;
-      tr.L.arp.connect(delayLine(tr, tr.def.step * 3, 0.3, 0.35));
+      tr.L.arp.connect(delayLine(tr, 3, 0.3, 0.35));
     },
     onI(tr, now) {
       tr.padIn.frequency.setTargetAtTime(500 + 1600 * tr.I, now, 0.5);
     },
     onBar: phraseBar,
     onStep(tr, s, t) {
-      const { root, step } = tr.def, lv = tr.lv, I = tr.I, ch = tr.chord, brk = tr.section === 'break';
+      const { root, step } = tr, lv = tr.lv, I = tr.I, ch = tr.chord, brk = tr.section === 'break';
       const ht = () => t + rnd(-0.003, 0.004);
-      if (s === 0 && lv.pad > 0.01) INST.pad(tr, t, [...ch.map((x) => root + x), root + ch[0] + 12], tr.barDur * 1.02, tr.padIn, 0.03);
+      if (s === 0 && lv.pad > 0.01) INST.pad(tr, t, [...ch.map((x) => root + x), root + ch[0] + 12], tr.barDur * 1.02, tr.padIn, 0.03 * tr.padG, tr.padType);
       if (lv.bass > 0.01) {
         const b = brk ? (s % 8 === 0 ? 'R' : '.') : tr.bassPat[s];
         if (b !== '.') INST.bass(tr, t, root - 12 + bassNote(b, ch), step * (brk ? 6 : 1.5), s % 4 === 0 ? 1 : 0.8, 0.3 + 0.7 * I);
@@ -1412,14 +1636,14 @@ const TRACKS = {
         const fast = I > 0.78;
         if ((fast || s % 2 === 0) && Math.random() > 0.06) {
           const idx = tr.arpPat[(fast ? s : s / 2) % tr.arpPat.length];
-          INST.pluck(tr, ht(), root + 12 + tr.arpOct + arpNote(ch, idx), s % 4 === 0 ? 1 : 0.7, tr.arpIn);
+          INST.pluck(tr, ht(), root + 12 + tr.arpOct + arpNote(ch, idx), (s % 4 === 0 ? 1 : 0.7) * tr.arpG, tr.arpIn, tr.arpType);
         }
       }
     },
   },
 
   boss: {
-    step: 60 / 128 / 4, rev: 0.25, root: 48,
+    step: 60 / 128 / 4, rev: 0.25, root: 48, themed: true, arp: 'sawtooth',
     layers: ['pad', 'bass', 'hats', 'drums', 'arp', 'perc'],
     trim: { pad: 1.1, bass: 0.2, hats: 2.5, drums: 0.21, arp: 4, perc: 0.38 },
     progs: [['i', 'VI', 'VII', 'i'], ['i', 'iv', 'V', 'i'], ['i', 'VI', 'iv', 'V'], ['i', 'bII', 'V', 'i'], ['VI', 'V', 'i', 'i'], ['i', 'i', 'bII', 'i']],
@@ -1453,15 +1677,15 @@ const TRACKS = {
       lp.connect(lv);
       lv.connect(tr.L.bass);
       tr.arpIn = tr.L.arp;
-      tr.L.arp.connect(delayLine(tr, tr.def.step * 3, 0.32, 0.3));
+      tr.L.arp.connect(delayLine(tr, 3, 0.32, 0.3));
     },
     onBar: phraseBar,
     onStep(tr, s, t) {
-      const { root, step } = tr.def, lv = tr.lv, I = tr.I, ch = tr.chord, brk = tr.section === 'break';
+      const { root, step } = tr, lv = tr.lv, I = tr.I, ch = tr.chord, brk = tr.section === 'break';
       const ht = () => t + rnd(-0.003, 0.004);
       if (s === 0 && lv.pad > 0.01) {
-        INST.pad(tr, t, [root + ch[0], ...ch.map((x) => root + 12 + x)], tr.barDur * 1.02, tr.padIn, 0.05, 'sawtooth', [-11, 0, 9]);
-        if (tr.bar % 4 === 0 && lv.perc > 0.01 && !brk) INST.boom(tr, t);
+        INST.pad(tr, t, [root + ch[0], ...ch.map((x) => root + 12 + x)], tr.barDur * 1.02, tr.padIn, 0.05 * tr.padG, tr.padType, [-11, 0, 9]);
+        if (tr.pb % 4 === 0 && lv.perc > 0.01 && !brk) INST.boom(tr, t);
       }
       if (lv.bass > 0.01) {
         const b = brk ? (s % 8 === 0 ? 'R' : '.') : tr.bassPat[s];
@@ -1481,7 +1705,7 @@ const TRACKS = {
       }
       if (lv.arp > 0.01 && Math.random() > 0.05) {
         const idx = tr.arpPat[s % tr.arpPat.length];
-        INST.pluck(tr, ht(), root + tr.arpOct + arpNote(ch, idx), s % 4 === 0 ? 1 : 0.65, tr.arpIn, 'sawtooth');
+        INST.pluck(tr, ht(), root + tr.arpOct + arpNote(ch, idx), (s % 4 === 0 ? 1 : 0.65) * tr.arpG, tr.arpIn, tr.arpType);
       }
     },
   },
@@ -1489,7 +1713,7 @@ const TRACKS = {
   // Forge master: G minor (the dominant of boss's C minor), slower and heavier, with anvil
   // strikes on the off-beat eighths, a crushed bass and a bit-reduced ostinato.
   boss2: {
-    step: 60 / 120 / 4, rev: 0.2, root: 43,
+    step: 60 / 120 / 4, rev: 0.2, root: 43, themed: true, arp: 'square',
     layers: ['pad', 'bass', 'anvil', 'drums', 'hats', 'arp', 'perc'],
     trim: { pad: 1.1, bass: 0.22, anvil: 1, hats: 2.2, drums: 0.3, arp: 2.5, perc: 0.38 },
     progs: [['i', 'i', 'bII', 'i'], ['i', 'VI', 'v', 'i'], ['i', 'iv', 'bII', 'V'], ['i', 'VII', 'VI', 'bII'], ['VI', 'bII', 'V', 'i'], ['i', 'iv', 'i', 'V']],
@@ -1518,16 +1742,16 @@ const TRACKS = {
       const alp = tr.node(filterNode(c, 'lowpass', 3000));
       tr.arpIn.connect(alp);
       alp.connect(tr.L.arp);
-      tr.L.arp.connect(delayLine(tr, tr.def.step * 3, 0.28, 0.3));
-      tr.L.anvil.connect(delayLine(tr, tr.def.step * 2, 0.18, 0.22));
+      tr.L.arp.connect(delayLine(tr, 3, 0.28, 0.3));
+      tr.L.anvil.connect(delayLine(tr, 2, 0.18, 0.22));
     },
     onBar: phraseBar,
     onStep(tr, s, t) {
-      const { root, step } = tr.def, lv = tr.lv, I = tr.I, ch = tr.chord, brk = tr.section === 'break';
+      const { root, step } = tr, lv = tr.lv, I = tr.I, ch = tr.chord, brk = tr.section === 'break';
       const ht = () => t + rnd(-0.003, 0.004);
       if (s === 0 && lv.pad > 0.01) {
-        INST.pad(tr, t, [root + ch[0], root + 12 + ch[0], root + 12 + ch[1], root + 12 + ch[2]], tr.barDur * 1.02, tr.padIn, 0.04, 'sawtooth', [-10, 0, 9]);
-        if (tr.bar % 4 === 0 && lv.perc > 0.01 && !brk) INST.boom(tr, t);
+        INST.pad(tr, t, [root + ch[0], root + 12 + ch[0], root + 12 + ch[1], root + 12 + ch[2]], tr.barDur * 1.02, tr.padIn, 0.04 * tr.padG, tr.padType, [-10, 0, 9]);
+        if (tr.pb % 4 === 0 && lv.perc > 0.01 && !brk) INST.boom(tr, t);
       }
       if (lv.bass > 0.01) {
         const b = brk ? (s % 8 === 0 ? 'R' : '.') : tr.bassPat[s];
@@ -1551,7 +1775,7 @@ const TRACKS = {
       }
       if (lv.arp > 0.01 && s % 2 === 0 && Math.random() > 0.08) {
         const idx = tr.arpPat[(s / 2) % tr.arpPat.length];
-        INST.pluck(tr, ht(), root + 12 + tr.arpOct + arpNote(ch, idx), s % 4 === 0 ? 1 : 0.7, tr.arpIn);
+        INST.pluck(tr, ht(), root + 12 + tr.arpOct + arpNote(ch, idx), (s % 4 === 0 ? 1 : 0.7) * tr.arpG, tr.arpIn, tr.arpType);
       }
     },
   },
@@ -1580,7 +1804,11 @@ class Track {
       this.lv[k] = 0;
     }
     this.I = this.tI = I;
-    this.barDur = this.def.step * 16;
+    this.delays = [];
+    this.bar0 = 0; // bar where the current theme began; phrases count from here
+    this.pb = 0;
+    this.pending = null;
+    this.applyTheme(e.theme, now, true);
     this.next = now + 0.05;
     this.n = 0;
     this.bar = -1;
@@ -1608,6 +1836,40 @@ class Track {
     return new Voice(this.e, t, this.e.sag, out);
   }
 
+  // Unthemed tracks (menu) always use theme 0.
+  setTheme(n) {
+    if (!this.def.themed) return;
+    this.pending = n === this.themeN ? null : n;
+  }
+
+  applyTheme(n, t, initial) {
+    const d = this.def;
+    if (!d.themed) n = 0;
+    const th = THEMES[n], mode = MODES[th.mode];
+    this.themeN = n;
+    this.modeName = th.mode || '';
+    this.root = d.root + th.key + (d.root + th.key < 40 ? 12 : 0);
+    this.step = d.step / th.tempo;
+    this.barDur = this.step * 16;
+    this.chords = mode ? { ...CH, ...mode.chords } : CH;
+    // A theme keeps half of the track's own progressions (alternating halves by theme) so
+    // the track stays recognisable.
+    this.progs = mode ? [...mode.progs, ...(d.progs || []).filter((_, i) => i % 2 === n % 2)] : d.progs;
+    this.kicks = th.kicks ? KICKS[th.kicks] : d.kicks;
+    this.arps = th.arps ? ARP_POOLS[th.arps] : ARPS;
+    this.arpType = th.arp || d.arp;
+    this.arpG = th.arp ? ARP_G[th.arp] / ARP_G[d.arp] : 1;
+    this.padType = th.pad || 'sawtooth';
+    this.padG = th.pad ? PAD_G[th.pad] : 1;
+    this.swing = th.swing || 0;
+    if (initial) return;
+    this.themedAt = t; // for tools/audio-test
+    this.themedStep = this.n;
+    // Mid-track: retime the echoes and start a fresh phrase with a progression from the new pool.
+    for (const [dl, steps] of this.delays) dl.delayTime.setTargetAtTime(steps * this.step, t, 0.05);
+    this.prog = null;
+  }
+
   levels(now, force) {
     const lv = this.def.levels(this.I);
     for (const k in lv) {
@@ -1624,22 +1886,30 @@ class Track {
       this.I += (this.tI - this.I) * Math.min(1, dt * 1.5);
       this.levels(now, false);
     }
-    const st = this.def.step;
     if (this.next < now) {
       // Fell behind (hidden tab, long frame): skip ahead instead of bursting stale notes.
-      const k = Math.ceil((now - this.next) / st);
-      this.next += k * st;
+      const k = Math.ceil((now - this.next) / this.step);
+      this.next += k * this.step;
       this.n += k;
     }
     const until = now + lookahead;
     while (this.next < until) {
-      const bar = Math.floor(this.n / 16);
+      const s = this.n % 16, bar = Math.floor(this.n / 16);
+      // A theme change waits for the next downbeat, so nothing is cut mid-bar: notes already
+      // scheduled ring out and the new key, tempo and patterns start together.
+      if (s === 0 && this.pending !== null) {
+        this.applyTheme(this.pending, this.next, false);
+        this.pending = null;
+        this.bar0 = bar;
+      }
       if (bar !== this.bar) {
         this.bar = bar;
+        this.pb = bar - this.bar0;
         this.def.onBar(this, bar, this.next);
       }
-      this.def.onStep(this, this.n % 16, this.next);
-      this.next += st;
+      // Swing delays the off-beat eighths.
+      this.def.onStep(this, s, s % 4 === 2 && this.swing ? this.next + this.swing * this.step : this.next);
+      this.next += this.step;
       this.n++;
     }
   }
@@ -1673,6 +1943,7 @@ class Engine {
     this.dyingLoops = [];
     this.track = null;
     this.trackName = 'none';
+    this.theme = 0;
     this.oldTracks = [];
     this.slow = 0;
     this.sag = 1;
@@ -1857,6 +2128,11 @@ class Engine {
     if (this.track) this.stats.tracks++;
   }
 
+  setTheme(n) {
+    this.theme = n;
+    if (this.track) this.track.setTheme(n);
+  }
+
   setSlowmo(k) {
     k = clamp(num(k, 0), 0, 1);
     if (Math.abs(k - this.slow) < 0.002 && !(k === 0 && this.slow !== 0)) return;
@@ -1913,6 +2189,7 @@ function setParams(node, values) {
 
 let live = null;
 const prefs = { master: 1, sfx: 1, music: 1 };
+let themePref = 0; // remembered so a setTheme() before init() still applies
 let warnings = 0;
 
 function guard(fn) {
@@ -1932,6 +2209,7 @@ export const audio = {
         if (!AC) return;
         live = new Engine(new AC({ latencyHint: 'interactive' }));
         live.setVolumes(prefs);
+        live.setTheme(themePref);
       }
       if (live.ctx.state !== 'running') {
         const p = live.ctx.resume();
@@ -1950,6 +2228,12 @@ export const audio = {
   },
   music(track, intensity) {
     if (live) guard(() => live.music(track, intensity));
+  },
+  // Sector music theme: any integer, wrapped to the theme count. Applies at the next bar.
+  setTheme(n) {
+    if (typeof n !== 'number' || !Number.isFinite(n)) return;
+    themePref = wrapTheme(n);
+    if (live) guard(() => live.setTheme(themePref));
   },
   setSlowmo(k) {
     if (live) guard(() => live.setSlowmo(k));
@@ -1973,6 +2257,7 @@ function facade(e) {
     hum: (id, p) => e.hum(id, p),
     loop: (n, on, o) => e.loop(n, on, o),
     music: (t, i) => e.music(t, i),
+    setTheme: (n) => typeof n === 'number' && Number.isFinite(n) && e.setTheme(wrapTheme(n)),
     setSlowmo: (k) => e.setSlowmo(k),
     setVolumes: (v) => e.setVolumes({ ...prefs, ...v }),
     update: (dt) => e.update(dt),
@@ -1983,6 +2268,7 @@ export const audioDev = {
   names: Object.keys(SFX),
   loops: Object.keys(LOOPS),
   tracks: Object.keys(TRACKS),
+  themes: THEMES.length,
   limits: { RATE_LIMIT, VOICE_CAP, HUM_CAP, HUM_TIMEOUT },
   live: () => live,
   stats() {
