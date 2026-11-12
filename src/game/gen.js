@@ -139,6 +139,7 @@ function buildRules(s, roster, r) {
     rider: () => { const a = from(riders), b = from(mounts); return a && b ? [a, b] : null; },
     pack: () => { const b = from(packs.filter((p) => p.beast)) || from(packs), a = from(leaders.filter((p) => p !== b)); return a && b ? [a, b] : null; },
     ward: () => { const a = from(shots) || from(all.filter((p) => p.cost <= 1.7)), b = from(heavy.filter((p) => p !== a)); return a && b ? [a, b] : null; },
+    mend: () => { const a = from(all.filter((p) => p.cost <= 2 && p.kind !== 'initiate')), b = from(heavy.filter((p) => p !== a)); return a && b ? [a, b] : null; },
     avenger: () => { const a = from(mid), b = from(mid.filter((p) => p !== a)); return a && b ? [a, b] : null; },
     cover: () => { const a = from(shields), b = from(shots.filter((p) => p !== a)); return a && b ? [a, b] : null; },
     combo: () => { const a = from(heavy), b = from(mid.filter((p) => p !== a && p.cost < (a ? a.cost : 9))); return a && b ? [a, b] : null; },
@@ -147,7 +148,9 @@ function buildRules(s, roster, r) {
   const beast = all.find((p) => p.beast && own(p));
   const order = [];
   if (beast && def(beast).rideable) order.push('rider'); else if (beast && def(beast).info?.pack) order.push('pack');
-  for (const t of ['ward', 'avenger', 'cover', 'combo', 'pack', 'rider'].sort(() => r() - 0.5)) if (!order.includes(t)) order.push(t);
+  const rest = ['ward', 'mend', 'avenger', 'cover', 'combo', 'pack', 'rider'];
+  for (let i = rest.length - 1; i > 0; i--) { const j = (r() * (i + 1)) | 0; [rest[i], rest[j]] = [rest[j], rest[i]]; }
+  for (const t of rest) if (!order.includes(t)) order.push(t);
   const rules = [];
   for (const type of order) {
     if (rules.length >= 2) break;
@@ -214,7 +217,7 @@ function generateWave(pool, budget, r, o) {
       if (type) {
         temper = type === 'pack' && q.role ? 'aggressive' : null;
         if (type === 'pack') dx = side * (far + q.role * 70);
-        else if (type === 'ward') dx = side * (q.role ? far : far + 230);          // the warder hangs back behind its charge
+        else if (type === 'ward' || type === 'mend') dx = side * (q.role ? far : far + 230); // the warder or mender hangs back behind its charge
         else if (type === 'avenger') dx = (q.role ? -side : side) * far;
         else if (type === 'cover') dx = side * (q.role ? far + 210 : far);
         else if (type === 'combo') dx = side * (far + q.role * 90);

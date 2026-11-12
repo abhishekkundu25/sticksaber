@@ -4,6 +4,7 @@
 //             under it. A mount that loses its rider goes feral.
 //   pack      a leader emboldens its pack. Kill the leader and the pack's nerve breaks.
 //   ward      a warder halves and halves again the damage its charge takes. Kill the warder first.
+//   mend      a mender feeds its partner health through a green thread. Kill the mender first.
 //   avenger   two fighters are sworn to each other. When one dies the other enrages.
 //   cover     a shield carrier stands between the player and the shooter it guards.
 //   combo     one fighter waits for its partner's attack and strikes as it ends.
@@ -14,6 +15,7 @@ export const BONDS = {
   rider: { name: 'RIDER', color: null, hint: (a, b) => `${a} rides ${b}. Launch or knock the rider out of the saddle, or kill the mount under it` },
   pack: { name: 'PACK', color: '#ffd36b', hint: (a, b) => `${b} hunt as a pack behind ${a}. Kill the leader and their nerve breaks` },
   ward: { name: 'WARD', color: '#9fd0ff', hint: (a, b) => `${a} wards ${b}: while the link holds it takes a third of the damage. Kill the warder first` },
+  mend: { name: 'MENDER', color: '#7dffb0', hint: (a, b) => `${a} mends ${b}: its wounds close while the green thread holds. Kill the mender first` },
   avenger: { name: 'SWORN', color: '#ff8a30', hint: (a, b) => `${a} and ${b} are sworn to each other. When one falls the other enrages, so finish them close together` },
   cover: { name: 'COVER', color: null, hint: (a, b) => `${a} covers ${b}. Get past the shield, or throw something over it` },
   combo: { name: 'TANDEM', color: null, hint: (a, b) => `${a} and ${b} attack in tandem: the second strikes as the first one ends. Parry twice` },
@@ -31,6 +33,7 @@ export function bind(world, type, m, o = {}) {
     a.alpha = true; a.tag = 'ALPHA';
     for (let i = 1; i < m.length; i++) { m[i].rate *= 1.12; m[i].packOf = a; }
   } else if (type === 'ward') { b.ward = a; a.tag = 'WARDER'; }
+  else if (type === 'mend') a.tag = 'MENDER';
   else if (type === 'cover') { a.ai.guardOf = b; }
   else if (type === 'twins') {
     // One pool: both bodies show it, and `lit` is the one that can be hurt.
@@ -96,6 +99,14 @@ export function tickBonds(world, dt) {
           world.fx.text(b.x, b.j[1] - 46 * b.scale, 'WARD BROKEN', '#9fd0ff', 16, 1); world.fx.ring(b.cx, b.cy, 90, 12, 0.35, '#9fd0ff', 1, 4);
           world.sfx('tetherSnap', b.x);
           if (!b.rag && b.state !== 'custom') { b.setState('recoil', 0.7); b.posture += b.maxPosture * 0.3; }
+        }
+        break;
+      case 'mend':
+        if (a.dead || b.dead || a.remove || b.remove) { done = true; if (!a.dead) a.tag = null; else if (!b.dead) world.sfx('tetherSnap', b.x, 0.7); }
+        else {
+          // The thread only shows, and only heals, while there is something to mend and the two are in reach.
+          B.line = b.hp < b.maxHp && Math.abs(a.x - b.x) < 760 && !a.rag;
+          if (B.line) { b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.045 * dt); b.barT = Math.max(b.barT, 0.4); }
         }
         break;
       case 'avenger':
