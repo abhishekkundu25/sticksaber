@@ -241,6 +241,9 @@ class Voice {
     const c = this.ctx, g = o.g ?? 1, shaped = o.drive || o.curve;
     const len = envLen(o), p = o.abs ? 1 : this.p;
     const env = c.createGain();
+    // Closed from now, not just from t0: a source started between samples renders one
+    // interpolated sample before t0, which the default gain of 1 would pass as a click.
+    env.gain.value = 0;
     envelope(env.gain, t0, o, shaped ? 1 : g);
     for (const s of srcs) s.connect(env);
     let node = env;
@@ -679,6 +682,113 @@ const SFX = {
     v.crackle({ d: 0.35, g: 0.35 });
   } },
 
+  // ----- Floors 4-10 enemies -----
+  // Pike lunge: a long, narrow, rising band of air, then a faint inharmonic ring off the tip.
+  thrust: { vary: 0.06, fn(v) {
+    const d = v.r(0.34, 0.4), pk = d * 0.32;
+    v.noise({ gp: [[0, 0], [pk, 1], [d * 0.6, 0.45], [d, 0]], g: 0.6, bp: { pts: [[0, 700], [pk, 3400], [d, 1500]], q: 3.2 } });
+    v.noise({ color: 'pink', gp: [[0, 0], [pk, 1], [d, 0]], g: 0.25, bp: { pts: [[0, 300], [pk, 900], [d, 400]], q: 2 } });
+    v.tone({ type: 'sawtooth', unison: [-7, 7], fp: [[0, 120], [pk, 210], [d, 150]], gp: [[0, 0], [pk, 1], [d, 0]], g: 0.07, bp: { pts: [[0, 700], [pk, 2400], [d, 900]], q: 2.5 } });
+    v.fm({ at: pk * 0.8, f: v.r(1850, 2050), ratio: 2.76, index: 1.4, index1: 0.1, a: 0.004, d: 0.32, g: 0.07 });
+    v.tone({ at: pk * 0.8, f: 4430, a: 0.004, d: 0.2, g: 0.02 });
+  } },
+  // Teleport: air sucked in and cut dead (a reversed whoosh), then a glassy shimmer. Rising and
+  // late-peaking where `dash` falls and peaks early, so the two never read alike.
+  blink: { vary: 0.03, pri: 2, rev: 0.3, fn(v) {
+    const D = 0.16;
+    v.noise({ gp: [[0, 0], [D * 0.6, 0.35], [D, 1], [D + 0.008, 0]], g: 0.5, bp: { pts: [[0, 700], [D, 5200]], q: 2.2 } });
+    v.noise({ color: 'pink', gp: [[0, 0], [D, 1], [D + 0.008, 0]], g: 0.2, bp: { pts: [[0, 300], [D, 1600]], q: 1.5 } });
+    v.tone({ fp: [[0, 900], [D, 2600]], gp: [[0, 0], [D, 1], [D + 0.01, 0]], g: 0.06 });
+    v.tone({ at: D, f: 3520, unison: [0, 17], a: 0.004, d: 0.3, g: 0.05, am: { rate: 19, depth: 0.5 } });
+    v.tone({ at: D, f: 5274, a: 0.004, d: 0.2, g: 0.025 });
+    v.shards(5, 0.06, 3500, 7500, 0.05, D);
+  } },
+  // A drone tipping into a dive: a falling, slightly wobbling whine with a rush of air under it.
+  droneDive: { vary: 0.05, fn(v) {
+    const D = 0.5, gp = [[0, 0], [0.04, 0.7], [0.36, 1], [D, 0]];
+    v.tone({ type: 'sawtooth', unison: [-12, 12], fp: [[0, 1700], [D, 560]], gp, g: 0.09, vib: { rate: 26, depth: 25 }, bp: { pts: [[0, 2400], [D, 900]], q: 2 } });
+    v.tone({ fp: [[0, 3400], [D, 1120]], gp, g: 0.05, vib: { rate: 26, depth: 25 } });
+    v.noise({ gp, g: 0.3, bp: { pts: [[0, 1500], [D, 4000]], q: 1.4 } });
+  } },
+  // Launcher: a hollow tube thunk, then a short rising whistle as the glob leaves.
+  lob: { vary: 0.07, fn(v) {
+    v.click({ g: 0.3, hp: 1500, d: 0.008 });
+    v.thump(190, 85, 0.12, 0.8, { drive: 0.3 });
+    v.noise({ a: 0.001, d: 0.09, g: 0.7, bp: { f: 420, q: 6 } });
+    v.tone({ type: 'triangle', f: 330, to: 260, a: 0.001, d: 0.08, g: 0.2 });
+    v.tone({ at: 0.04, fp: [[0, 900], [0.25, 1750]], gp: [[0, 0], [0.06, 1], [0.25, 0]], g: 0.07 });
+    v.noise({ at: 0.04, gp: [[0, 0], [0.06, 1], [0.25, 0]], g: 0.18, bp: { pts: [[0, 900], [0.25, 1750]], q: 5 } });
+  } },
+  // Arming tick: tiny, dry and identical every time so a run of them reads as a countdown.
+  beep: { vary: 0, fn(v) {
+    v.tone({ type: 'square', f: 3150, a: 0.0005, h: 0.022, d: 0.015, g: 0.12, lp: 6500 });
+    v.tone({ f: 3150, a: 0.0005, h: 0.022, d: 0.015, g: 0.15 });
+  } },
+  explode: { vary: 0.07, pri: 2, rev: 0.18, fn(v) {
+    v.click({ g: 0.8, hp: 1500, d: 0.012 });
+    v.thump(v.r(125, 145), 40, 0.38, 1, { drive: 0.75, h: 0.02 });
+    v.noise({ color: 'brown', a: 0.001, d: 0.32, g: 0.9, lp: { f: 3500, to: 220 } });
+    v.noise({ color: 'pink', a: 0.001, d: 0.2, g: 0.5, bp: { f: 1100, to: 500, q: 0.8 } });
+    v.crackle({ d: v.r(0.45, 0.55), g: 0.55, bp: { f: v.r(1800, 2600), q: 0.6 } });
+    v.crackle({ at: 0.03, d: 0.3, g: 0.3, hp: 5000 });
+  } },
+  // Flame column: a fast-attack roar of filtered noise over a driven low growl.
+  pillar: { vary: 0.05, pri: 2, rev: 0.2, fn(v) {
+    const gp = [[0, 0], [0.015, 1], [0.12, 0.8], [0.35, 0.5], [0.75, 0]];
+    v.thump(110, 45, 0.25, 0.7, { drive: 0.5 });
+    v.noise({ color: 'pink', gp, g: 0.8, lp: { pts: [[0, 7000], [0.75, 700]] }, hp: 120 });
+    v.noise({ gp, g: 0.3, bp: { pts: [[0, 600], [0.1, 2800], [0.75, 1200]], q: 1.3 } });
+    v.tone({ type: 'sawtooth', unison: [-18, 0, 17], fp: [[0, 70], [0.1, 85], [0.75, 52]], gp, g: 0.12, drive: 0.9, lp: { pts: [[0, 1800], [0.75, 300]] }, am: { rate: 27, depth: 0.3 } });
+    v.crackle({ d: 0.7, g: 0.5, bp: { f: 2400, q: 0.6 } });
+  } },
+  // The heaviest hit in the game: a forge-hammer clang (inharmonic FM partials) over a deep thud.
+  hammer: { vary: 0.04, pri: 2, rev: 0.25, fn(v) {
+    v.click({ g: 0.5, hp: 1200, d: 0.015 });
+    v.thump(98, 27, 0.85, 1, { drive: 0.9, h: 0.05 });
+    v.tone({ f: 38, a: 0.01, h: 0.1, d: 1.0, g: 0.5 });
+    v.noise({ color: 'brown', a: 0.001, d: 0.55, g: 1, lp: { f: 2200, to: 120 } });
+    v.fm({ f: v.r(410, 440), ratio: 1.41, index: 5, index1: 0.5, it: 0.5, a: 0.001, d: 1.2, g: 0.2 });
+    v.fm({ f: 1130, ratio: 2.76, index: 3, index1: 0.2, a: 0.001, d: 0.8, g: 0.1 });
+    v.tone({ f: 1597, a: 0.001, d: 0.5, g: 0.04 });
+    v.tone({ f: 2741, a: 0.001, d: 0.3, g: 0.025 });
+    v.noise({ a: 0.0005, d: 0.06, g: 0.5, bp: { f: 2600, q: 1.2 } });
+    v.crackle({ d: 0.4, g: 0.3, bp: { f: 3000, q: 0.7 } });
+  } },
+  // Blade heating: a sizzle and a tone that climb together. opts.pitch scales the whole thing,
+  // and the level, so the boss combo's 1 / 1.15 / 1.3 steps climb audibly and keep their length.
+  heatUp: { vary: 0.01, pri: 2, rev: 0.15, fn(v) {
+    const D = 0.5, gp = [[0, 0], [0.38, 1], [D, 0]], k = clamp(v.p, 0.5, 1.6);
+    v.noise({ gp, g: 0.4 * k, bp: { pts: [[0, 2800], [D, 6500]], q: 1.2 } });
+    v.crackle({ gp: [[0, 0], [0.4, 1], [D, 0]], g: 0.45 * k, bp: { pts: [[0, 2500], [D, 5500]], q: 0.8 } });
+    v.tone({ type: 'sawtooth', unison: [-8, 8], fp: [[0, 220], [D, 660]], gp, g: 0.1 * k, bp: { pts: [[0, 600], [D, 2400]], q: 3 } });
+    v.tone({ fp: [[0, 440], [D, 1320]], gp, g: 0.11 * k, vib: { rate: 14, depth: 18 } });
+  } },
+  // Steam vent: a valve pop then a long falling hiss with a faint whistle. The boss's punish cue.
+  vent: { vary: 0.03, pri: 2, rev: 0.15, fn(v) {
+    const D = 1.2, gp = [[0, 0], [0.02, 1], [0.3, 0.8], [0.8, 0.35], [D, 0]];
+    v.thump(150, 70, 0.08, 0.45);
+    v.noise({ gp, g: 0.55, bp: { pts: [[0, 7000], [D, 1400]], q: 1 }, am: { rate: 11, depth: 0.15 } });
+    v.noise({ gp, g: 0.2, hp: { f: 6000, to: 2500, ft: D } });
+    v.tone({ fp: [[0, 2300], [D, 750]], gp: [[0, 0], [0.08, 1], [0.6, 0.5], [D, 0]], g: 0.025, vib: { rate: 7, depth: 30 } });
+  } },
+  // Afterimage: swingHeavy's shape, an octave-ish lower, narrow-band (hollow) and doubled.
+  echo: { vary: 0.05, rev: 0.6, fn(v) {
+    const d = v.r(0.36, 0.42), pk = d * 0.45;
+    for (const [at, g] of [[0, 1], [0.09, 0.45]]) {
+      v.whoosh({ at, d, g: 0.6 * g, color: 'pink', lo: 160, hi: v.r(800, 950), end: 220, q: 3.5, peak: 0.45 });
+      v.tone({ at, fp: [[0, 40], [pk, 66], [d, 38]], gp: [[0, 0], [pk, 1], [d, 0]], g: 0.25 * g });
+      v.tone({ at, type: 'triangle', unison: [-14, 13], fp: [[0, 110], [pk, 190], [d, 100]], gp: [[0, 0], [pk, 1], [d, 0]], g: 0.08 * g, bp: { pts: [[0, 300], [pk, 900], [d, 300]], q: 4 } });
+    }
+  } },
+  // Elite arrival: a low hit, a dissonant swell and one cold high tone.
+  elite: { vary: 0, pri: 2, rev: 0.4, fn(v) {
+    v.thump(80, 32, 0.7, 0.8, { drive: 0.5 });
+    v.chord([38, 39, 45], { gp: [[0, 0], [0.12, 1], [0.6, 0.6], [1.4, 0]], g: 0.05, lp: { pts: [[0, 300], [0.15, 1600], [1.4, 250]] } });
+    v.tone({ f: mtof(38), a: 0.02, h: 0.2, d: 0.9, g: 0.25 });
+    v.fm({ at: 0.05, f: mtof(87), ratio: 2.414, index: 1.2, index1: 0.05, a: 0.003, d: 1.1, g: 0.06 });
+    v.tone({ at: 0.05, f: mtof(86), unison: [0, 9], a: 0.05, d: 1.0, g: 0.02, am: { rate: 6, depth: 0.4 } });
+  } },
+
   // ----- Player and UI -----
   hurt: { vary: 0.06, fn(v) {
     v.click({ g: 0.4, d: 0.008 });
@@ -754,6 +864,7 @@ const MIX = {
   jump: .7, doubleJump: 1.5, dash: .81, land: .36, landHeavy: .37, footstep: .12, thud: .4, bounce: .49, wallSplat: .43,
   telegraph: 1.76, telegraphRed: 1,
   bolt: .69, boltReflect: .85, shockwave: .53, slam: .36, bossRoar: .39, bossPhase: .56, healDone: 1, healInterrupt: .58, adapt: 1, stagger: .56,
+  thrust: 1.13, blink: 1.3, droneDive: 1.2, lob: .34, beep: .75, explode: .32, pillar: .54, hammer: .4, heatUp: .85, vent: .68, echo: .83, elite: .42,
   hurt: .47, death: .41, perfectDodge: 1.1, focus: 1.28, rankUp: 1.84, waveClear: 1.53, victory: .95, uiMove: .5, uiSelect: .74, heal: 1.76,
 };
 
@@ -1128,6 +1239,14 @@ const INST = {
     v.fm({ f, ratio: 3.5, index: 1.2, index1: 0.05, a: 0.003, d: 2.6, g: 0.06 * vel });
     v.tone({ f: f * 2.003, a: 0.003, d: 1.2, g: 0.02 * vel });
   },
+  // Struck steel: inharmonic FM partials with a short ring, for the forge track's off-beats.
+  anvil(tr, t, f, vel, dest) {
+    const v = tr.voice(t, dest);
+    v.fm({ f, ratio: 1.41, index: 3.5, index1: 0.3, a: 0.001, d: 0.24, g: 0.05 * vel });
+    v.tone({ f: f * 2.29, a: 0.001, d: 0.12, g: 0.014 * vel });
+    v.noise({ a: 0.0005, d: 0.025, g: 0.07 * vel, bp: { f: 3200, q: 1.2 } });
+    v.tone({ f: 190, to: 120, a: 0.001, d: 0.06, g: 0.08 * vel });
+  },
   riser(tr, t, dur, dest) {
     tr.voice(t, dest).noise({ gp: [[0, 0], [dur * 0.95, 1], [dur, 0]], g: 0.12, bp: { f: 300, to: 5000, ft: dur, q: 1.5 } });
   },
@@ -1245,7 +1364,7 @@ const TRACKS = {
   combat: {
     step: 60 / 112 / 4, rev: 0.2, root: 50,
     layers: ['pad', 'bass', 'hats', 'drums', 'arp', 'perc'],
-    trim: { pad: 1.4, bass: 0.72, hats: 2.5, drums: 0.43, arp: 2.5, perc: 0.6 },
+    trim: { pad: 1.4, bass: 0.62, hats: 2.5, drums: 0.39, arp: 2.5, perc: 0.6 },
     progs: [['i', 'VI', 'III', 'VII'], ['i', 'VI', 'iv', 'V'], ['i', 'iv', 'VII', 'III'], ['i', 'VII', 'VI', 'V'], ['VI', 'VII', 'i', 'i'], ['i', 'i', 'VI', 'VII'], ['iv', 'VI', 'V', 'i'], ['i', 'III', 'iv', 'V']],
     kicks: ['x.......x.......', 'x.......x..x....', 'x..x....x.......', 'x.....x...x.....', 'x.......x.....x.'],
     bassPats: (I) => (I < 0.3
@@ -1363,6 +1482,76 @@ const TRACKS = {
       if (lv.arp > 0.01 && Math.random() > 0.05) {
         const idx = tr.arpPat[s % tr.arpPat.length];
         INST.pluck(tr, ht(), root + tr.arpOct + arpNote(ch, idx), s % 4 === 0 ? 1 : 0.65, tr.arpIn, 'sawtooth');
+      }
+    },
+  },
+
+  // Forge master: G minor (the dominant of boss's C minor), slower and heavier, with anvil
+  // strikes on the off-beat eighths, a crushed bass and a bit-reduced ostinato.
+  boss2: {
+    step: 60 / 120 / 4, rev: 0.2, root: 43,
+    layers: ['pad', 'bass', 'anvil', 'drums', 'hats', 'arp', 'perc'],
+    trim: { pad: 1.1, bass: 0.22, anvil: 1, hats: 2.2, drums: 0.3, arp: 2.5, perc: 0.38 },
+    progs: [['i', 'i', 'bII', 'i'], ['i', 'VI', 'v', 'i'], ['i', 'iv', 'bII', 'V'], ['i', 'VII', 'VI', 'bII'], ['VI', 'bII', 'V', 'i'], ['i', 'iv', 'i', 'V']],
+    kicks: ['x.....x...x.....', 'x..x..x...x..x..', 'x.....x.x.......', 'x...x...x...x...', 'x.x...x...x...x.'],
+    bassPats: (I) => (I < 0.35
+      ? ['R.......R.......', 'R.....R.R.......', 'R...R...R...R...']
+      : ['R.RRR.RRR.RRR.RR', 'RR.RRR.RRR.RRROF', 'R..RR..RR..RR.TF', 'RRORRRORRRORRRRF']),
+    levels: (I) => ({
+      pad: 0.75 - 0.15 * I, bass: 0.5 + 0.5 * smooth(I, 0, 0.25), anvil: smooth(I, 0.1, 0.35),
+      drums: smooth(I, 0.2, 0.45), hats: smooth(I, 0.3, 0.55), arp: smooth(I, 0.55, 0.8), perc: smooth(I, 0.7, 0.95),
+    }),
+    setup(tr) {
+      const c = tr.e.ctx;
+      tr.padIn = tr.node(filterNode(c, 'lowpass', 650, 4));
+      tr.padIn.connect(tr.L.pad);
+      tr.bassIn = tr.node(gainNode(c, 1));
+      const sh = tr.node(c.createWaveShaper());
+      sh.curve = driveCurve(1);
+      const lp = tr.node(filterNode(c, 'lowpass', 1100, 2)), lv = tr.node(gainNode(c, 0.6));
+      tr.bassIn.connect(sh);
+      sh.connect(lp);
+      lp.connect(lv);
+      lv.connect(tr.L.bass);
+      tr.arpIn = tr.node(c.createWaveShaper());
+      tr.arpIn.curve = crushCurve();
+      const alp = tr.node(filterNode(c, 'lowpass', 3000));
+      tr.arpIn.connect(alp);
+      alp.connect(tr.L.arp);
+      tr.L.arp.connect(delayLine(tr, tr.def.step * 3, 0.28, 0.3));
+      tr.L.anvil.connect(delayLine(tr, tr.def.step * 2, 0.18, 0.22));
+    },
+    onBar: phraseBar,
+    onStep(tr, s, t) {
+      const { root, step } = tr.def, lv = tr.lv, I = tr.I, ch = tr.chord, brk = tr.section === 'break';
+      const ht = () => t + rnd(-0.003, 0.004);
+      if (s === 0 && lv.pad > 0.01) {
+        INST.pad(tr, t, [root + ch[0], root + 12 + ch[0], root + 12 + ch[1], root + 12 + ch[2]], tr.barDur * 1.02, tr.padIn, 0.04, 'sawtooth', [-10, 0, 9]);
+        if (tr.bar % 4 === 0 && lv.perc > 0.01 && !brk) INST.boom(tr, t);
+      }
+      if (lv.bass > 0.01) {
+        const b = brk ? (s % 8 === 0 ? 'R' : '.') : tr.bassPat[s];
+        if (b !== '.') INST.bass(tr, t, root - 12 + bassNote(b, ch), step * (brk ? 6 : 1.2), s % 4 === 0 ? 1 : 0.8, 0.35 + 0.65 * I);
+      }
+      if (lv.anvil > 0.01 && s % 4 === 2 && (!brk || s === 14)) {
+        const accent = s === 6 || s === 14;
+        INST.anvil(tr, ht(), mtof(root + 36 + ch[0]) * (accent ? 1 : 1.06), accent ? 1 : rnd(0.6, 0.75), tr.L.anvil);
+      }
+      const drums = !brk && !(tr.drop && s >= 8) && lv.drums > 0.01;
+      if (drums) {
+        const half = I < 0.4;
+        if (half ? s === 0 || s === 11 : tr.kickPat[s] === 'x') INST.kick(tr, t, s === 0 ? 1 : 0.85, true);
+        if (half ? s === 8 : s === 4 || s === 12) INST.snare(tr, ht(), 1, true);
+        else if (tr.fill && s >= 12) INST.snare(tr, t, 0.4 + (s - 12) * 0.15, true);
+      }
+      if (lv.hats > 0.01 && (s % 2 === 0 || I > 0.8)) INST.hat(tr, ht(), s % 4 === 2 ? 0.9 : s % 2 ? 0.35 : 0.55);
+      if (lv.perc > 0.01) {
+        if (tr.fill && s >= 8 && s % 2 === 0) INST.tom(tr, t, 130 - (s - 8) * 9, 0.9);
+        if (s === 15 && Math.random() < 0.35) INST.hat(tr, t, 1.2, true, tr.L.perc);
+      }
+      if (lv.arp > 0.01 && s % 2 === 0 && Math.random() > 0.08) {
+        const idx = tr.arpPat[(s / 2) % tr.arpPat.length];
+        INST.pluck(tr, ht(), root + 12 + tr.arpOct + arpNote(ch, idx), s % 4 === 0 ? 1 : 0.7, tr.arpIn);
       }
     },
   },

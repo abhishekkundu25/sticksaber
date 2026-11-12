@@ -17,10 +17,12 @@ const GROUPS = {
   Movement: ['jump', 'doubleJump', 'dash', 'land', 'landHeavy', 'footstep', 'thud', 'bounce', 'wallSplat'],
   Warnings: ['telegraph', 'telegraphRed'],
   'Enemies & boss': ['bolt', 'boltReflect', 'shockwave', 'slam', 'bossRoar', 'bossPhase', 'healDone', 'healInterrupt', 'adapt', 'stagger'],
+  'Floors 4-10': ['thrust', 'blink', 'droneDive', 'lob', 'beep', 'explode', 'pillar', 'elite'],
+  'Forge master': ['hammer', 'heatUp', 'vent', 'echo'],
   'Player & UI': ['hurt', 'death', 'perfectDodge', 'focus', 'rankUp', 'waveClear', 'victory', 'uiMove', 'uiSelect', 'heal'],
 };
 const LOOP_NAMES = ['heal', 'throw', 'rain'];
-const TRACK_NAMES = ['menu', 'combat', 'boss'];
+const TRACK_NAMES = ['menu', 'combat', 'boss', 'boss2'];
 
 // Longest acceptable dry length (to -60 dBFS) per sound; anything unlisted gets DEFAULT_LIMIT.
 const DEFAULT_LIMIT = 1.2;
@@ -30,6 +32,15 @@ const LIMIT = {
   kill: 1.6, sever: 1.3, parry: 1.6, guardBreak: 1.2, shockwave: 1.6, slam: 1.2,
   bossRoar: 2.0, bossPhase: 2.8, healDone: 1.6, adapt: 1.4, death: 2.4, perfectDodge: 1.2,
   rankUp: 1.0, waveClear: 2.2, victory: 3.2, heal: 1.2,
+  thrust: 0.5, blink: 0.5, droneDive: 0.65, lob: 0.4, beep: 0.08, explode: 0.8, pillar: 1.0, elite: 1.7,
+  hammer: 1.4, heatUp: 0.7, vent: 1.5, echo: 0.7,
+};
+// Sequences the game plays; the soundboard has a button for each.
+const SEQUENCES = {
+  'heatUp x3': [[0, 'heatUp', { pitch: 1 }], [0.6, 'heatUp', { pitch: 1.15 }], [1.2, 'heatUp', { pitch: 1.3 }]],
+  grenade: [[0, 'lob'], [0.45, 'beep'], [0.7, 'beep'], [0.9, 'beep'], [1.05, 'beep'], [1.15, 'beep'], [1.25, 'explode']],
+  'hammer + vent': [[0, 'hammer'], [0.9, 'vent']],
+  'blink out/in': [[0, 'blink'], [0.7, 'blink'], [0.9, 'thrust']],
 };
 const SILENCE = 0.001; // -60 dBFS
 const WARM = 0.5;
@@ -64,6 +75,8 @@ async function runNode() {
     m.audio.setSlowmo(0.5);
     m.audio.setVolumes({ master: 0.5 });
     m.audio.play('hitHeavy', { vol: 1, pitch: 1, pan: 0 });
+    m.audio.play('vent');
+    m.audio.music('boss2', 0.5);
     m.audio.update(0.016);
     console.log('PASS  node import: every method is a silent no-op');
   } catch (err) {
@@ -164,6 +177,15 @@ async function runPage() {
       row.append(b);
     }
     sfx.append(h, row);
+  }
+  for (const [label, seq] of Object.entries(SEQUENCES)) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.onclick = () => {
+      start();
+      for (const [at, name, o] of seq) setTimeout(() => audio.play(name, { pan: val('pan'), ...o }), at * 1000);
+    };
+    $('seq').append(b);
   }
   for (const name of LOOP_NAMES) {
     const b = document.createElement('button');
@@ -305,6 +327,59 @@ async function runPage() {
       check('setVolumes: sfx 0 silences one-shots', analyze(muted.buffer).peak < SILENCE, `peak ${fmtDb(analyze(muted.buffer).peak)} dBFS`);
     }
 
+    // New sounds: what the game relies on beyond the per-sound checks.
+    {
+      const by = Object.fromEntries(R.sounds.map((s) => [s.name, s]));
+      const zcr = (buf) => (analyze(buf).hf * buf.sampleRate) / (2 * Math.PI);
+      // Spectral centroid from 200 Hz to 2.5 kHz, where heatUp's climbing tones sit (Goertzel
+      // scan, 10 Hz steps).
+      const centroid = (buf, from, to) => {
+        const sr = buf.sampleRate, d = buf.getChannelData(0).subarray(Math.floor(from * sr), Math.floor(to * sr));
+        let sum = 0, wsum = 0;
+        for (let f = 200; f <= 2500; f += 10) {
+          const k = 2 * Math.cos((2 * Math.PI * f) / sr);
+          let s1 = 0, s2 = 0;
+          for (let i = 0; i < d.length; i++) { const s0 = d[i] + k * s1 - s2; s2 = s1; s1 = s0; }
+          const m = s1 * s1 + s2 * s2 - k * s1 * s2;
+          sum += m;
+          wsum += m * f;
+        }
+        return wsum / sum;
+      };
+      const heat = [];
+      for (const pitch of [1, 1.15, 1.3]) {
+        const r = await audioDev.render({ seconds: 1, dry: true, script: (a) => a.play('heatUp', { pitch }) });
+        heat.push({ hz: centroid(r.buffer, 0.2, 0.45), ...analyze(r.buffer) });
+      }
+      check('heatUp: pitch 1 / 1.15 / 1.3 climb in spectrum, keep length, stay unclipped',
+        heat[1].hz > heat[0].hz * 1.07 && heat[2].hz > heat[1].hz * 1.07 && heat.every((h) => Math.abs(h.dur - heat[0].dur) < 0.05 && h.peak < 1),
+        heat.map((h) => `~${h.hz.toFixed(0)} Hz ${h.dur.toFixed(2)} s ${fmtDb(h.peak)} dBFS`).join(' | '));
+      // When the loudest 20 ms is centred, in seconds after the trigger.
+      const peakAt = (buf) => {
+        const d = buf.getChannelData(0), win = Math.floor(buf.sampleRate * 0.02);
+        let best = 0, at = 0, e = 0;
+        for (let i = 0; i < d.length; i++) {
+          e += d[i] * d[i];
+          if (i >= win) e -= d[i - win] * d[i - win];
+          if (e > best) { best = e; at = i; }
+        }
+        return at / buf.sampleRate - 0.01;
+      };
+      const bl = await audioDev.render({ seconds: 1, dry: true, script: (a) => a.play('blink') });
+      const da = await audioDev.render({ seconds: 1, dry: true, script: (a) => a.play('dash') });
+      const pb = peakAt(bl.buffer), pd = peakAt(da.buffer);
+      check('blink vs dash: blink swells to a late cut, dash peaks early and is darker', pb > 0.11 && pd < 0.11 && zcr(bl.buffer) > zcr(da.buffer) * 1.1,
+        `loudest at ${(pb * 1000).toFixed(0)} ms vs ${(pd * 1000).toFixed(0)} ms, brightness ~${zcr(bl.buffer).toFixed(0)} vs ~${zcr(da.buffer).toFixed(0)} Hz`);
+      const beeps = await audioDev.render({ seconds: 1.2, dry: true, fps: 60, script: (a, t, i) => i < 48 && i % 6 === 0 && a.play('beep') });
+      const bp = analyze(beeps.buffer);
+      check('beep: 8 ticks 100 ms apart all play, none limited or dropped', beeps.engine.stats.played === 8 && !beeps.engine.stats.limited && !beeps.engine.stats.dropped && bp.peak < 1,
+        `${JSON.stringify(beeps.engine.stats)} peak ${fmtDb(bp.peak)} dBFS`);
+      check('impact scale: explode is shorter and quieter than slam; hammer is louder than slam',
+        by.explode.loud < by.slam.loud && by.explode.dryDur < by.slam.dryDur && by.hammer.loud > by.slam.loud,
+        `loudest 50 ms: explode ${fmtDb(by.explode.loud)}, slam ${fmtDb(by.slam.loud)}, hammer ${fmtDb(by.hammer.loud)} dB`);
+      check('vent: long enough to mark the punish window', by.vent.dryDur > 1 && by.vent.dryDur < 1.5, `${by.vent.dryDur.toFixed(2)} s`);
+    }
+
     // Rate limit and polyphony.
     {
       const r = await audioDev.render({ seconds: 0.2, dry: true, script: (a) => { for (let i = 0; i < 10; i++) a.play('hitLight'); } });
@@ -376,11 +451,14 @@ async function runPage() {
     }
     check('music: combat intensity adds layers', musicRms.combat1 > musicRms.combat0 * 1.4, `${fmtDb(musicRms.combat0)} -> ${fmtDb(musicRms.combat1)} dBFS`);
     check('music: boss intensity adds layers', musicRms.boss1 > musicRms.boss0 * 1.4, `${fmtDb(musicRms.boss0)} -> ${fmtDb(musicRms.boss1)} dBFS`);
+    check('music: boss2 intensity adds layers', musicRms.boss21 > musicRms.boss20 * 1.4, `${fmtDb(musicRms.boss20)} -> ${fmtDb(musicRms.boss21)} dBFS`);
     {
-      const r = await audioDev.render({ seconds: 8, fps: 30, script: (a, t) => a.music(t < 3 ? 'combat' : 'boss', 0.7) });
-      const mid = analyze(r.buffer, 3, 4.5), before = analyze(r.buffer, 1.5, 3);
-      check('music: combat -> boss crossfades without a gap and frees the old track', mid.rms > before.rms * 0.4 && r.engine.oldTracks.length === 0 && r.engine.stats.tracks === 2,
-        `rms before ${fmtDb(before.rms)}, during ${fmtDb(mid.rms)} dBFS, old tracks left ${r.engine.oldTracks.length}`);
+      for (const [from, to] of [['combat', 'boss'], ['boss', 'boss2']]) {
+        const r = await audioDev.render({ seconds: 8, fps: 30, script: (a, t) => a.music(t < 3 ? from : to, 0.7) });
+        const mid = analyze(r.buffer, 3, 4.5), before = analyze(r.buffer, 1.5, 3);
+        check(`music: ${from} -> ${to} crossfades without a gap and frees the old track`, mid.rms > before.rms * 0.4 && r.engine.oldTracks.length === 0 && r.engine.stats.tracks === 2,
+          `rms before ${fmtDb(before.rms)}, during ${fmtDb(mid.rms)} dBFS, old tracks left ${r.engine.oldTracks.length}`);
+      }
       const r2 = await audioDev.render({ seconds: 7, fps: 30, script: (a, t) => a.music(t < 2 ? 'combat' : 'none', 0.8) });
       check("music: 'none' fades to silence", analyze(r2.buffer, 5.5, 7).peak < SILENCE, `peak ${fmtDb(analyze(r2.buffer, 5.5, 7).peak)} dBFS`);
     }
@@ -451,7 +529,7 @@ async function runPage() {
         hooks.delete(tick);
         check(`live: music ${track} (called every frame)`, p > 0.005, `peak ${fmtDb(p)} dBFS`);
       }
-      check('live: per-frame music() calls start each track once', audioDev.stats().tracks - tracksBefore === 3, `tracks started ${audioDev.stats().tracks - tracksBefore}`);
+      check('live: per-frame music() calls start each track once', audioDev.stats().tracks - tracksBefore === TRACK_NAMES.length, `tracks started ${audioDev.stats().tracks - tracksBefore}`);
       audio.setVolumes({ music: 0.5, sfx: 0.8 });
       audio.play('parry');
       audio.music('none');
