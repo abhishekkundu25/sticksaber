@@ -20,8 +20,8 @@ import { BotInput } from '../src/game/bot.js';
 // the machine; the counts are tight, because they do not.
 export const BUDGET = {
   simMicrosPerStep: 150,
-  high: { ms: 22, drawImage: 44, megapixels: 6.5 },
-  low: { ms: 13, drawImage: 44, megapixels: 6.5 },
+  high: { ms: 24, drawImage: 60, megapixels: 4.3 },
+  low: { ms: 22, drawImage: 16, megapixels: 2.6 },
 };
 const FRAMES = 90, W = 1280, H = 720;
 const report = process.argv.includes('--report');

@@ -71,6 +71,7 @@ try {
         lunge: (b) => b.move?.id === 'p_lunge' && b.mt > 0.55 && b.mt < 0.7, crescent: () => w.projectiles.list.some((q) => q.type === 'crescent' && q.life < q.max - 0.25),
         phase: (b) => b.double && b.state === 'custom' && b.st > 1.05, heal: () => w.bossChannel > 0.1, marker: () => w.marker?.lock,
         slam: (b) => b.move?.id === 'p_slam' && b.mt > 0.05, cyclone: (b) => b.move?.id === 'p_cyclone' && b.mt > 0.36, read: (b) => !!b.reads, broken: (b) => b.broken && b.st > 0.3,
+        echo: (b) => w.fighters.some((f) => f.phantom && f.state === 'attack' && f.mt > 0.3),
         dead: (b) => b.dead && b.deadT > 0.5, victory: () => g.director.state === 'victory' && g.director.t > 1.2,
       };
       for (let i = 0; i < 60 * 240 && Object.keys(out).length < Object.keys(want).length; i++) {

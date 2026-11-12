@@ -178,7 +178,18 @@ Colour also carries meaning. Cyan is the player. Each enemy type owns one blade 
 - The simulation sub-steps so no step exceeds 1/120 s at any refresh rate.
 - Sparks are recycled from a pool, and the per-frame paths create no gradients.
 
-PERF_TABLE
+Measured in headless Chrome on an Apple-silicon laptop, in the same crowded fight (nine fighters) before and after the performance work:
+
+| Setup | Before | After |
+| --- | --- | --- |
+| GPU off, 1280x720 | 21.9 ms per frame | 8.6 ms |
+| GPU off, 1920x1080 | 50.5 ms | 19.4 ms |
+| GPU on, 1280x720 | 0.67 ms | 0.62 ms |
+| GPU on, 1920x1080 | 0.88 ms | 0.69 ms |
+
+With the GPU off the game is about 2.5 times faster. With a working GPU it was already at 5% of the frame budget and barely changed. A little over half of the saving came from the arenas (merged layers and a baked floor reflection) and the rest from the glow compositing.
+
+The half-resolution backdrop tier cuts the pixels drawn per frame by 41% (3.83 to 2.25 megapixels at 720p) but saves little time in software raster, where it measured within noise of full resolution. It is kept as the first step down because it should matter on GPUs that are limited by fill rate. That has not been measured on such a machine.
 
 ## Tests
 

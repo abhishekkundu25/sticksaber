@@ -38,6 +38,7 @@ const SCRIPTS = {
   wraith: { enemy: 'wraith', dist: 380, live: true, keys: [], from: 60, frames: 150, every: 10, crop: [900, 360], dx: 60 },
   drone: { enemy: 'drone', dist: 300, live: true, keys: [], from: 150, frames: 220, every: 11, crop: [900, 520], dy: -150 },
   lancer: { enemy: 'lancer', dist: 300, live: true, keys: [], from: 40, frames: 150, every: 10, crop: [820, 360], dx: 130 },
+  echo: { enemy: 'proctor', dist: 300, live: true, p3: true, keys: [], from: 150, frames: 160, every: 10, crop: [1000, 420], dx: 150, dy: -40 },
   plunge: { enemy: 'dummy', dist: 90, keys: [[2, 'jump', 1], [20, 'jump', 0], [24, 'down', 1], [24, 'heavy', 1], [30, 'heavy', 0], [60, 'down', 0]], from: 20, frames: 72, every: 3, crop: [560, 520], dy: -130 },
 };
 
@@ -56,6 +57,7 @@ async function run(name) {
     }
     for (let i = 0; i < 40; i++) g.tick(1 / 60);
     if (sc.force) { e.face(p.x); e.startMove(sc.force); }
+    if (sc.p3) { e.ai.phase = 2; e.double = true; e.color = e.def.color2; e.hp = e.maxHp * 0.24; e.ai.heals = []; }
     const cv = document.getElementById('game'), [cw, ch] = sc.crop;
     const n = Math.ceil(sc.frames / sc.every), cols = Math.min(n, Math.max(4, Math.floor(2400 / cw))), rows = Math.ceil(n / cols);
     const sheet = document.createElement('canvas'); sheet.width = cols * cw * sc.z; sheet.height = rows * ch * sc.z;
