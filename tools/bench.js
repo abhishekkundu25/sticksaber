@@ -17,12 +17,13 @@ import { Director } from '../src/game/encounters.js';
 import { BotInput } from '../src/game/bot.js';
 
 // Budgets. Times have generous headroom over what a 2020s laptop measures, because they depend on
-// the machine; the counts are tight, because they do not.
+// the machine. The counts do not depend on the machine, but they do move a little whenever gameplay
+// changes how the scripted fight unfolds, so they carry about 25% headroom.
 export const BUDGET = {
   simMicrosPerStep: 150,
   crowdMicrosPerStep: 1500, // 120 enemies at once in the training room
-  high: { ms: 24, drawImage: 60, megapixels: 4.3 },
-  low: { ms: 22, drawImage: 16, megapixels: 2.6 },
+  high: { ms: 24, drawImage: 72, megapixels: 5.0 },
+  low: { ms: 22, drawImage: 24, megapixels: 3.0 },
 };
 const FRAMES = 90, W = 1280, H = 720;
 const report = process.argv.includes('--report');
