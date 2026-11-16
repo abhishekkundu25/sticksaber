@@ -7,6 +7,7 @@ import { POWERS } from '../game/powers.js';
 import { FORMS } from '../game/forms.js';
 
 const FONT = '"Avenir Next Condensed", "Bahnschrift", "DIN Condensed", "Roboto Condensed", "Arial Narrow", sans-serif';
+const PRESENTS = 'A B H I S H E K   K U N D U   P R E S E N T S';
 const RANK_COL = ['#8fa3b8', '#8fa3b8', '#9fe8ff', '#7dffb0', '#ffd36b', '#ff6bd6'];
 
 const MOVELIST = [
@@ -467,6 +468,13 @@ export class Hud {
     }
     ctx.fillStyle = this.menuGrad; ctx.fillRect(0, 0, W, H);
     const cx = W / 2, ty = 150;
+    // The credit fades in once, when the page first loads, with a hairline to each side.
+    const ca = clamp((this.t - 0.3) / 1.2, 0, 1), cw = this.width(ctx, PRESENTS, 13, 5) / 2 + 18;
+    ctx.globalAlpha = ca * 0.45; ctx.fillStyle = '#ffffff';
+    ctx.fillRect(cx - cw - 70, ty - 80, 70, 1); ctx.fillRect(cx + cw, ty - 80, 70, 1);
+    ctx.globalAlpha = ca;
+    this.text(ctx, PRESENTS, cx, ty - 80, 13, '#ffffffb0', 'center', 600, 5);
+    ctx.globalAlpha = 1;
     this.text(ctx, 'STICKSABER', cx, ty, 112, '#ffffff', 'center', 800, 18);
     // A lit blade under the title.
     const bw = 520, pulse = 0.85 + Math.sin(this.t * 3) * 0.15;
