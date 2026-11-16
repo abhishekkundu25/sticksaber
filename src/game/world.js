@@ -186,6 +186,7 @@ export class World {
     const at = f.rag ? f.rag.x[2] : f.x, q = this.inPit(at), x = this.solidX(at, 90), fx = this.fx;
     if (f.dead || f.def.thing || f.herd) { f.remove = true; return; }
     fx.beam(q ? clamp((q.x0 + q.x1) / 2, this.minX + 40, this.maxX - 40) : x, 0.5, f.isPlayer ? '#ff5060' : '#ffd36b'); this.sfx('ringOut', x);
+    if (f.isPlayer) this.lastHurt = { who: 'the drop', red: false, boss: false };
     if (!f.isPlayer && !f.def.boss && f.team !== 0) {
       f.hp = 0; if (!f.rag) f.toRagdoll(0, 200, 0);
       f.dead = true; f.remove = true;
@@ -739,6 +740,8 @@ export class World {
     const name = h.kind === 'launch' || h.kind === 'pop' ? 'hitLaunch' : h.kind === 'spike' ? 'hitSpike' : heavy ? 'hitHeavy' : 'hitLight';
     this.sfx(name, cx);
     if (B.isPlayer) {
+      // Remembered for the screen a fall shows: who did it, and whether it could have been blocked.
+      this.lastHurt = { who: A ? A.def.name : h.hazard ? 'the room itself' : 'something thrown', red: !!h.unblockable && !h.hazard, boss: !!A?.def.boss };
       this.style.hurt(); this.stats.hitsTaken++;
       this.rally = Math.min(B.maxHp - Math.max(0, B.hp), this.rally + dmg * 0.6); this.rallyT = 3.2;
       this.sfx('hurt', B.x); this.flashScreen('#ff2a3a', 0.25);
@@ -753,6 +756,9 @@ export class World {
         fx.ember(B.cx, B.cy, 8, '#ff3b5e'); fx.text(A.x, A.j[1] - 40 * A.scale, 'FEEDS', '#ff3b5e', 13, 0.7);
       }
     } else {
+      // The number by its health bar adds up for as long as the hits keep coming.
+      const run = this.time - (B.popAt ?? -9) < 0.8;
+      B.popV = (run ? B.popV : 0) + dmg; B.popCrit = !!info.crit || (run && B.popCrit); B.popAt = this.time;
       if (info.punished) fx.text(cx, cy - 62, 'PUNISH', '#ffd36b', 16, 0.8);
       if (info.glance) fx.text(cx, cy - 46, 'GLANCED', '#8fa3b8', 13, 0.6);
       const pl = this.hero || this.player;
@@ -761,6 +767,12 @@ export class World {
         if (this.rally > 0) { const r = Math.min(this.rally, dmg * 0.5); this.rally -= r; pl.hp = Math.min(pl.maxHp, pl.hp + r); }
         if (this.overdrive > 0) pl.hp = Math.min(pl.maxHp, pl.hp + 1.5);
         if (this.mods.leech) pl.hp = Math.min(pl.maxHp, pl.hp + this.mods.leech * this.mods.healK);
+        // A long combo is called out as it passes each mark.
+        const combo = this.style.combo;
+        if (combo === 25 || combo === 50 || combo === 100) {
+          fx.text(pl.x, pl.j[1] - 112, `${combo} HITS`, '#56e9ff', combo === 100 ? 30 : 24, 1.3); fx.ring(pl.cx, pl.cy, 20, 180 + combo, 0.4, '#56e9ff', 1, 4);
+          this.sfx('rankUp', pl.x, 0.9, 1 + combo / 200);
+        }
         // Live Wire: every fourth blade hit jumps to someone else.
         if (this.mods.arc && ++this.hitCount % 4 === 0) this.strike(B, WIRE_HIT, this.mods.arc, 320, '#c9a0ff', false);
         if (!pl.onGround && pl.state === 'attack' && pl.move.air && !pl.move.plunge) {
@@ -787,6 +799,13 @@ export class World {
     }
     this.stats.kills++;
     if (B.y < -60 || B.rag?.air) this.stats.airKills++;
+    // Kills in quick succession are called out, each one a note higher.
+    this.killRun = this.time - (this.killAt ?? -9) < 1.5 ? (this.killRun || 1) + 1 : 1; this.killAt = this.time;
+    if (this.killRun >= 2 && this.player && !this.player.dead && !this.training) {
+      const word = this.killRun === 2 ? 'DOUBLE' : this.killRun === 3 ? 'TRIPLE' : this.killRun === 4 ? 'QUADRUPLE' : 'RAMPAGE', pl0 = this.player;
+      fx.text(pl0.x, pl0.j[1] - 84, word, '#ffd36b', Math.min(28, 16 + this.killRun * 3), 1.1);
+      this.sfx('rankUp', pl0.x, 0.7, 0.9 + this.killRun * 0.14);
+    }
     // The room did it: a kill by a vent, a wall or the floor pays extra.
     if (h.hazard) { fx.text(cx, cy - 84, 'ENVIRONMENT', '#ff7a2e', 16, 1); this.gainFocus(20); this.style.bonus(12); this.stats.hazardKills++; }
     fx.spark(cx, cy, dir > 0 ? 0 : Math.PI, 1.5, 30, 900, B.color, { white: 0.3 });

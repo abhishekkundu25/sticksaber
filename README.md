@@ -30,6 +30,7 @@ A run is saved at the start of every floor: seed, length, difficulty, floor, bui
 | `?floor=40` | Start a new run on that floor, with the picks the run would have made on the way up. |
 | `?daily` or `?daily=2026-11-16` | Go straight into the daily run for today, or for that date. |
 | `?boons=all` | Offer every boon before the first floor, earned or not. |
+| `?forms=all` | Open every weapon on the first screen, earned or not. |
 
 ## Controls
 
@@ -43,7 +44,7 @@ A run is saved at the start of every floor: seed, length, difficulty, floor, bui
 | Guard, tap on impact to parry | L | RB |
 | Use the selected Focus power | I, or middle mouse button | LB |
 | Switch power | U, 1 to 9, the mouse wheel, or click a power in the HUD | LT |
-| Switch weapon (with a Second Sheath) | T | Back / Select |
+| Switch weapon (once you carry two) | T | Back / Select |
 | Drop through a light bridge | S + Space | Down + A |
 | Burst (costs 1 focus, while being hit or knocked down) | I | LB |
 | Overdrive (needs a full focus meter) | O | Click either stick |
@@ -60,6 +61,7 @@ Hold the device in landscape. The first touch switches on the touch controls; a 
 - Tap a menu item or a card to choose it. When a screen has more than four cards they fold down to their names: tap one to read it, then tap it again to take it.
 - The left thumb gets a stick that appears wherever it lands. Left and right move. Pulling down is the same as S: stick down plus HEAVY launches on the ground and plunges in the air.
 - The right thumb gets LIGHT, HEAVY, JUMP, DASH, GUARD, OVERDRIVE and the power button. The power button carries the name of the selected power. SWAP, which appears once you own a second power, changes it. While you are being hit the power button grows, glows and reads BURST. OVERDRIVE lights up when the meter is full.
+- The phone buzzes when you are hit, when you parry and on a kill, where the browser allows it.
 - The pause button is at the top centre. In the training room a SPAWN button adds an enemy. BLADE appears beside it once you carry two weapons, and switches between them.
 - Phones render at 720p internally.
 
@@ -86,7 +88,9 @@ These are the saber's. The other weapon forms use the same inputs with their own
 
 ## Weapon forms
 
-A new run opens with a choice of seven weapons. Each has a complete move list of its own on the same inputs. An armoury, the quartermaster or a card can trade it for another on the way up, and your build comes with you.
+There are seven weapons, each with a complete move list of its own on the same inputs. A run can start with the saber, the twin blades or the greatsword. The other four are locked on the first screen: you find them in the tower, at an armoury, the quartermaster or among the cards, and once you have cleared three floors with one in hand it is yours to start with from then on. The codex shows how far along each is.
+
+Every weapon you pick up is carried for the rest of the run. T switches through them (BLADE on a touch screen, Back on a gamepad), and the HUD shows what you carry.
 
 | Form | Blade | How it plays |
 | --- | --- | --- |
@@ -130,8 +134,8 @@ Everything that falls also leaves shards, the gold diamonds. They are the run's 
 | --- | --- |
 | Quartermaster | Sells four cards (a technique, rares and a legendary), a weapon and field repairs. Buy as many as you can pay for. |
 | Shrine | Offers three pacts. A pact gives a great deal and takes something back for the rest of the run: Glass Heart is 40% more damage for 30 less health, Hunger heals on every kill and never between waves, Debt is 150 shards now and a tougher tower. You may refuse. |
-| Armoury | Trades the weapon in your hand for one of three others. Your build comes with you. A weapon also turns up among the cards now and then. |
-| Second Sheath | A legendary. With it the next weapon you take joins the one you hold, T switches between them, and the first hit after a switch lands half again as hard. |
+| Armoury | Offers three weapons you do not carry. Take one and it joins the others. A weapon also turns up among the cards now and then, and the ones you have not earned yet come up twice as often. |
+| Second Sheath | A legendary. The first hit after you switch weapons lands half again as hard. |
 | Boons | A head start chosen before the first floor, earned by feats in earlier runs. The codex on the title screen lists the feats. |
 
 ## The run
@@ -265,6 +269,11 @@ A kill made by the room shows ENVIRONMENT and pays extra focus.
 - Sector bosses are generated from five fighting schools, with borrowed attacks, two or three phases and set pieces: a leap that lands on a marker, a blink to your back, reinforcements, afterimages, a kneeling heal you can interrupt.
 - The Twins share one life, and only the lit one can be hurt. The other still cuts, at reduced damage. They take turns until half health, then stop.
 - The Cartographer redraws the floor. First strips that erupt, then a wall of fire that walks across the room with two gaps in it, and in its last phase the whole floor, with three light bridges to stand on.
+- Each enemy you are hitting shows a number that adds up while the hits keep coming, gold when it is large and pale yellow on a critical hit.
+- An enemy outside the view has a chevron at the edge of the screen. It turns red while that enemy is winding up.
+- Kills in quick succession are called out (DOUBLE, TRIPLE, RAMPAGE), and so is a combo passing 25, 50 and 100 hits.
+- A cleared floor shows its time, hits taken, kills and shards. A fall shows what cut you down and one line of advice about it.
+- The doors screen says what is known of the next floor: its objective, the shape of its room, its challenge, or the name of the champion or keeper waiting there.
 - A champion or a keeper is announced by name as it lands. A boss kill ends with a finisher: time slows, the camera closes in and the body keeps coming apart.
 - The Shade uses copies of your own moves, played slower behind a held wind-up. Change weapon or take different powers and the next Shade fights differently.
 - A first-time player gets a parry lesson on floor 1, in a sprint and in the climb: the instructor cannot be hurt until you parry it once.

@@ -125,6 +125,7 @@ export class Hud {
     if (app.state === 'play' || app.state === 'pause') {
       if (p) this.player(ctx, world, p, dt, app.touch);
       this.combo(ctx, W, world, dt);
+      if (app.state === 'play' && dir.state === 'fight') this.edges(ctx, W, H, world);
       if (world.boss && !world.boss.remove && world.boss.y > -2000) this.boss(ctx, W, H, world, world.boss, dt, app.touch);
       if (!dir.training) {
         const s = dir.stageDef;
@@ -140,9 +141,11 @@ export class Hud {
         const ch = dir.challenge;
         if (ch && dir.state !== 'draft') {
           // The floor's challenge: white while it can still be met, green once it is, grey when it is lost.
-          const col = ch.ok ? (ch.open ? '#ffffff' : '#7dffb0') : ch.open ? '#ffffffcc' : '#8fa3b866';
-          this.text(ctx, `${ch.name}${ch.count ? `  ${ch.count}` : ''}  ·  +${ch.pay}`, W - 36, y + 30, 11, col, 'right', 700, 2);
-          this.text(ctx, ch.text.toUpperCase(), W - 36, y + 45, 9, `${col.slice(0, 7)}88`, 'right', 600, 2);
+          // It sits on the left under the weapons, clear of the style rank on the right.
+          const col = ch.ok ? (ch.open ? '#ffffff' : '#7dffb0') : ch.open ? '#ffffffcc' : '#8fa3b866', cy = world.arsenal.length > 1 ? 142 : 118;
+          ctx.fillStyle = col; ctx.save(); ctx.translate(40, cy); ctx.rotate(Math.PI / 4); ctx.fillRect(-3, -3, 6, 6); ctx.restore();
+          this.text(ctx, `${ch.name}${ch.count ? `  ${ch.count}` : ''}  ·  +${ch.pay}`, 52, cy, 11, col, 'left', 700, 2);
+          this.text(ctx, ch.text.toUpperCase(), 52, cy + 15, 9, `${col.slice(0, 7)}88`, 'left', 600, 2);
         }
         const ob = dir.objective;
         if (ob) {
@@ -160,7 +163,7 @@ export class Hud {
         // On a phone the bottom of the screen belongs to the thumbs, so prompts move to the top.
         const hint = app.touch ? touchHint(dir.hint, dir.training) : dir.hint;
         const lines = this.wrap(ctx, hint, W - 200, 15, 600, 1);
-        const y = app.touch ? (bossUp ? 186 : 112) : (bossUp ? H - 122 : H - 46) - (lines.length - 1) * 22;
+        const y = app.touch ? (bossUp ? 186 : dir.objective ? 150 : 112) : (bossUp ? H - 122 : H - 46) - (lines.length - 1) * 22;
         let tw = 0;
         for (const l of lines) tw = Math.max(tw, this.width(ctx, l, 15, 1));
         ctx.globalAlpha = a * 0.55; ctx.fillStyle = '#000';
@@ -230,7 +233,7 @@ export class Hud {
     const x = 36, y = 34, w = Math.min(420, 320 * Math.sqrt(p.maxHp / 100));
     const hp = Math.max(0, p.hp) / p.maxHp;
     this.hpLag += (hp - this.hpLag) * Math.min(1, dt * (hp < this.hpLag ? 2.5 : 20));
-    this.text(ctx, world.formId === 'saber' && !world.form2 ? 'INITIATE ZERO' : `INITIATE ZERO  ·  ${world.form.name}${world.form2 ? `   ⇄  ${FORMS[world.form2].name}  [${touch ? 'BLADE' : 'T'}]${world.arsenal.length > 2 ? `  +${world.arsenal.length - 2}` : ''}` : ''}`, x, y - 12, 12, '#ffffff99', 'left', 600, 3);
+    this.text(ctx, world.formId === 'saber' && !world.form2 ? 'INITIATE ZERO' : `INITIATE ZERO  ·  ${world.form.name}`, x, y - 12, 12, '#ffffff99', 'left', 600, 3);
     this.text(ctx, `${Math.ceil(Math.max(0, p.hp))} / ${p.maxHp}`, x + w, y - 12, 11, '#ffffff66', 'right', 600, 1);
     ctx.fillStyle = '#00000088'; ctx.fillRect(x - 2, y - 2, w + 4, 14);
     ctx.fillStyle = '#ffffff1c'; ctx.fillRect(x, y, w, 10);
@@ -261,6 +264,44 @@ export class Hud {
       this.text(ctx, !p.armed ? 'SABER OUT' : full ? (touch ? 'FOCUS FULL' : 'FOCUS FULL  ·  O') : 'FOCUS', x + pw + 8, fy + 4, 11, !p.armed || full ? '#56e9ff' : '#ffffff77', 'left', full ? 700 : 600, 2);
     }
     this.powers(ctx, world, x, fy + 26, touch, this.hover);
+    if (world.arsenal.length > 1) this.arms(ctx, world, x, fy + 54, touch);
+  }
+
+  // The weapons carried, as small pictures: the one in hand lit in its own colour, and the key that switches.
+  arms(ctx, world, x, y, touch) {
+    const A = world.arsenal, pop = world.swapT > 2.2 ? (world.swapT - 2.2) * 10 : 0;
+    let cx = x;
+    for (const id of A) {
+      const F = FORMS[id], on = id === world.formId, w = 26;
+      ctx.fillStyle = on ? '#000000aa' : '#00000066'; ctx.fillRect(cx, y - 11 - (on ? pop : 0), w, 22 + (on ? pop * 2 : 0));
+      if (on) { ctx.fillStyle = F.color; ctx.fillRect(cx, y + 10 + pop, w, 2); }
+      ctx.globalAlpha = on ? 1 : 0.45;
+      this.glyph(ctx, FORM_GLYPH[id] || 'slash', cx + w / 2, y, 7, on ? F.color : '#ffffff');
+      ctx.globalAlpha = 1;
+      cx += w + 4;
+    }
+    this.text(ctx, touch ? 'BLADE  switches' : 'T  switches', cx + 6, y + 0.5, 10, '#ffffff66', 'left', 600, 2);
+  }
+
+  // Enemies outside the view: a chevron at the edge of the screen, at their height, in their colour.
+  // It turns red and pulses while that enemy is winding up, so nothing hits from off screen unannounced.
+  edges(ctx, W, H, world) {
+    const c = world.cam, z = c.zoom * (1 + c.punchK), half = W / (2 * z);
+    let nl = 0, nr = 0;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const f of world.fighters) {
+      if (f.team !== 1 || f.dead || f.phantom || f.def.thing || f.y < -900) continue;
+      const dx = f.x - c.x;
+      if (Math.abs(dx) < half + 20) continue;
+      const side = dx > 0 ? 1 : -1;
+      if ((side > 0 ? nr++ : nl++) >= 4) continue;
+      const hot = f.tele > 0 || (f.state === 'attack' && f.mt < (f.move?.hits[0]?.t1 ?? 0)), x = side > 0 ? W - 22 : 22;
+      const y = clamp((f.cy - c.y) * z + H / 2, 130, H - 150) + (side > 0 ? nr : nl) * 3, k = hot ? 1 + Math.sin(this.t * 22) * 0.25 : 1;
+      ctx.globalAlpha = hot ? 0.95 : 0.6; ctx.strokeStyle = hot ? '#ff2038' : f.color; ctx.lineWidth = hot ? 4 : 3;
+      ctx.beginPath(); ctx.moveTo(x - side * 7 * k, y - 9 * k); ctx.lineTo(x + side * 5 * k, y); ctx.lineTo(x - side * 7 * k, y + 9 * k); ctx.stroke();
+      if (f.def.boss || f.elite) { ctx.beginPath(); ctx.moveTo(x - side * 15 * k, y - 9 * k); ctx.lineTo(x - side * 3 * k, y); ctx.lineTo(x - side * 15 * k, y + 9 * k); ctx.stroke(); }
+    }
+    ctx.globalAlpha = 1;
   }
 
   // The powers the player owns, in slot order. The selected one is lit and shows its key and cost.
@@ -387,6 +428,7 @@ export class Hud {
     this.text(ctx, b.title, W / 2 + slide, y, 46, '#ffffff', 'center', 700, 14);
     ctx.fillStyle = b.alarm ? '#ff2e6e' : '#ffffff'; ctx.fillRect(W / 2 - 150 * a, y + 34, 300 * a, 1.5);
     if (b.sub) this.text(ctx, b.sub.toUpperCase(), W / 2 - slide, y + 56, 14, '#ffffffbb', 'center', 600, 5);
+    if (b.note) { ctx.globalAlpha = a * Math.min(1, (b.max - b.t) * 1.6); this.text(ctx, b.note, W / 2, y + 84, 11, '#9fe8ff', 'center', 600, 4); ctx.globalAlpha = a; }
     if (b.sector !== undefined) {
       // The tower at a glance: ten sectors, the ones below you filled in.
       const ns = b.sectors || 10;
@@ -406,9 +448,18 @@ export class Hud {
     const a = clamp(dir.t - 0.6, 0, 1), what = dir.stageDef.restart ? 'floor' : 'wave';
     ctx.globalAlpha = a * 0.6; ctx.fillStyle = '#12020a'; ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = a;
-    this.text(ctx, 'YOU FELL', W / 2, H / 2 - 30, 70, '#ff5060', 'center', 800, 18);
-    this.text(ctx, touch ? `TAP  to retry this ${what}` : `CLICK or ENTER  retry this ${what}        ESC  menu`, W / 2, H / 2 + 40, 16, '#ffffffcc', 'center', 600, 3);
-    this.text(ctx, `FLOOR ${dir.stageDef.n} OF ${dir.count}  ·  your build is kept  ·  SCORE ${dir.score.toLocaleString('en-US')}`, W / 2, H / 2 + 72, 12, '#ffffff77', 'center', 600, 3);
+    this.text(ctx, 'YOU FELL', W / 2, H / 2 - 44, 70, '#ff5060', 'center', 800, 18);
+    // What did it, and the one thing worth knowing about it.
+    const L = dir.world.lastHurt;
+    if (L) {
+      this.text(ctx, `CUT DOWN BY  ${L.who.toUpperCase()}`, W / 2, H / 2 + 14, 15, '#ffffff', 'center', 700, 5);
+      this.text(ctx, L.who === 'the drop' ? 'The floor ends before the wall. Stay clear of the lit edge' : L.red ? 'A red flash cannot be blocked. Dash through it' : L.who === 'the room itself' ? 'Watch the marked ground: it burns everyone, you included' : L.who === 'something thrown' ? 'Parry or cut a bolt and it flies back. Jump a wave' : L.boss ? 'Parry its white flashes and strike while its posture is broken' : 'A white flash can be parried: tap guard just before it lands', W / 2, H / 2 + 38, 12, '#ffb0b8', 'center', 600, 2);
+    }
+    this.text(ctx, touch ? `TAP  to retry this ${what}` : `CLICK or ENTER  retry this ${what}        ESC  menu        C  copy result`, W / 2, H / 2 + 78, 16, '#ffffffcc', 'center', 600, 3);
+    const st = dir.world.stats, sec = Math.floor(dir.runTime);
+    this.text(ctx, `FLOOR ${dir.stageDef.n} OF ${dir.count}   ·   ${st.kills} KILLS   ·   ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}   ·   ${dir.deaths + 1} FALL${dir.deaths ? 'S' : ''}   ·   SCORE ${dir.score.toLocaleString('en-US')}`, W / 2, H / 2 + 108, 12, '#ffffff77', 'center', 600, 3);
+    if (dir.best !== undefined && dir.score > dir.best) this.text(ctx, 'YOUR BEST SCORE YET', W / 2, H / 2 + 128, 11, '#ffd36b', 'center', 700, 5);
+    else this.text(ctx, 'your build is kept', W / 2, H / 2 + 128, 11, '#ffffff55', 'center', 600, 3);
     ctx.globalAlpha = 1;
   }
 
@@ -418,6 +469,7 @@ export class Hud {
     ctx.globalAlpha = a;
     this.text(ctx, 'EXAMINATION PASSED', W / 2, 118, 58, '#ffe2a0', 'center', 800, 14);
     this.text(ctx, `SCORE  ${dir.score.toLocaleString('en-US')}`, W / 2, 168, 22, '#ffffff', 'center', 700, 8);
+    if (dir.best !== undefined && dir.score > dir.best) { ctx.globalAlpha = a * (0.7 + Math.sin(this.t * 6) * 0.3); this.text(ctx, 'NEW BEST', W / 2 + 190, 168, 13, '#ffd36b', 'left', 700, 5); ctx.globalAlpha = a; }
     this.text(ctx, `${dir.daily ? `DAILY  ${dir.daily}` : MODES[dir.mode].name}   ·   ${DIFFS[dir.diff].name}   ·   RUN SEED  ${seedLabel(dir.seed)}`, W / 2, H - 56, 12, '#ffffff77', 'center', 600, 4);
     ctx.fillStyle = '#ffe2a0'; ctx.fillRect(W / 2 - 220, 192, 440, 1.5);
     const hrs = Math.floor(dir.runTime / 3600), m = Math.floor((dir.runTime % 3600) / 60), s = Math.floor(dir.runTime % 60);
@@ -655,7 +707,11 @@ export class Hud {
       this.text(ctx, `${P.cost} focus`, rx + 190, y, 11, '#ffffff66', 'left', 600, 1);
       y += 21;
     });
-    y += 14;
+    y += 10;
+    this.text(ctx, 'WEAPONS', rx, y, 12, '#ffffff77', 'left', 700, 5); y += 22;
+    let wx = rx;
+    for (const id of world.arsenal) { const F = FORMS[id], on = id === world.formId; this.text(ctx, F.name, wx, y, 13, on ? F.color : '#ffffffaa', 'left', 700, 2); wx += this.width(ctx, F.name, 13, 2) + 22; }
+    y += 30;
     this.text(ctx, 'AUGMENTS', rx, y, 12, '#ffffff77', 'left', 700, 5); y += 24;
     const own = AUGMENTS.filter((g) => dir.build[g.id]);
     if (!own.length) this.text(ctx, dir.training ? 'None in the training room' : 'None yet. One is offered after every floor', rx, y, 13, '#ffffff77', 'left', 600, 1);

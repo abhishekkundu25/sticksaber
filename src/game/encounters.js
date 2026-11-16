@@ -1,7 +1,7 @@
 // Encounter director: runs the generated floors wave by wave, and handles pacing, surprises,
 // objectives, the cards and doors between floors, retries and the training room.
 import { clamp, seedRng, hash32, makeRng, rand, rng } from '../core/math.js';
-import { generateRun, PER, roman, ANOMALIES, MODES, DIFFS, SURPRISES, OBJECTIVES, CHALLENGES, DOORS, CURSES, doorsFor } from './gen.js';
+import { generateRun, PER, roman, ANOMALIES, MODES, DIFFS, SURPRISES, OBJECTIVES, CHALLENGES, DOORS, CURSES, ROOMS, doorsFor } from './gen.js';
 import { newStats } from './world.js';
 import { draftAugments, draftPacts, AUG } from './augments.js';
 import { draftPowers, POWER_IDS, POWERS } from './powers.js';
@@ -158,6 +158,7 @@ export class Director {
     w.anom = def.anomaly; w.gravK = def.anomaly === 'lowgrav' ? 0.62 : 1; w.windUsed = false;
     this.sur = null; this.surArm = null; this.obj = null; this.bonus = []; this.queue = []; this.floorT = 0;
     const st = w.stats;
+    this.tallyAt = { hits: st.hitsTaken, shards: st.shards, kills: st.kills };
     this.chal = def.challenge ? { ...def.challenge, hits: st.hitsTaken, powers: st.powers, parries: st.parries, air: st.airKills, room: st.hazardKills, fell: !fresh ? false : this.chal?.fell && this.chal.n === def.n, n: def.n } : null;
     this.state = 'intro'; this.t = 0; this.pending.length = 0;
     this.fade = 1; this.fadeDir = -1;
@@ -376,7 +377,14 @@ export class Director {
   }
   doors(n) {
     const list = doorsFor(this.run, n);
-    return list ? { type: 'doors', title: 'CHOOSE YOUR WAY', sub: this.floors[n].kind === 'boss' ? 'A keeper waits above' : this.floors[n].kind === 'champion' ? 'A champion waits above' : `Floor ${n + 1} is next`, doors: list,
+    // What is known of the next floor is said. Its surprise, if it has one, is not.
+    const nx = this.floors[n], B = nx.boss && this.world.def(nx.boss);
+    const parts = [nx.kind === 'boss' ? `The keeper ${B?.name || ''} waits above` : nx.kind === 'champion' ? `The champion ${B?.name || ''} waits above` : `Floor ${n + 1} is next`];
+    if (nx.objective) parts.push(OBJECTIVES[nx.objective.type].name);
+    if (nx.room) parts.push(ROOMS[nx.room]);
+    if (nx.anomaly) parts.push(ANOMALIES[nx.anomaly].name);
+    if (nx.challenge) parts.push(`Challenge: ${CHALLENGES[nx.challenge.type].name}`);
+    return list ? { type: 'doors', title: 'CHOOSE YOUR WAY', sub: parts.join('   ·   '), doors: list,
       options: list.map((d) => d.type), kinds: list.map(() => 'door'), idx: 0 } : null;
   }
   takeFirst(d) { if (d) this.take(d, 0, true); }
@@ -579,6 +587,11 @@ export class Director {
       this.hooks.onEvent?.({ type: 'floor', n: def.n, kind: def.kind, objective: def.objective?.type });
     }
     w.banner(last ? 'FLOOR CLEARED' : 'WAVE CLEARED', sub, last && def.kind === 'boss' ? 2.4 : 1.8);
+    if (last && !fake && this.tallyAt) {
+      // How the floor went, in one line under the banner.
+      const T = this.tallyAt, st = w.stats, s = Math.round(this.floorT), hits = st.hitsTaken - T.hits;
+      w.bannerMsg.note = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}   ·   ${hits ? `${hits} HIT${hits > 1 ? 'S' : ''} TAKEN` : 'UNTOUCHED'}   ·   ${st.kills - T.kills} KILLS   ·   ${st.shards - T.shards} SHARDS`;
+    }
     const skip = (def.waves[this.wave]?.noHeal && !last) || this.mod.drought || w.mods.noWaveHeal;
     this.healPool = skip ? 0 : (w.player.maxHp * (def.boss ? 0.6 : def.heal) + w.mods.waveHeal) * w.mods.healK;
   }

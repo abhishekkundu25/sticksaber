@@ -199,6 +199,18 @@ export class Renderer {
     for (const p of world.projectiles.list) if (p.type === 'saber') this.saberCore(ctx, p);
     ctx.globalAlpha = 1;
     for (const f of fs) if ((f.team === 1 || f.tag) && !f.isPlayer && !f.dead && !f.def.boss && !f.phantom && (f.barT > 0 || f.tag)) this.enemyBar(ctx, f);
+    // Damage numbers: one by each enemy that is being hit, adding up while the hits keep coming.
+    const now = world.time;
+    ctx.textAlign = 'center';
+    for (const f of fs) {
+      const age = now - (f.popAt ?? -9);
+      if (age > 0.9 || f.isPlayer || !(f.popV >= 1)) continue;
+      const big = f.popV >= 40, y = (f.rag ? f.j[1] : Math.min(f.j[1], f.j[3])) - (f.def.boss ? 64 : 58) * f.scale - age * 22;
+      ctx.globalAlpha = Math.min(1, (0.9 - age) * 4); ctx.font = `800 ${big ? 17 : 13}px "Avenir Next Condensed", "Arial Narrow", sans-serif`;
+      ctx.fillStyle = '#000000'; ctx.fillText(Math.round(f.popV), f.x + 1, y + 1);
+      ctx.fillStyle = f.popCrit ? '#fff2a8' : big ? '#ffd36b' : '#ffffff'; ctx.fillText(Math.round(f.popV), f.x, y);
+    }
+    ctx.globalAlpha = 1;
     world.fx.drawText(ctx);
 
     // ── 7. foreground ──

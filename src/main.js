@@ -102,7 +102,10 @@ const RUMBLE = { hitLight: [0.15, 0.3, 50], hitHeavy: [0.5, 0.5, 90], hitSpike: 
   slam: [0.8, 0.4, 140], explode: [0.8, 0.5, 160], guardBreak: [0.9, 0.7, 200], stagger: [0.6, 0.8, 160], finisher: [1, 1, 600], bossPhase: [0.9, 0.7, 400], powerNova: [0.9, 0.7, 220], pillar: [0.6, 0.4, 140],
   gaBlast: [0.7, 0.5, 160], gaBlastFull: [1, 0.8, 320], lashCrack: [0.1, 0.5, 40], lashSlam: [0.8, 0.5, 160], dbCut: [0.3, 0.7, 70], dbPerfect: [0.2, 0.9, 120], surprise: [0.8, 0.8, 300], shadeArrive: [0.9, 0.6, 400],
   stampede: [1, 0.5, 500], quake: [1, 0.6, 700], beaconFire: [1, 1, 450], propBreak: [0.5, 0.7, 120], ringOut: [0.6, 0.4, 200], weaponSwap: [0.2, 0.6, 60] };
+// A phone has one motor and no strength control, so only the moments that matter buzz, by length.
+const BUZZ = { hurt: 45, parry: 18, kill: 22, guardBreak: 60, finisher: 140, surprise: 70, gaBlastFull: 50, bossPhase: 90, secondWind: 80 };
 function rumble(name) {
+  if (app.touch && BUZZ[name] && navigator.vibrate) { try { navigator.vibrate(BUZZ[name]); } catch { /* not allowed here */ } }
   const r = RUMBLE[name];
   if (!r || !input.usedPad || !navigator.getGamepads) return;
   for (const pad of navigator.getGamepads()) pad?.vibrationActuator?.playEffect?.('dual-rumble', { duration: r[2], strongMagnitude: r[0], weakMagnitude: r[1] }).catch(() => {});
@@ -114,7 +117,8 @@ world.loopOut = (name, on) => audio.loop(name, on && live());
 
 function buildMenu(keep) {
   const saved = loadRun(), M = MODES[app.mode], best = store.get(DAILY_KEY), date = today();
-  app.menu = [{ id: 'run', label: 'ASCEND', sub: `${M.name}  ·  ${M.floors} FLOORS`, note: M.blurb }];
+  const top = meta.data.best[`${app.mode}:${app.diff}`]?.score;
+  app.menu = [{ id: 'run', label: 'ASCEND', sub: `${M.name}  ·  ${M.floors} FLOORS${top ? `  ·  BEST ${top.toLocaleString('en-US')}` : ''}`, note: M.blurb }];
   if (saved) app.menu.push({ id: 'continue', label: 'CONTINUE', sub: `${saved.daily ? 'DAILY' : MODES[saved.mode].name}  ·  FLOOR ${saved.floor}`, saved });
   app.menu.push({ id: 'daily', label: 'DAILY CLIMB', sub: best?.date === date ? `TODAY'S BEST  ${best.score.toLocaleString('en-US')}` : date, note: 'One seed for everyone today. Thirty floors, and a score to share' },
     { id: 'mode', row: 1, label: `LENGTH  ·  ${M.name}`, note: M.blurb }, { id: 'diff', row: 1, label: `DIFFICULTY  ·  ${DIFFS[app.diff].name}`, note: DIFFS[app.diff].blurb },
@@ -191,6 +195,8 @@ function startRun(floor = 1, seed = fixedSeed || undefined, diff = app.diff, sav
   world.input = input; app.state = 'play';
   director.startRun(floor - 1, seed, diff, saved, mode);
   if (daily) { director.daily = daily; director.save(); }
+  // The score to beat, for the results screens.
+  director.best = meta.data.best[`${director.mode}:${director.diff}`]?.score || 0;
 }
 const startDaily = (date = today()) => startRun(1, dailySeed(date), 'normal', null, 'sprint', date);
 function startTraining() { world.input = input; app.state = 'play'; director.startTraining(); }

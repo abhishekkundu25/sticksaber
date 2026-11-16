@@ -163,7 +163,7 @@ export function applyHit(world, A, B, h, cx, cy) {
   if (B.bondRef) { B.bondRef.pool -= dmg; B.hp = B.bondRef.pool; } else B.hp -= dmg;
   B.flash = 0.1; B.barT = 3.5; B.vib = h.stop + 0.06; B.sinceHurt = 0;
   if (warded && world.time - (B.noteT || -9) > 0.8) { B.noteT = world.time; fx.text(cx, cy - 46, 'WARDED', '#9fd0ff', 13, 0.6); }
-  world.onDamage(A, B, dmg, h, cx, cy, dir, { fresh, punished, glance: read });
+  world.onDamage(A, B, dmg, h, cx, cy, dir, { fresh, punished, glance: read, crit });
   if (crit) { fx.text(cx, cy - 94, 'CRIT', '#fff2a8', 17, 0.7); fx.ring(cx, cy, 6, 70, 0.22, '#fff2a8', 1, 3); world.sfx('crit', cx, 0.8); }
   // Second Wind refuses one killing blow per floor.
   if (B.isPlayer && B.hp <= 0 && M.secondWind && !world.windUsed) { world.secondWind(B); return 'hit'; }

@@ -456,7 +456,9 @@ A fall keeps the build. On Student and Adept it restarts the wave, on Master the
 
 ### Weapon forms
 
-A run played by a person opens with a choice of weapon, saved with the run. An armoury, the quartermaster or a card can trade it on the way up, and a Second Sheath carries two. A form is a blade and a complete move list on the same inputs, so the choice changes how the whole game is played, not a number.
+A run played by a person opens with a choice of weapon. The owner did not want all seven on offer from the first day, so three are open (saber, twin blades, greatsword) and four are locked on that screen. A locked weapon is met in the tower, where the armoury, the quartermaster and the cards offer the locked ones twice as often as the open ones, and it is earned for the start of every later run by clearing three floors with it in hand. A scripted player that picks weapons up earns all four in two to four sprints. Floors cleared before the lock existed do not count, or a player who had already tried everything would see no locks.
+
+Every weapon picked up is carried for the run, and one key switches through all of them. The Second Sheath used to be what allowed a second weapon. Now it makes the first hit after a switch land half again as hard. A form is a blade and a complete move list on the same inputs, so the choice changes how the whole game is played, not a number.
 
 | Form | Blade | Character | Damage on one target, against the saber |
 | --- | --- | --- | --- |
@@ -563,6 +565,23 @@ The weapons, climbing on Adept in skilled scripted hands: twin blades and staff 
 ## Sound
 
 Every sound is synthesized with the Web Audio API. A saber hum rises from 88 Hz to 115 Hz with swing speed. The parryable telegraph is a bright glint centred near 4.5 kHz and the unblockable one is a low buzz near 0.5 kHz, so the two are distinct by ear. Music is generative and its intensity follows the number of enemies and your style rank. Each sector has its own theme: the combat and boss tracks change key, tempo (within 10%), chord colour (dorian, phrygian, harmonic minor or a brighter major-led set), the timbre of the arpeggio and pad, and sometimes the kick pattern or swing. A theme change waits for the next downbeat. Sector I plays the tracks as they were written. The powers, the draft, orbs, champions and sector changes have their own sounds, 21 in all. A further 29 cover the animals (growl, bite, roar, screech, hooves, wings, hiss, stomp, built from saws and noise through vowel filters so they sound like throats), a swing for each weapon form, the terrain, the bonds, the room bosses and the finisher. A further 47 came with the surprises and the new weapons: 25 for the surprises, shards, the quartermaster, doors, pacts and objectives, and 22 for the whip, the gauntlets, the drawn blade and the open edges. A shard's tick may repeat every 4 ms instead of the usual 30, so a run of them at rising pitch is not thinned out, and the drawn blade's delayed cuts are staggered 22 ms apart so that four landing together play as a flurry instead of adding up to a clip. Nothing is louder than the finisher, and the full gauntlet blast is the heaviest sound a weapon makes. Slow motion sweeps a low-pass filter over the mix. Nobody has listened to any of it yet. The balance was set from measurements, so expect to retune it by ear.
+
+## Small things that tell the player what happened
+
+Ten pieces of feedback, none of which changes a number in a fight:
+
+1. A damage number by each enemy being hit, adding up for as long as the hits keep coming: white, gold from 40, pale yellow on a critical hit.
+2. A chevron at the edge of the screen for each enemy outside the view (four a side at most), red and pulsing while that enemy winds up.
+3. Kills within a second and a half of each other are called out: DOUBLE, TRIPLE, QUADRUPLE, RAMPAGE, each a note higher.
+4. A combo passing 25, 50 and 100 hits is called out.
+5. A fall names what did it and gives one line of advice chosen by the kind of blow: a red flash, a projectile, the room, a boss, the drop.
+6. A cleared floor shows its time, hits taken, kills and shards under the banner.
+7. The doors screen says what is known of the next floor. Its surprise is never named.
+8. The weapons carried are drawn as small pictures under the powers, the one in hand lit, and the pause screen lists them.
+9. A phone buzzes on a hit taken, a parry, a kill and a few larger moments.
+10. The best score for the run's length and difficulty is shown under ASCEND, and a run that beats it says so on the results and on a fall.
+
+The floor's challenge moved to the left column under the weapons, because on the right it ran into the style rank whenever an anomaly and a curse were both showing. On a touch screen the hint line drops below the objective bar when there is one.
 
 ## Open questions
 
