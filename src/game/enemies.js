@@ -577,9 +577,12 @@ function skyfall(f, world) {
       sk.stage = 'track'; sk.t = 0; g.vy = 0; g.vx = 0;
       w.marker = { x: pl.x, lock: false, t: 0 };
     } else if (sk.stage === 'track') {
+      // The marker belongs to the room, and another keeper resetting can clear it: put it back.
+      w.marker ||= { x: g.x, lock: false, t: 0 };
       w.marker.x += (pl.x - w.marker.x) * Math.min(1, dt * 7); w.marker.t += dt; g.x = w.marker.x; g.y = -1100; g.vy = 0;
       if (sk.t > 1.0) { sk.stage = 'lock'; sk.t = 0; w.marker.lock = true; w.sfx('telegraphRed', w.marker.x); }
     } else if (sk.stage === 'lock') {
+      w.marker ||= { x: g.x, lock: true, t: 0 };
       g.x = w.marker.x; g.y = -1100; g.vy = 0; w.marker.t += dt;
       if (sk.t > 0.4) { sk.stage = 'fall'; g.vy = 3800; g.gravMul = 1; g.invuln = 0; g.face(pl.x); }
     } else if (g.onGround) {
