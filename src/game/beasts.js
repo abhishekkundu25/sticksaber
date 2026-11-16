@@ -798,7 +798,11 @@ class BeastRagdoll extends Ragdoll {
         // A point that began the step inside the floor or a wall (it went limp that way) is eased out
         // 6 px a step instead of in one jump.
         const fl = -r[i], lo = minX + r[i], hi = maxX - r[i];
-        if (y[i] > fl) { y[i] = PY0[i] > fl + 1 ? Math.max(fl, Math.min(y[i], PY0[i] - 6)) : fl; HIT[i] = 1; surf = 0; if (i === 2) this.floorY = 0; }
+        // Over an open edge there is no floor (the same rule the humanoid ragdoll follows), and below
+        // the lip the shaft's wall holds the joint in.
+        const pit = Ragdoll.pits ? Ragdoll.pitAt(x[i], y[i] > 4 ? r[i] : 0) : null;
+        if (pit) { if (y[i] > 4) { if (x[i] < pit.x0 + r[i]) x[i] = pit.x0 + r[i]; else if (x[i] > pit.x1 - r[i]) x[i] = pit.x1 - r[i]; } }
+        else if (y[i] > fl) { y[i] = PY0[i] > fl + 1 ? Math.max(fl, Math.min(y[i], PY0[i] - 6)) : fl; HIT[i] = 1; surf = 0; if (i === 2) this.floorY = 0; }
         if (x[i] < lo) { x[i] = PX0[i] < lo - 1 ? Math.min(lo, Math.max(x[i], PX0[i] + 6)) : lo; HIT[i] |= 2; }
         else if (x[i] > hi) { x[i] = PX0[i] > hi + 1 ? Math.max(hi, Math.min(x[i], PX0[i] - 6)) : hi; HIT[i] |= 2; }
       }

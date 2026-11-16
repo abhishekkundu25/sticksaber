@@ -38,10 +38,18 @@ const TOUCH_MOVES = [
 ];
 
 // Where draft card `i` of `n` sits. The shell uses the same rectangles to hit-test taps and clicks.
-export function draftCard(W, n, i) {
+// With `focus` (a card index, used on touch screens when there are more than four cards) the chosen
+// card is drawn wide enough to read and the others fold down to a name.
+export function draftCard(W, n, i, focus = -1) {
+  if (focus >= 0 && n > 4) {
+    const gap = 14, wide = 360, w = (W - 80 - wide - (n - 1) * gap) / (n - 1), x0 = 40;
+    return { x: x0 + i * (w + gap) + (i > focus ? wide - w : 0), y: 198, w: i === focus ? wide : w, h: 330 };
+  }
   const gap = 26, w = Math.min(300, (W - 100 - (n - 1) * gap) / Math.max(3, n)), total = n * w + (n - 1) * gap;
   return { x: W / 2 - total / 2 + i * (w + gap), y: 198, w, h: 330 };
 }
+// Whether the card screen folds its cards (see draftCard).
+export const draftFocus = (d, touch) => (touch && d.options.length > 4 ? d.idx : -1);
 // The button under the cards that leaves a room without taking anything.
 export function skipButton(W) { return { x: W / 2 - 130, y: 548, w: 260, h: 36 }; }
 // Things the quartermaster sells that are not cards.
@@ -479,7 +487,7 @@ export class Hud {
   // The choice between floors: a few cards, one pick. Each card wears its own colour. The same screen
   // shows the doors, the quartermaster's stock, a shrine's pacts and an armoury's blades.
   draft(ctx, W, H, world, dir, touch) {
-    const d = dir.draft, n = d.options.length, a = clamp(dir.t * 2.4, 0, 1), shop = d.type === 'shop', accent = d.type === 'pact' ? '#ff5c8a' : d.type === 'doors' ? '#e6fdff' : shop ? '#ffb347' : '#56e9ff';
+    const d = dir.draft, n = d.options.length, a = clamp(dir.t * 2.4, 0, 1), shop = d.type === 'shop', focus = draftFocus(d, touch), accent = d.type === 'pact' ? '#ff5c8a' : d.type === 'doors' ? '#e6fdff' : shop ? '#ffb347' : '#56e9ff';
     ctx.globalAlpha = a * 0.82; ctx.fillStyle = d.type === 'pact' ? '#0b0308' : '#04060b'; ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = a;
     this.text(ctx, d.title, W / 2, 104, 42, '#ffffff', 'center', 700, 14);
@@ -487,7 +495,7 @@ export class Hud {
     this.text(ctx, d.sub.toUpperCase(), W / 2, 158, 13, '#ffffffaa', 'center', 600, 5);
     if (!d.first) { this.text(ctx, 'SHARDS', W - 36, 96, 10, '#ffffff77', 'right', 600, 4); this.shards(ctx, W - 36, 116, world, 0.016); }
     for (let i = 0; i < n; i++) {
-      const c = draftCard(W, n, i), sel = i === d.idx, id = d.options[i];
+      const c = draftCard(W, n, i, focus), sel = i === d.idx, id = d.options[i], folded = focus >= 0 && !sel;
       const show = clamp(dir.t * 3.2 - i * 0.3, 0, 1);
       const kind = d.kinds?.[i] || (d.type === 'power' ? 'power' : d.type === 'form' ? 'form' : 'aug');
       const isP = kind === 'power', isF = kind === 'form', isD = kind === 'door', isI = kind === 'item', isB = kind === 'boon', sold = !!d.sold?.[i];
@@ -528,11 +536,16 @@ export class Hud {
         ctx.globalAlpha = a * show * fade;
         this.glyph(ctx, isP ? POWER_GLYPH[id] : isF ? FORM_GLYPH[id] || 'slash' : A.glyph, mx, y + 76, (sel ? 19 : 17) * (small ? 0.8 : 1), col);
       }
-      const size = small ? 17 : w < 250 ? 21 : 25, bs = small ? 12.5 : 15, lh = small ? 17 : 21;
+      const size = folded ? 14 : small ? 17 : w < 250 ? 21 : 25, bs = small ? 12.5 : 16, lh = small ? 17 : 22;
       const name = this.wrap(ctx, A.name.toUpperCase(), w - (small ? 16 : 30), size, 700, small ? 1.5 : 3);
       name.forEach((l, k) => this.text(ctx, l, mx, y + 134 + k * (size + 3), size, '#ffffff', 'center', 700, small ? 1.5 : 3));
       const ty = y + 134 + name.length * (size + 3) + 2;
       ctx.fillStyle = `${col}66`; ctx.fillRect(mx - 40, ty - 9, 80, 1.5);
+      if (folded) {
+        // A folded card is its picture, its name and, in a shop, its price. A tap unfolds it.
+        if (d.prices) this.text(ctx, sold ? 'SOLD' : String(d.prices[i]), mx, y + h - 24, 13, sold ? '#ffffff88' : world.shards >= d.prices[i] ? '#ffd36b' : '#ff6b6b', 'center', 700, 2);
+        continue;
+      }
       const words = isD ? A.text(d.doors[i]) : kind === 'aug' ? A.text(have + 1) : A.text;
       const body = this.wrap(ctx, words, w - (small ? 18 : 36), bs, 600, 0.5).slice(0, small ? 8 : 7);
       body.forEach((l, k) => this.text(ctx, l, mx, ty + 14 + k * lh, bs, '#e3edf8', 'center', 600, 0.5));
@@ -560,7 +573,7 @@ export class Hud {
       ctx.strokeStyle = hot ? '#ffffff' : '#ffffff55'; ctx.lineWidth = hot ? 2 : 1; ctx.strokeRect(k.x + 0.5, k.y + 0.5, k.w - 1, k.h - 1);
       this.text(ctx, touch ? d.skip : `${d.skip}   ·   ESC`, W / 2, k.y + k.h / 2 + 1, 13, hot ? '#ffffff' : '#ffffffbb', 'center', 700, 4);
     }
-    const how = shop ? (touch ? 'TAP a card to buy it' : 'CLICK a card to buy it        or  A / D  and  ENTER') : touch ? 'TAP a card to take it' : `CLICK a card        or  A / D  and  ENTER        or press  ${Array.from({ length: n }, (_, k) => k + 1).join('  ')}`;
+    const how = focus >= 0 ? `TAP a card to read it, then TAP it again to ${shop ? 'buy' : 'take'} it` : shop ? (touch ? 'TAP a card to buy it' : 'CLICK a card to buy it        or  A / D  and  ENTER') : touch ? 'TAP a card to take it' : `CLICK a card        or  A / D  and  ENTER        or press  ${Array.from({ length: n }, (_, k) => k + 1).join('  ')}`;
     this.text(ctx, how, W / 2, H - 112, 14, '#ffffffcc', 'center', 600, 3);
     // What the build already holds.
     const own = AUGMENTS.filter((g) => dir.build[g.id]).map((g) => `${g.name}${dir.build[g.id] > 1 ? ` ${roman(dir.build[g.id])}` : ''}`);

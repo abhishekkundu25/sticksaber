@@ -458,8 +458,11 @@ function buildFloor(n, seed, D, roster, sectors, plan, M) {
     if (!first.hint && e <= 3) first.hint = HINTS[word];
   }
   if (n === 1 && S.school) { fl.arenaSeed = 0; fl.hue = 0; }
-  // A sprint has no school, so its first floors carry the three lines a new player cannot do without.
-  if (M.id === 'sprint' && n <= 3 && !fl.waves[0].hint) fl.waves[0].hint = HINTS[['basics', 'parry', 'focus'][n - 1]];
+  // A sprint has no school, so its first floor opens with one small wave that carries the basics, and
+  // the parry lesson for a player who has not passed it. The next two floors carry two more lines on
+  // their second waves, where the strain's own line is not in the way.
+  if (M.id === 'sprint' && n === 1) fl.waves.unshift({ ...T('basics', 1, ['initiate', 340], ['initiate', -400, 1.4]), hint: HINTS.basics, lesson: 'parry', lessonHint: HINTS.parry });
+  else if (M.id === 'sprint' && n <= 3 && fl.waves[1] && !fl.waves[1].hint) fl.waves[1].hint = HINTS[n === 2 ? 'focus' : 'launch'];
   fl.sub = `Floor ${n}  ·  ${tag}`;
   return fl;
 }

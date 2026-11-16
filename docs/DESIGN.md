@@ -260,7 +260,7 @@ The owner played the hundred floors and found they became repetitive. Three thin
 | | Sprint | Climb |
 | --- | --- | --- |
 | Floors, sectors | 30, 3 | 100, 10 |
-| First sector | Generated like every other: its own strains, animal and bonds | The school: the eight base enemies, one at a time |
+| First sector | Generated like every other: its own strains, animal and bonds. Floor 1 opens with one small extra wave that carries the basics and, for a first-time player, the parry lesson | The school: the eight base enemies, one at a time |
 | Depth of floor `n`, which sets health, damage and wave size | `6 + 1.6 (n-1)`, so floor 30 hits like floor 52 of the climb | `n` |
 | Hand-made keepers | One of the three on floor 20, the Proctor on floor 30 | All three, and the Proctor on floor 100 |
 | Time for a scripted player | 25 to 40 minutes | 70 to 80 minutes |
@@ -368,6 +368,7 @@ The owner's idea: a dark version of the player with all their powers, different 
 - Powers map to things bosses already do: the throw to a thrown blade, Crescent to a wave, Arc to a line of pillars, Nova to a spin, Flash Step to a blink, Judgment to a leap that lands on a marker, Mirror to an afterimage, Mend to a kneeling heal that can be interrupted. Stasis maps to nothing. Freezing the player is never fair.
 - Each appearance is a tier. Tier 1 uses two powers and has one phase. Tier 2 adds a fourth hit to the string, a heavy that cannot be blocked, a third power and a second phase. Tier 3 takes four powers.
 - It pays a legendary card.
+- Measured alone against scripted players, it is a duel and not a wall: the fight lasts 35 to 110 seconds, it deals between a fifth of the player's health and nearly three times it (healing from the build makes up the difference), and a script falls to it less than once in three meetings. A Shade with gauntlets is the gentlest and one with a whip or a drawblade the hardest.
 
 ### Objectives and challenges
 

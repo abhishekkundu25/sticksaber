@@ -54,7 +54,10 @@ test('a sprint is thirty floors in three sectors, with no school and the Proctor
     assert.equal(new Set(R.sectors.map((s) => s.name)).size, 3);
     for (const fl of R.floors) {
       assert.ok(fl.waves.length >= 1 && fl.waves.every((w) => w.spawns.length >= 1), `floor ${fl.n} has an empty wave`);
-      assert.ok(fl.waves.every((w) => !w.lesson), 'a sprint has no lesson');
+      // The one lesson a sprint has is the parry, on the first wave of the first floor.
+      assert.ok(fl.waves.every((w, i) => !w.lesson || (fl.n === 1 && i === 0)), 'a lesson somewhere other than the first wave of a sprint');
+      if (fl.n === 1) assert.ok(fl.waves[0].lesson && fl.waves[0].hint && fl.waves[0].lessonHint);
+      if (fl.n === 2 || fl.n === 3) assert.ok(fl.waves.every((w) => w.hint), `floor ${fl.n} of a sprint has a wave with no line for a new player`);
       for (const w of fl.waves) for (const s of w.spawns) assert.ok(R.roster.defs[s.kind] || ['initiate', 'marksman', 'bulwark', 'duelist', 'brute', 'lancer', 'wraith', 'drone', 'forgemaster', 'proctor', 'twinA', 'twinB', 'cartographer'].includes(s.kind), `unknown kind ${s.kind}`);
       assert.equal(fl.kind, fl.pos === 5 ? 'champion' : fl.pos === 10 ? 'boss' : fl.kind);
     }
@@ -551,4 +554,48 @@ test('a shooter posted on a ledge holds it until it is knocked off', () => {
   for (let i = 0; i < 120 * 6 && (m.rag || m.y < -1); i++) { world.step(DT); dir.update(DT); }
   for (let i = 0; i < 120 * 3; i++) { world.step(DT); dir.update(DT); }
   assert.ok(m.dead || m.perch === null || Math.abs(m.y - L.y) < 0.01);
+});
+
+test('animals and a stampede respect open edges too', () => {
+  const g = boot(7, 77, { mode: 'climb' }), { world, dir } = g, def = dir.stageDef;
+  def.surprise = null; def.objective = null; def.challenge = null;
+  def.terrain = { plats: [], vents: [], walls: false, pits: [{ side: -1, w: 300 }, { side: 1, w: 300 }] };
+  def.waves = [{ spawns: [{ kind: 'initiate', dx: 300, t: 0 }], attackers: 1, hint: null }];
+  dir.enterStage(dir.stage, 0, true);
+  world.input = { tick() {}, held: () => false, axisX: () => 0, consume: () => false, peek: () => false, sincePress: () => 9 };
+  world.player.invuln = 1e9; world.player.x = -200;
+  const lip = world.maxX - 300, KNOCK = { dmg: 1, post: 0, kx: 900, ky: -500, kind: 'knock', stop: 0, shake: 0, stun: 0.4, fromPlayer: true, id: 'T', fam: 'power', dir: 1 };
+  // Every animal plan in this run: knocked over the lip alive it is gone and the room gets the kill,
+  // and a dead one thrown over does not come to rest on thin air.
+  const R = dir.run.roster, kinds = R.beasts.filter((id) => id && !R.defs[id].flying);
+  assert.ok(kinds.length >= 5);
+  for (const kind of kinds) {
+    const before = world.stats.hazardKills, a = world.spawnEnemy(kind, lip - 110, false);
+    for (let i = 0; i < 30; i++) world.step(DT);
+    a.invuln = 0; a.x = lip - 110;
+    if (!a.rag) a.toRagdoll(900, -520, 2); else a.rag.kick(900, -520, 2);
+    for (let i = 0; i < 900 && !a.remove; i++) world.step(DT);
+    assert.ok(a.remove && a.dead, `${R.defs[kind].beast}: a live animal knocked over the edge is still there (x ${a.x.toFixed(0)}, lip ${lip})`);
+    assert.equal(world.stats.hazardKills, before + 1, `${R.defs[kind].beast}: the room did not get the kill`);
+    const b = world.spawnEnemy(kind, lip - 110, false);
+    for (let i = 0; i < 30; i++) world.step(DT);
+    b.die(900, -520, 2);
+    for (let i = 0; i < 900 && !b.remove; i++) world.step(DT);
+    assert.ok(b.remove, `${R.defs[kind].beast}: a dead animal rests over the drop (y ${b.rag ? b.rag.y[2].toFixed(0) : b.y})`);
+  }
+  assert.ok(finite(world));
+
+  // A stampede on a floor with open edges: the herd runs in, through, and off the far side.
+  const h = boot(7, 78), def2 = h.dir.stageDef;
+  def2.objective = null; def2.challenge = null; def2.surprise = { type: 'stampede' };
+  def2.terrain = { plats: [], vents: [], walls: false, pits: [{ side: -1, w: 300 }, { side: 1, w: 300 }], lift: true };
+  h.dir.enterStage(h.dir.stage, h.dir.waveCount - 1, true);
+  h.world.input = world.input; h.world.player.invuln = 1e9;
+  // (The herd may well clear the floor by itself, so watch one pass, not the whole surprise.)
+  let most = 0, longest = 0, cur = 0, seen = false;
+  const stage0 = h.dir.stage;
+  run(h, 30, { god: false, until: () => { const n = h.world.fighters.filter((f) => f.herd).length; seen ||= h.dir.sur?.type === 'stampede'; most = Math.max(most, n); cur = n ? cur + DT : 0; longest = Math.max(longest, cur); return h.dir.stage !== stage0 || (most >= 3 && n === 0 && !h.world.herd); } });
+  assert.ok(seen && most >= 3, 'no herd came through');
+  assert.equal(h.world.fighters.filter((f) => f.herd).length, 0, 'the herd is still in the room');
+  assert.ok(longest < 4.5, `a pass took ${longest.toFixed(1)} s: the runners stalled somewhere`);
 });

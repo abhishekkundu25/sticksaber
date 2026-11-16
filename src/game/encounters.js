@@ -169,6 +169,7 @@ export class Director {
     if (wave.lesson && this.hooks.lesson?.()) {
       this.lesson = { t: 0, base: w.stats.parries };
       w.lessonOn = true; this.hintT = 1e9;
+      if (wave.lessonHint) this.hint = wave.lessonHint;
       this.pending.forEach((s, i) => { if (i) s.t += 1000; else s.lesson = true; });
     }
     w.maxAttackers = wave.attackers; w.freeCast = !!w.mods.freeCast;
@@ -322,8 +323,9 @@ export class Director {
       const options = draftPowers(w.powers, r);
       if (options.length) return { type: 'power', title: 'CHOOSE A POWER', sub: 'The champion falls. Take what it guarded', options, idx: 0 };
     }
-    const tier = Math.min(2, (def.reward === 'legend' ? 2 : def.reward === 'augment' ? 0 : 1) + (lift && def.reward !== 'legend' ? 1 : 0));
-    const d = this.cards(r, tier === 2 && def.reward !== 'legend' ? 1 : tier, n, tier === 2 ? 'The keeper falls' : lift ? 'The elite guard falls' : `Floor ${n} cleared`);
+    // An elite door lifts a plain floor's cards to the tier an event floor pays. Legendaries stay with the keepers.
+    const legend = def.reward === 'legend', tier = legend ? 2 : def.reward === 'augment' && !lift ? 0 : 1;
+    const d = this.cards(r, tier, n, legend ? 'The keeper falls' : lift ? 'The elite guard falls' : `Floor ${n} cleared`);
     if (!d) return null;
     // Now and then a weapon lies among the cards: taking it trades the blade in hand.
     const rw = makeRng(hash32(this.seed, 0x3ea9 + n * 17));

@@ -11,12 +11,12 @@ const KEYMAP = {
   ShiftLeft: 'dash', ShiftRight: 'dash', KeyV: 'dash', Semicolon: 'dash',
   KeyI: 'special', KeyE: 'special',
   KeyU: 'cycle', KeyQ: 'cycle', Tab: 'cycle',
-  KeyO: 'overdrive', KeyR: 'overdrive',
+  KeyO: 'overdrive', KeyR: 'overdrive', KeyT: 'swap',
   Escape: 'pause', KeyP: 'pause', Enter: 'confirm',
 };
 // Standard-mapping gamepad buttons.
-const PADMAP = { 0: 'jump', 2: 'light', 3: 'heavy', 1: 'dash', 5: 'guard', 7: 'guard', 4: 'special', 6: 'cycle', 10: 'overdrive', 11: 'overdrive', 9: 'pause', 12: 'up', 13: 'down', 14: 'left', 15: 'right' };
-const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'light', 'heavy', 'guard', 'dash', 'special', 'cycle', 'overdrive', 'pause', 'confirm'];
+const PADMAP = { 0: 'jump', 2: 'light', 3: 'heavy', 1: 'dash', 5: 'guard', 7: 'guard', 4: 'special', 6: 'cycle', 10: 'overdrive', 11: 'overdrive', 9: 'pause', 8: 'swap', 12: 'up', 13: 'down', 14: 'left', 15: 'right' };
+const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'light', 'heavy', 'guard', 'dash', 'special', 'cycle', 'overdrive', 'swap', 'pause', 'confirm'];
 
 export class Input {
   constructor() {

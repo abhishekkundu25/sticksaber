@@ -161,7 +161,7 @@ export class Fighter {
       this.x = mt.saddleX ?? mt.cx; this.y = (mt.saddleY ?? mt.cy - 16 * mt.scale) + 24 * this.scale; this.vx = 0; this.vy = 0; this.onGround = true;
     } else {
       if (this.def.rooted) this.vx = 0; // a prop stays where it was put
-      if (this.onGround && !this.isPlayer && this.vx !== 0 && (world.pits.length || this.perch) && this.state !== 'hitstun' && this.state !== 'recoil' && this.state !== 'stagger') {
+      if (this.onGround && !this.isPlayer && !this.herd && this.vx !== 0 && (world.pits.length || this.perch) && this.state !== 'hitstun' && this.state !== 'recoil' && this.state !== 'stagger') {
         // Nobody walks off an edge on purpose. Being knocked off one is another matter.
         const ahead = this.x + this.vx * dt + Math.sign(this.vx) * 34 * this.scale, P = this.perch;
         if (P && (!P.solid || Math.abs(this.y - P.y) > 3)) this.perch = null;

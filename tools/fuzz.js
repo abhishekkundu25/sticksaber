@@ -40,6 +40,7 @@ function check(world, label) {
     if (f.riding) seen.rider = 1;
     if (f.enraged) seen.enraged = 1;
     seen[`${who}:${f.state}${f.move ? ':' + f.move.src : ''}`] = 1;
+    if (f.move && f.def.kit?.school === 'shade') seen[`${who}:attack`] = 1; // climbers use copies of the player's moves, whatever the weapon
     if (f.move && f.move.id !== f.move.src) seen[f.move.id.includes('+') ? 'generated:chain' : 'generated:tempo'] = 1;
   }
 }
@@ -101,6 +102,15 @@ for (const type of Object.keys(SURPRISES)) {
     d.enterStage(d.stage, type === 'shade' ? d.waveCount : d.waveCount - 1, true);
   }, true);
 }
+// The same surprises where the floor has open edges: a lift, the hardest room to share.
+const LIFT = { plats: [{ fx: 0, y: -165, w: 230, fixed: true, amp: 0.28, period: 7, phase: 0 }], vents: [], walls: false, pits: [{ side: -1, w: 400 }, { side: 1, w: 400 }], lift: true };
+for (const type of Object.keys(SURPRISES)) {
+  soak(`random input, surprise ${type} on a lift`, quick ? 12 : 30, (d) => {
+    d.startRun(16, 3200, 'normal', null, 'sprint');
+    const def = d.stageDef; def.objective = null; def.surprise = { type, tier: 2 }; def.terrain = LIFT;
+    d.enterStage(d.stage, type === 'shade' ? d.waveCount : d.waveCount - 1, true);
+  }, true);
+}
 for (const o of [{ type: 'survive', time: 12 }, { type: 'hunt' }, { type: 'hold', fx: 0.2, need: 6 }, { type: 'cores', at: [-0.6, 0, 0.6] }]) {
   soak(`random input, objective ${o.type}`, quick ? 14 : 30, (d) => { d.startRun(16, 3100, 'normal', null, 'sprint'); const def = d.stageDef; def.surprise = null; def.objective = o; d.enterStage(d.stage, 0, true); }, true);
 }
@@ -129,5 +139,5 @@ const want = ['player:attack:RIPOSTE', 'player:attack:PLUNGE_LAND', 'player:atta
   'forgemaster:attack:fm_string', 'forgemaster:attack:fm_quake', 'forgemaster:attack:fm_ember', 'forgemaster:attack:fm_erupt', 'forgemaster:custom',
   'strain:attack:br_charge', 'strain:attack:d_throw', 'strain:stagger', 'strain:custom', 'champion:custom', 'champion:stagger', 'warden:custom', 'warden:stagger', 'warden:attack:p_slam', 'warden:attack:fm_erupt~', 'warden:guard',
   'generated:tempo', 'generated:chain', 'beast:attack:bt_hound_snap', 'beast:attack:bt_charger_charge', 'beast:attack:bt_raptor_leap', 'beast:attack:bt_ape_slam', 'beast:attack:bt_spit_shot', 'beast:custom', 'beast:ragdoll', 'beast:stagger',
-  'rider', 'enraged', 'shade:custom', 'shade:stagger', 'rival:attack:L1', 'beast:free', 'core:free', 'cache:free', 'cell:free', 'courier:free', 'ally:attack:L1', 'twinA:attack:p_verdict', 'twinB:attack:ln_thrust', 'cartographer:custom', 'player:attack:TW_L1', 'player:attack:GS_H1', 'player:attack:ST_L1'];
+  'rider', 'enraged', 'shade:custom', 'shade:stagger', 'beast:free', 'core:free', 'cache:free', 'cell:free', 'courier:free', 'ally:attack', 'rival:attack', 'shade:attack', 'twinA:attack:p_verdict', 'twinB:attack:ln_thrust', 'cartographer:custom', 'player:attack:TW_L1', 'player:attack:GS_H1', 'player:attack:ST_L1'];
 for (const k of want) if (!seen[k]) console.log('  NOT REACHED:', k);

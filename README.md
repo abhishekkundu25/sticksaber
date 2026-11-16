@@ -43,7 +43,7 @@ A run is saved at the start of every floor: seed, length, difficulty, floor, bui
 | Guard, tap on impact to parry | L | RB |
 | Use the selected Focus power | I, or middle mouse button | LB |
 | Switch power | U, 1 to 9, the mouse wheel, or click a power in the HUD | LT |
-| Switch weapon (with a Second Sheath) | T | |
+| Switch weapon (with a Second Sheath) | T | Back / Select |
 | Drop through a light bridge | S + Space | Down + A |
 | Burst (costs 1 focus, while being hit or knocked down) | I | LB |
 | Overdrive (needs a full focus meter) | O | Click either stick |
@@ -51,13 +51,13 @@ A run is saved at the start of every floor: seed, length, difficulty, floor, bui
 
 Fullscreen is F. Mute is M. G cycles graphics quality between auto, high and low.
 
-Everything outside a fight works with the mouse: menu items, cards, doors, the quartermaster's stock and the pause buttons highlight under the pointer and take a click. Esc leaves a room that can be left. A gamepad rumbles on hits, parries and boss kills where the browser supports it.
+Outside a fight a gamepad moves with the d-pad or the stick, confirms with A, and goes back or leaves a room with B. Everything outside a fight also works with the mouse: menu items, cards, doors, the quartermaster's stock and the pause buttons highlight under the pointer and take a click. Esc leaves a room that can be left. A gamepad rumbles on hits, parries and boss kills where the browser supports it.
 
 ### Phones and tablets
 
 Hold the device in landscape. The first touch switches on the touch controls; a desktop never shows them.
 
-- Tap a menu item or a draft card to choose it.
+- Tap a menu item or a card to choose it. When a screen has more than four cards they fold down to their names: tap one to read it, then tap it again to take it.
 - The left thumb gets a stick that appears wherever it lands. Left and right move. Pulling down is the same as S: stick down plus HEAVY launches on the ground and plunges in the air.
 - The right thumb gets LIGHT, HEAVY, JUMP, DASH, GUARD, OVERDRIVE and the power button. The power button carries the name of the selected power. SWAP, which appears once you own a second power, changes it. While you are being hit the power button grows, glows and reads BURST. OVERDRIVE lights up when the meter is full.
 - The pause button is at the top centre. In the training room a SPAWN button adds an enemy. BLADE appears beside it once you carry two weapons, and switches between them.
@@ -267,7 +267,7 @@ A kill made by the room shows ENVIRONMENT and pays extra focus.
 - The Cartographer redraws the floor. First strips that erupt, then a wall of fire that walks across the room with two gaps in it, and in its last phase the whole floor, with three light bridges to stand on.
 - A champion or a keeper is announced by name as it lands. A boss kill ends with a finisher: time slows, the camera closes in and the body keeps coming apart.
 - The Shade uses copies of your own moves, played slower behind a held wind-up. Change weapon or take different powers and the next Shade fights differently.
-- A first-time player gets a parry lesson on floor 1: the instructor cannot be hurt until you parry it once.
+- A first-time player gets a parry lesson on floor 1, in a sprint and in the climb: the instructor cannot be hurt until you parry it once.
 - The Forgemaster's hammer heats through each string. You can parry it until it glows white. When it vents steam, hit it.
 - The Proctor kneels to heal at 45% and 20% health. Any hit interrupts it and breaks its posture. The saber throw reaches it from across the room.
 

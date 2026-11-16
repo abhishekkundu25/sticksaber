@@ -4,7 +4,7 @@ import { World } from './game/world.js';
 import { Director } from './game/encounters.js';
 import { Renderer } from './render/renderer.js';
 import { buildArena, ARENA_IDS } from './render/arenas.js';
-import { Hud, draftCard, menuLayout, pauseButton, skipButton } from './ui/hud.js';
+import { Hud, draftCard, draftFocus, menuLayout, pauseButton, skipButton } from './ui/hud.js';
 import { codexTab, codexBack, CODEX_PAGES } from './ui/codex.js';
 import { Touch } from './ui/touch.js';
 import { audio } from './audio/audio.js';
@@ -203,8 +203,15 @@ function shell() {
   if (hit('KeyF')) { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.().catch(() => {}); }
   if (hit('KeyM')) { app.muted = !app.muted; audio.setVolumes({ master: app.muted ? 0 : 1 }); toast(app.muted ? 'SOUND OFF' : 'SOUND ON'); }
   if (hit('KeyG')) { const m = GFX[(GFX.indexOf(renderer.mode) + 1) % GFX.length]; renderer.setMode(m); toast(`GRAPHICS  ${m.toUpperCase()}`); }
-  let confirm = hit('Enter', 'NumpadEnter', 'Space') || (input.usedPad && app.state !== 'play' && input.consume('jump', 0.1));
-  let back = hit('Escape'), skip = false;
+  // A gamepad outside a fight: the d-pad or the stick moves, A confirms, B goes back or leaves a room,
+  // Start pauses. In a fight those buttons belong to the fight.
+  const calm = !fighting(), pad = (a) => input.usedPad && calm && input.consume(a, 0.12);
+  const sgn = input.usedPad && Math.abs(input.padX) > 0.5 ? Math.sign(input.padX) : 0, flick = sgn !== app.padSgn && calm ? sgn : 0;
+  app.padSgn = sgn;
+  const left = hit('ArrowLeft', 'KeyA') || pad('left') || flick < 0, right = hit('ArrowRight', 'KeyD') || pad('right') || flick > 0;
+  const upDown = hit('ArrowUp', 'KeyW', 'ArrowDown', 'KeyS') || pad('up') || pad('down');
+  let confirm = hit('Enter', 'NumpadEnter', 'Space') || pad('jump');
+  let back = hit('Escape') || pad('dash') || (input.usedPad && input.consume('pause', 0.1)), skip = false;
   const drafting = app.state === 'play' && director.state === 'draft';
   if (touch.enabled && !app.touch) { app.touch = true; renderer.touch = true; renderer.resize(); }
   // Touch: a tap on a menu item or a draft card picks it; a tap anywhere dismisses a screen that only needs acknowledging.
@@ -217,8 +224,9 @@ function shell() {
         document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {});
       }
     } else if (drafting) {
-      const n = director.draft.options.length;
-      for (let i = 0; i < n; i++) if (inRect(draftCard(renderer.view.w, n, i), t)) { director.draft.idx = i; confirm = true; }
+      // With many cards on a small screen they are folded: the first tap unfolds one, the second takes it.
+      const d = director.draft, n = d.options.length, focus = draftFocus(d, true);
+      for (let i = 0; i < n; i++) if (inRect(draftCard(renderer.view.w, n, i, focus), t)) { if (focus >= 0 && i !== d.idx) { d.idx = i; audio.play('uiMove'); } else { d.idx = i; confirm = true; } break; }
       if (director.draft.skip && inRect(skipButton(renderer.view.w), t)) skip = true;
     } else if (app.state === 'codex') {
       // The codex turns its pages by tab and leaves by its back control; a stray tap does nothing.
@@ -269,9 +277,9 @@ function shell() {
   switch (app.state) {
     case 'menu': {
       const n = app.menu.length, row = (i) => (app.menu[i].row ? 1 : 0);
-      if (hit('ArrowLeft', 'KeyA')) { app.idx = (app.idx + n - 1) % n; audio.play('uiMove'); }
-      if (hit('ArrowRight', 'KeyD')) { app.idx = (app.idx + 1) % n; audio.play('uiMove'); }
-      if (hit('ArrowUp', 'KeyW', 'ArrowDown', 'KeyS')) {
+      if (left) { app.idx = (app.idx + n - 1) % n; audio.play('uiMove'); }
+      if (right) { app.idx = (app.idx + 1) % n; audio.play('uiMove'); }
+      if (upDown) {
         // Up and down move between the two rows, to the item nearest across.
         const L = menuLayout(renderer.view.w, renderer.view.h, app.menu), from = L[app.idx].cx, other = 1 - row(app.idx);
         let best = -1;
@@ -293,8 +301,8 @@ function shell() {
       break;
     }
     case 'codex':
-      if (hit('ArrowLeft', 'KeyA')) codexPage(app.codexPage - 1);
-      if (hit('ArrowRight', 'KeyD')) codexPage(app.codexPage + 1);
+      if (left) codexPage(app.codexPage - 1);
+      if (right) codexPage(app.codexPage + 1);
     // falls through: confirm and back leave the codex as they leave the controls
     case 'controls': if (confirm || back) { app.state = 'menu'; audio.play('uiMove'); } break;
     case 'pause':
@@ -305,8 +313,8 @@ function shell() {
       if (drafting) {
         // Choosing an augment or a power: left and right move, a number or confirm takes it.
         const d = director.draft, n = d.options.length;
-        if (hit('ArrowLeft', 'KeyA')) { d.idx = (d.idx + n - 1) % n; audio.play('uiMove'); }
-        if (hit('ArrowRight', 'KeyD')) { d.idx = (d.idx + 1) % n; audio.play('uiMove'); }
+        if (left) { d.idx = (d.idx + n - 1) % n; audio.play('uiMove'); }
+        if (right) { d.idx = (d.idx + 1) % n; audio.play('uiMove'); }
         const num = DIGITS.findIndex((c) => hit(c));
         if (num >= 0 && num < n) { d.idx = num; confirm = true; }
         // A room that can be left is left with Escape; anywhere else Escape pauses.
@@ -321,7 +329,7 @@ function shell() {
         if (hit('KeyC')) copyResult();
         else if (director.t > 1.2 && (confirm || back)) { store.set(RUN_KEY, null); toMenu(); }
       } else if (back || hit('KeyP')) { app.state = 'pause'; audio.play('uiMove'); }
-      else if (hit('KeyT') && !director.training) world.swapForm();
+      else if (input.consume('swap', 0.15) && !director.training) world.swapForm();
       if (director.training) for (const c of input.keysHit) director.trainingKey(c);
       else if (!drafting) { const num = DIGITS.findIndex((c) => hit(c)); if (num >= 0) world.selectPower(num); }
       break;
