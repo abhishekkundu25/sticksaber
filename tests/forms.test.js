@@ -184,23 +184,75 @@ function room(form, gap = 120, over = null) {
 const run = (world, secs, each) => { for (let t = 0; t < secs; t += DT) { world.input?.tick?.(DT); world.step(DT); each?.(t); } };
 const strike = (form, move, gap) => { const { world, p, e } = room(form, gap); p.startMove(move); run(world, 0.5); return 1e5 - e.hp; };
 
-test('lash: the tip bites hardest, and nothing in close is hit at all', () => {
+test('lash: all of the whip connects, and the tip bites hardest', () => {
   const near = strike('lash', 'LA_L1', 45), mid = strike('lash', 'LA_L1', 95), tip = strike('lash', 'LA_L1', 140);
-  assert.equal(near, 0, `a target against the hand took ${near}`);
-  assert.ok(mid > 0 && tip > mid * 1.15, `mid ${mid.toFixed(1)}, tip ${tip.toFixed(1)}`);
+  assert.ok(near > 0, 'a target against the hand was not hit');
+  assert.ok(near >= strike('saber', 'L1', 45) * 0.9, `up close the lash did ${near.toFixed(1)}, well under a saber`);
+  assert.ok(mid >= near && tip > near * 1.15, `near ${near.toFixed(1)}, mid ${mid.toFixed(1)}, tip ${tip.toFixed(1)}`);
   // The lash reaches about twice as far as the saber.
   assert.ok(FORMS.lash.blade.len >= FORMS.saber.blade.len * 1.9);
+  assert.ok(strike('lash', 'LA_L1', 165) > 0, 'the lash did not reach 165');
 });
 
-test('lash: the heavy drags a target in, or drags you to one too heavy to move', () => {
+test('lash: the wielder stands their ground, and a guard costs the hit but not the wielder', () => {
+  // The light string never walks its owner backward.
+  let { world, p } = room('lash', 120);
+  for (const id of ['LA_L1', 'LA_L2', 'LA_L3']) { p.startMove(id); run(world, MOVES[id].dur + 0.02); }
+  assert.ok(p.x >= -1, `the lights moved the wielder back to ${p.x.toFixed(0)}`);
+  // A blocked crack does not stagger the one who threw it.
+  let e;
+  ({ world, p, e } = room('lash', 120));
+  e.setState('guard'); e.ai.guardT = 9;
+  p.startMove('LA_L1'); let recoiled = false;
+  run(world, 0.34, () => { e.state === 'guard' || e.setState('guard'); recoiled ||= p.state === 'recoil'; });
+  assert.ok(!recoiled, 'a blocked crack staggered its owner');
+  // The whirl is a ring: it hits what stands behind.
+  ({ world, p, e } = room('lash', -90));
+  p.facing = 1; p.startMove('LA_L4'); run(world, 0.3);
+  assert.ok(1e5 - e.hp > 0, 'the whirl did not reach behind');
+  // Every ground move lets the guard come up before it can be cancelled into anything else.
+  for (const id of ['LA_L1', 'LA_L2', 'LA_L3', 'LA_L4', 'LA_H1', 'LA_LAUNCH', 'LA_FIN', 'LA_DA']) assert.ok(MOVES[id].guardAt < MOVES[id].cancel * 0.75, `${id}: no early guard`);
+  ({ world, p } = room('lash', 400));
+  p.startMove('LA_L1'); world.input.press('guard', 1);
+  run(world, 0.17);
+  assert.equal(p.state, 'guard', 'the guard did not come up mid-string');
+});
+
+test('lash: the heavy drags a target in and cracks it, and holds one too heavy to move', () => {
   let { world, p, e } = room('lash', 200);
-  p.startMove('LA_H1'); run(world, 0.7);
-  assert.ok(1e5 - e.hp > 0, 'the heavy did not connect at 200');
-  assert.ok(e.x - p.x < 150, `the target is still ${(e.x - p.x).toFixed(0)} away`);
+  p.startMove('LA_H1'); run(world, 0.38);
+  const afterWrap = 1e5 - e.hp;
+  assert.ok(afterWrap > 0, 'the wrap did not connect at 200');
+  // It is on its way in when the crack comes, so the crack meets it out at the tip.
+  assert.ok(e.x - p.x < 175 && e.x - p.x > 80, `the target is ${(e.x - p.x).toFixed(0)} away after the pull`);
+  assert.ok(Math.abs(p.x) < 6, `the pull moved the wielder ${p.x.toFixed(0)}`);
+  run(world, 0.3);
+  assert.ok(1e5 - e.hp > afterWrap * 2.5, `the crack added only ${(1e5 - e.hp - afterWrap).toFixed(1)} to the wrap's ${afterWrap.toFixed(1)}`);
+  // The whole heavy is worth about what a saber's is, at any distance.
+  const saber = strike('saber', 'H1', 70);
+  for (const gap of [40, 90, 150]) { const d = (() => { const r = room('lash', gap); r.p.startMove('LA_H1'); run(r.world, 0.75); return 1e5 - r.e.hp; })(); assert.ok(d > saber * 0.9 && d < saber * 1.6, `heavy at ${gap}: ${d.toFixed(1)} against the saber's ${saber.toFixed(1)}`); }
+  // Something too heavy to move stays where it is, and so does the wielder: no dragging yourself into a boss.
   ({ world, p, e } = room('lash', 200, { armor: 2 }));
   const x0 = e.x;
-  p.startMove('LA_H1'); run(world, 0.7);
-  assert.ok(Math.abs(e.x - x0) < 10 && p.x > 60, `anchored target moved ${(e.x - x0).toFixed(0)}, the player ${p.x.toFixed(0)}`);
+  p.startMove('LA_H1'); run(world, 0.75);
+  assert.ok(Math.abs(e.x - x0) < 10 && Math.abs(p.x) < 6, `anchored target moved ${(e.x - x0).toFixed(0)}, the wielder ${p.x.toFixed(0)}`);
+  assert.ok(1e5 - e.hp > saber * 0.9);
+});
+
+test('an enemy that reads or counters counts moves, not hits', () => {
+  // The same number of attacks from a weapon of many small hits and from the saber leaves a reader equally wary.
+  const reads = (form, move) => {
+    const { world, p, e } = room(form, form === 'saber' ? 70 : 100, { adaptAt: 99 });
+    for (let k = 0; k < 2; k++) { p.startMove(move); run(world, MOVES[move].dur + 0.05); }
+    return e.adapt.light || 0;
+  };
+  assert.equal(reads('lash', 'LA_L3'), reads('saber', 'L1'), 'a two-hit move was counted as two attacks');
+  // A guard that counters after two blocked attacks does not count one whirl as four.
+  const { world, p, e } = room('lash', 80);
+  e.ai.blocks = 0; e.ai.blocked = (self) => { self.ai.blocks++; };
+  e.setState('guard');
+  p.startMove('LA_L4'); run(world, 0.5, () => { if (e.state !== 'guard' && !e.rag && e.state !== 'stagger') e.setState('guard'); });
+  assert.ok(e.ai.blocks <= 1, `one move was counted as ${e.ai.blocks} blocked attacks`);
 });
 
 test('gauntlets: landed punches build charge and the heavy spends it on a shockwave', () => {
@@ -278,8 +330,8 @@ test('a fighter that is not the player can use each signature move against the p
   };
   // Lash: the pull drags the player in.
   let { world, p, f } = setup('lash', 200);
-  f.startMove(formMove(f, 'H1')); run(world, 0.7);
-  assert.ok(p.hp < 1e4 && f.x - p.x < 150, `lash: player hp ${p.hp}, gap ${(f.x - p.x).toFixed(0)}`);
+  f.startMove(formMove(f, 'H1')); run(world, 0.36);
+  assert.ok(p.hp < 1e4 && f.x - p.x < 180, `lash: player hp ${p.hp}, gap ${(f.x - p.x).toFixed(0)}`);
   // Gauntlets: punches charge the copy's own fists, and the heavy spends them.
   ({ world, p, f } = setup('gauntlets', 60));
   for (const s of ['L1', 'DA']) { p.invuln = 0; f.startMove(formMove(f, s)); run(world, 0.42); }

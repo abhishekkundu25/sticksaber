@@ -320,8 +320,8 @@ const foes = (f, e) => e !== f && !e.dead && !e.phantom && !e.remove && e.team !
 // A whip of light about twice the saber's reach. The pose aims a straight line from the hand (`bl`), and
 // the whip is a chain of points that chases that line, stiff near the hand and loose at the tip, so a
 // swing unrolls and the tip snaps last. When it is not attacking it hangs from the hand and drags on
-// the floor. The hit test uses the chain itself (combat.js), the inner part never connects, and the
-// tip deals the most.
+// the floor. The hit test uses the chain itself (combat.js). All of it connects, and the tip deals
+// the most.
 const WN = 12;            // points along the whip, the hand included
 const CRACK_V = 3000;     // tip speed, in units a second, past which the tip cracks
 function whipTick(f, world, dt) {
@@ -372,14 +372,16 @@ function whipTick(f, world, dt) {
   f.tx = q[last]; f.ty = q[last + 1];
 }
 
-// Every lash hit: a guard turns the whip back on its owner, and a tip strike rings out.
+// Every lash hit: a guard slaps the whip aside (it costs nothing but the hit), and a tip strike rings out.
 function lashHit(world, A, B, r) {
-  if (r === 'block') {
-    world.fx.spark(A.tx, A.ty, 0, 3.14, 8, 380, '#ffffff', { white: 0.6 }); world.sfx('lashDeflect', A.tx);
-    if (A.state === 'attack' && A.move.fam !== 'riposte') { A.setState('recoil', 0.24); A.vx = -A.facing * 140; }
-    return;
-  }
-  if (landed(r) && A.tipK >= 0.75) { world.fx.ring(B.cx, B.cy, 6, 56, 0.16, '#ffffff', 1, 3); world.sfx('lashTip', B.x, 0.8); }
+  if (r === 'block') { world.fx.spark(A.tx, A.ty, 0, 3.14, 8, 380, '#ffffff', { white: 0.6 }); world.sfx('lashDeflect', A.tx); return; }
+  if (!landed(r) || A.tipK < 0.75) return;
+  world.fx.ring(B.cx, B.cy, 6, 56, 0.16, '#ffffff', 1, 3); world.sfx('lashTip', B.x, 0.8);
+  // The crack of the tip is what holds a fight at whip's length: it shoves back what it can move and
+  // rattles the posture of what it cannot.
+  if (r !== 'hit' || B.dead || B.isPlayer) return;
+  if (anchored(B)) { if (B.state !== 'stagger') B.posture += 5; }
+  else if (!B.rag && B.onGround && B.state === 'hitstun') B.vx += (B.x >= A.x ? 1 : -1) * 240;
 }
 // Holds the target at the tip for a moment, so the whip is seen to wrap it.
 function lashWrap(world, A, B, r) {
@@ -388,23 +390,22 @@ function lashWrap(world, A, B, r) {
   A.lashHold = B; A.lashHoldT = 0.42;
   world.sfx('lashWrap', B.x);
 }
-// Bodies too big to move: the lash pulls its owner to them instead.
+// Bodies too big to move. The lash holds them where they stand; it never drags its owner into them.
 const anchored = (B) => !!(B.def.boss || B.def.armor >= 2 || B.def.noRagdoll || B.def.thing || B.riding || B.scale > 1.3 || (B.def.beast && B.scale > 1.1));
-// The heavy: wrap the target and bring it to where the whip bites hardest (dragged in from afar,
-// shoved out from too close), or, if it will not move, drag yourself to it.
+// The heavy's first hit: wrap the target and drag it in to where the second hit, the crack, will
+// meet it. A target already that close is held where it is. One too heavy to move is held too, and
+// the wrap wears at its posture instead.
 function lashPull(world, A, B, r) {
   lashHit(world, A, B, r);
   if (r !== 'hit' && r !== 'break') return;
   A.lashHold = B; A.lashHoldT = 0.3;
-  const dir = B.x >= A.x ? 1 : -1, go = Math.abs(B.x - A.x) - A.bladeLen * 0.72, fx = world.fx; // < 0: too close
-  if (anchored(B)) {
-    A.vx = dir * Math.min(1500, Math.sqrt(2 * 2400 * Math.max(0, Math.abs(B.x - A.x) - 80))); A.invuln = Math.max(A.invuln, 0.2);
-    fx.ghost(A, A.color, 0.25);
-  } else if (B.rag) B.rag.kick(-dir * Math.max(-600, Math.min(900, go * 4)), -240, 0);
+  const dir = B.x >= A.x ? 1 : -1, go = Math.abs(B.x - A.x) - A.bladeLen * 0.62, fx = world.fx; // how far it has to come
+  if (anchored(B)) { if (B.state !== 'stagger' && !B.isPlayer) { B.posture += 14; B.postureDelay = 2.4; B.barT = 3.5; } }
+  else if (B.rag) B.rag.kick(-dir * Math.max(0, Math.min(900, go * 4)), -240, 0);
   else {
     const fr = B.state === 'stagger' ? 2200 : 1500;
-    if (B.state !== 'stagger') B.setState('hitstun', 0.55);
-    B.vx = -dir * Math.sign(go) * Math.sqrt(2 * fr * Math.abs(go));
+    if (B.state !== 'stagger') B.setState('hitstun', 0.62);
+    B.vx = go > 0 ? -dir * Math.sqrt(2 * fr * go) : 0;
   }
   fx.slash((A.x + B.x) / 2, B.cy, 0, Math.abs(B.x - A.x), A.color, 0.18, 3);
   world.sfx('lashPull', B.x);
@@ -421,54 +422,65 @@ const LWU = { ha: -1.5, hr: 0.8, bl: -2.6, lean: 0.3, py: 43, ua: -0.6, la: 0.1 
 const LSU = { ha: 0.3, hr: 1, bl: 0.16, lean: -0.05, py: 48, f1x: 20, ua: -2.3, la: -2.2 }; // rising crack
 const LHI = { ha: 1.45, hr: 0.9, ua: -0.6, la: 0.4 };                              // hand above the head, for the whirl
 const LYANK = { ha: -2.6, hr: 0.75, bl: 0.05, lean: -0.3, py: 47, f1x: 12, f2x: -28, ua: -2.0, la: -1.3 }; // hand torn back to the hip
-const lx = (t, d, o = {}) => hit(t, t + d, o.dmg ?? 8, { kx: 90, stop: 0.05, shake: 0.16, onHit: lashHit, ...o });
+const lx = (t, d, o = {}) => hit(t, t + d, o.dmg ?? 9, { kx: 90, stop: 0.05, shake: 0.16, onHit: lashHit, ...o });
+// One turn of the whip around the wielder: a ring that reaches both ways.
+const whirl = (t) => ({ ...hit(t, t + 0.09, 3, { kx: 70, stop: 0.03, shake: 0.1, onHit: lashHit }), shape: 'circle', ox: 0, oy: -70, r: 150 });
 
+// `guardAt` on the ground moves: the whip is light, so its wielder can drop a string and raise a
+// guard from that moment on. It is the lash's answer to being caught mid-swing at long range.
 const la = {
   // Light string: an overhand crack, a rising crack, a figure of eight, then a whirl overhead that
-  // ends in a crack that throws. Each crack gives a little ground, so the tip stays on the target.
-  LA_L1: { fam: 'light', dur: 0.42, cancel: 0.24, next: { light: 'LA_L2', heavy: 'LA_H1' },
-    keys: [[0, LW], [0.07, { ...LW, bl: 2.5 }], [0.15, LS, 'in'], [0.42, { ...LS, ha: -0.35, hr: 0.85, bl: -0.45, lean: 0.15 }]],
-    hits: [lx(0.11, 0.13)], step: [[0, 0.07, -150]], ev: [sfx(0.06, 'swingLash')] },
-  LA_L2: { fam: 'light', dur: 0.42, cancel: 0.24, next: { light: 'LA_L3', heavy: 'LA_LAUNCH' },
-    keys: [[0, LWU], [0.06, { ...LWU, bl: -2.8 }], [0.14, LSU, 'in'], [0.42, { ...LSU, ha: 0.5, hr: 0.9, bl: 0.6 }]],
-    hits: [lx(0.1, 0.13, { kx: 80 })], step: [[0, 0.06, -150]], ev: [sfx(0.05, 'swingLash')] },
-  LA_L3: { fam: 'light', dur: 0.5, cancel: 0.3, next: { light: 'LA_L4', heavy: 'LA_FIN' },
-    keys: [[0, LW], [0.05, { ...LW, bl: 2.5 }], [0.12, LS, 'in'], [0.2, { ha: 1.0, hr: 0.85, bl: 1.2, lean: 0, py: 47, ua: -1.6, la: -0.8 }], [0.28, { ...LS, ha: 0.05, bl: 0.12 }, 'in'], [0.5, { ...LS, bl: -0.3 }]],
-    hits: [lx(0.09, 0.1, { dmg: 6, kx: 40 }), lx(0.24, 0.11, { dmg: 7 })], ev: [sfx(0.05, 'swingLash'), sfx(0.2, 'swingLash')] },
-  LA_L4: { fam: 'light', dur: 0.72, cancel: 0.48, next: {},
-    keys: [[0, { ...LHI, bl: 3.0, lean: 0, py: 48 }], [0.04, { ...LHI, bl: 3.0 }], [0.34, { ...LHI, bl: 3.0 - 2 * T, py: 50, f1x: 18 }, 'lin'],
-      [0.44, { ...LS, bl: -0.1 - 2 * T, lean: 0.4, f1x: 30 }, 'in'], [0.72, { ...LS, bl: -0.4 - 2 * T }]],
-    hits: [lx(0.06, 0.09, { dmg: 3, kx: 60, stop: 0.03, shake: 0.1 }), lx(0.15, 0.09, { dmg: 3, kx: 60, stop: 0.03, shake: 0.1 }), lx(0.24, 0.09, { dmg: 3, kx: 60, stop: 0.03, shake: 0.1 }),
-      lx(0.38, 0.12, { dmg: 13, kx: 520, ky: -380, kind: 'knock', stop: 0.1, shake: 0.42, post: 18 })],
-    step: [[0.04, 0.3, 90]], ev: [sfx(0.05, 'swingLash'), sfx(0.2, 'swingLash'), sfx(0.36, 'swingSpin')] },
+  // clears a ring around you and ends in a crack that throws. The wielder stands their ground: a
+  // whip that walks its owner backward cannot be aimed.
+  LA_L1: { fam: 'light', dur: 0.36, cancel: 0.2, guardAt: 0.15, next: { light: 'LA_L2', heavy: 'LA_H1' },
+    keys: [[0, LW], [0.07, { ...LW, bl: 2.5 }], [0.15, LS, 'in'], [0.36, { ...LS, ha: -0.35, hr: 0.85, bl: -0.45, lean: 0.15 }]],
+    hits: [lx(0.11, 0.13)], ev: [sfx(0.06, 'swingLash')] },
+  LA_L2: { fam: 'light', dur: 0.36, cancel: 0.2, guardAt: 0.15, next: { light: 'LA_L3', heavy: 'LA_LAUNCH' },
+    keys: [[0, LWU], [0.06, { ...LWU, bl: -2.8 }], [0.14, LSU, 'in'], [0.36, { ...LSU, ha: 0.5, hr: 0.9, bl: 0.6 }]],
+    hits: [lx(0.1, 0.13, { kx: 80 })], ev: [sfx(0.05, 'swingLash')] },
+  LA_L3: { fam: 'light', dur: 0.46, cancel: 0.27, guardAt: 0.15, next: { light: 'LA_L4', heavy: 'LA_FIN' },
+    keys: [[0, LW], [0.05, { ...LW, bl: 2.5 }], [0.12, LS, 'in'], [0.2, { ha: 1.0, hr: 0.85, bl: 1.2, lean: 0, py: 47, ua: -1.6, la: -0.8 }], [0.28, { ...LS, ha: 0.05, bl: 0.12 }, 'in'], [0.46, { ...LS, bl: -0.3 }]],
+    hits: [lx(0.09, 0.1, { dmg: 7, kx: 40 }), lx(0.24, 0.11, { dmg: 8 })], ev: [sfx(0.05, 'swingLash'), sfx(0.2, 'swingLash')] },
+  // The whirl is a ring, not a line: it hits whatever stands near, in front or behind.
+  LA_L4: { fam: 'light', dur: 0.62, cancel: 0.42, guardAt: 0.28, next: {},
+    keys: [[0, { ...LHI, bl: 3.0, lean: 0, py: 48 }], [0.04, { ...LHI, bl: 3.0 }], [0.3, { ...LHI, bl: 3.0 - 2 * T, py: 50, f1x: 18 }, 'lin'],
+      [0.39, { ...LS, bl: -0.1 - 2 * T, lean: 0.4, f1x: 30 }, 'in'], [0.62, { ...LS, bl: -0.4 - 2 * T }]],
+    hits: [whirl(0.05), whirl(0.14), whirl(0.23), lx(0.33, 0.12, { dmg: 16, kx: 520, ky: -380, kind: 'knock', stop: 0.1, shake: 0.42, post: 22 })],
+    step: [[0.3, 0.39, 160]], ev: [sfx(0.05, 'swingLash'), sfx(0.18, 'swingLash'), sfx(0.31, 'swingSpin')] },
 
-  // Heavy: the whip is thrown out straight, wraps what it meets and is torn back, dragging the target
-  // in. Something too heavy to move drags you to it instead. Armoured through the throw.
-  LA_H1: { fam: 'heavy', dur: 0.66, cancel: 0.42, next: { light: 'LA_L2' }, tier: 2, armor: [0.02, 0.22],
-    keys: [[0, { ha: 2.3, hr: 0.8, bl: 2.9, lean: -0.3, py: 50, ua: -0.4, la: 0.3, f2x: -26 }], [0.16, { ha: 2.4, hr: 0.85, bl: 3.1, lean: -0.35, py: 51 }],
-      [0.24, { ha: -0.05, hr: 1, bl: 0, lean: 0.4, py: 43, f1x: 30, ua: -2.4, la: -2.2 }, 'in'], [0.36, { ha: -0.05, hr: 1, bl: 0, lean: 0.35 }], [0.46, LYANK, 'out'], [0.66, { ...LYANK, ha: -2.0, hr: 0.7, bl: 0.6, lean: -0.1 }]],
-    hits: [lx(0.2, 0.16, { dmg: 8, kx: 0, stun: 0.55, stop: 0.06, shake: 0.22, post: 12, onHit: lashPull })], ev: [sfx(0.04, 'lashWind'), sfx(0.16, 'swingLash')] },
+  // Heavy: the whip is thrown out straight, wraps what it meets and tears it in, then cracks it
+  // where it lands. The crack breaks a guard, and holding the button charges both hits. Something too
+  // heavy to move is held where it stands. Armoured until the wrap lets go.
+  // The move cannot be cancelled until the crack has landed (a quarter sooner on a hit, like every
+  // move), or the next press would throw away the half of the heavy that hurts.
+  LA_H1: { fam: 'heavy', dur: 0.76, cancel: 0.7, guardAt: 0.3, next: { light: 'LA_L2' }, tier: 2, armor: [0.02, 0.5], charge: 0.1,
+    keys: [[0, { ha: 2.3, hr: 0.8, bl: 2.9, lean: -0.3, py: 50, ua: -0.4, la: 0.3, f2x: -26 }], [0.11, { ha: 2.4, hr: 0.85, bl: 3.1, lean: -0.35, py: 51 }],
+      [0.18, { ha: -0.05, hr: 1, bl: 0, lean: 0.4, py: 43, f1x: 30, ua: -2.4, la: -2.2 }, 'in'], [0.26, { ha: -0.05, hr: 1, bl: 0, lean: 0.35 }], [0.33, LYANK, 'out'],
+      [0.38, { ...LW, bl: 2.6, lean: -0.25 }], [0.45, { ...LS, lean: 0.45, f1x: 32 }, 'in'], [0.76, { ...LS, bl: -0.4, lean: 0.3 }]],
+    hits: [lx(0.14, 0.14, { dmg: 8, kx: 0, stun: 0.6, stop: 0.06, shake: 0.22, post: 12, onHit: lashPull }),
+      lx(0.41, 0.11, { dmg: 18, kx: 380, ky: -240, kind: 'knock', stop: 0.11, shake: 0.42, post: 32, guardBreak: true })],
+    ev: [sfx(0.03, 'lashWind'), sfx(0.11, 'swingLash'), sfx(0.38, 'swingLash')] },
   // Launcher: the whip snakes along the floor and is yanked straight up, the target with it.
-  LA_LAUNCH: { fam: 'launch', dur: 0.46, cancel: 0.26, next: {}, rise: 0.22,
+  LA_LAUNCH: { fam: 'launch', dur: 0.46, cancel: 0.26, guardAt: 0.17, next: {}, rise: 0.22,
     keys: [[0, LWU], [0.08, { ...LWU, ha: -1.6, bl: -2.8 }], [0.16, LSU, 'in'], [0.24, { ha: 1.5, hr: 1, bl: 1.35, lean: -0.25, py: 54, ua: 1.2, la: 1.6 }, 'out'], [0.46, { ha: 1.6, hr: 0.9, bl: 1.6, lean: -0.15 }]],
-    hits: [lx(0.12, 0.14, { dmg: 11, kx: -60, ky: -980, kind: 'launch', stop: 0.09, shake: 0.32, post: 18 })], ev: [sfx(0.07, 'swingLash'), sfx(0.2, 'lashPull')] },
+    hits: [lx(0.12, 0.14, { dmg: 11, kx: -60, ky: -980, kind: 'launch', stop: 0.09, shake: 0.32, post: 20 })], ev: [sfx(0.07, 'swingLash'), sfx(0.2, 'lashPull')] },
   // Finisher branch: a crack that wraps, then the target is heaved over your head and thrown behind you.
-  LA_FIN: { fam: 'heavy', dur: 0.8, cancel: 0.56, next: {}, tier: 2,
+  LA_FIN: { fam: 'heavy', dur: 0.8, cancel: 0.56, guardAt: 0.3, next: {}, tier: 2,
     keys: [[0, LW], [0.06, { ...LW, bl: 2.5 }], [0.13, LS, 'in'], [0.22, { ...LS, bl: 0.05 }], [0.42, { ha: 2.4, hr: 0.9, bl: 2.2, lean: -0.4, py: 52, f1x: 8, f2x: -30, ua: 1.6, la: 2.2 }, 'out'], [0.8, { ha: 2.2, hr: 0.85, bl: 2.6, lean: -0.25 }]],
-    hits: [lx(0.09, 0.12, { dmg: 6, kx: 0, stun: 0.7, onHit: lashWrap }), lx(0.26, 0.16, { dmg: 15, kx: -700, ky: -640, kind: 'knock', stop: 0.11, shake: 0.45, post: 24 })],
+    hits: [lx(0.09, 0.12, { dmg: 8, kx: 0, stun: 0.7, onHit: lashWrap }), lx(0.26, 0.16, { dmg: 20, kx: -700, ky: -640, kind: 'knock', stop: 0.11, shake: 0.45, post: 28 })],
     ev: [sfx(0.06, 'swingLash'), sfx(0.24, 'swingHeavy')] },
   // Dash attack: a running crack.
-  LA_DA: { fam: 'light', dur: 0.42, cancel: 0.24, next: { light: 'LA_L2', heavy: 'LA_LAUNCH' },
+  LA_DA: { fam: 'light', dur: 0.42, cancel: 0.24, guardAt: 0.15, next: { light: 'LA_L2', heavy: 'LA_LAUNCH' },
     keys: [[0, { ...LW, lean: 0.5, py: 40 }], [0.05, { ...LW, bl: 2.6, lean: 0.55, py: 39 }], [0.13, { ...LS, lean: 0.55, py: 40, f1x: 32 }, 'in'], [0.42, { ...LS, bl: -0.4, lean: 0.3 }]],
     hits: [lx(0.09, 0.13, { dmg: 10, kx: 160, stop: 0.06, shake: 0.2 })], step: [[0, 0.12, 560]], ev: [sfx(0.05, 'swingLash')] },
 
   // Air string: a downward crack, a rising one, then the whip whirls round the body and throws.
   LA_A1: { fam: 'air', air: true, dur: 0.34, cancel: 0.18, next: { light: 'LA_A2', heavy: 'LA_AH' },
     keys: [[0, { ...LW, ...AIRLEGS }], [0.05, { ...LW, bl: 2.5 }], [0.12, { ...LS, ha: -0.35, bl: -0.35, ...AIRLEGS, lean: 0.3 }, 'in'], [0.34, { ...LS, ha: -0.45, bl: -0.5 }]],
-    hits: [lx(0.08, 0.12, { dmg: 7, kx: 60, ky: -320, kind: 'pop', stop: 0.04 })], ev: [sfx(0.05, 'swingLash')] },
+    hits: [lx(0.08, 0.12, { dmg: 6, kx: 60, ky: -320, kind: 'pop', stop: 0.04 })], ev: [sfx(0.05, 'swingLash')] },
   LA_A2: { fam: 'air', air: true, dur: 0.34, cancel: 0.18, next: { light: 'LA_A3', heavy: 'LA_AH' },
     keys: [[0, { ...LWU, ...AIRLEGS, py: 47 }], [0.05, { ...LWU, bl: -2.7 }], [0.12, { ...LSU, f1x: 10, f1y: 22, f2x: -10, f2y: 12 }, 'in'], [0.34, { ...LSU, bl: 0.5 }]],
-    hits: [lx(0.08, 0.12, { dmg: 7, kx: 60, ky: -340, kind: 'pop', stop: 0.04 })], ev: [[0, 'leap', [70, -90]], sfx(0.05, 'swingLash')] },
+    hits: [lx(0.08, 0.12, { dmg: 6, kx: 60, ky: -340, kind: 'pop', stop: 0.04 })], ev: [[0, 'leap', [70, -90]], sfx(0.05, 'swingLash')] },
   LA_A3: { fam: 'air', air: true, dur: 0.5, cancel: 0.34, next: {},
     keys: [[0, { ha: -0.3, hr: 0.8, bl: 1.6, ...TUCK, lean: 0.1, ua: -0.6, la: 0 }], [0.03, { ha: -0.3, hr: 0.8, bl: 1.6 }], [0.3, { ha: -0.3, hr: 0.9, bl: 1.6 - 2 * T, ...TUCK, lean: 0.2 }, 'lin'], [0.5, { ha: -0.3, hr: 0.9, bl: 1.2 - 2 * T, ...AIRLEGS }]],
     hits: [lx(0.04, 0.09, { dmg: 4, kx: 40, ky: -280, kind: 'pop', stop: 0.03, shake: 0.1, post: 5 }), lx(0.14, 0.09, { dmg: 4, kx: 40, ky: -280, kind: 'pop', stop: 0.03, shake: 0.1, post: 5 }),
@@ -808,10 +820,10 @@ export const FORMS = {
   staff: { id: 'staff', name: 'STAFF', text: 'A blade at each end: spins that strike in front and behind at once', color: '#c69bff',
     traits: ['Long reach', 'Hits both sides', 'Crowd control', 'Light single hits'],
     blade: { len: 62, double: true }, dmg: 0.9, speed: 1, moves: slots('ST') },
-  lash: { id: 'lash', name: 'LASH', text: 'A whip of light: twice the reach, a tip that cracks, and a heavy that drags the target to you', color: '#ff6fd8',
-    traits: ['Twice the reach', 'Tip hits hardest', 'Pulls targets in', 'Weak up close'],
+  lash: { id: 'lash', name: 'LASH', text: 'A whip of light: twice the reach, a tip that cracks, and a heavy that drags the target in and cracks it away', color: '#ff6fd8',
+    traits: ['Twice the reach', 'Tip hits hardest', 'Pulls targets in', 'Whirl clears a ring'],
     blade: { len: 150, whip: true, thin: true, tick: whipTick }, dmg: 1, speed: 1, moves: slots('LA'),
-    bot: { reach: 128, combos: [['heavy', 'light', 'light'], ['light', 'heavy', 'light', 'light']] } },
+    bot: { reach: 126, combos: [['light', 'light', 'light', 'light'], ['heavy', 'light', 'light', 'light']] } },
   gauntlets: { id: 'gauntlets', name: 'GAUNTLETS', text: 'Fists with blades on the knuckles: every punch that lands charges the heavy shockwave', color: '#ffe45c',
     traits: ['Fastest strings', 'Shortest reach', 'Hits build charge', 'Charged shockwave'],
     blade: { len: 20, fist: true, twin: true, twinAngle: 0, twinLen: 1, tick: fistTick }, dmg: 1, speed: 1.08, moves: slots('GA'),

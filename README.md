@@ -94,7 +94,7 @@ A new run opens with a choice of seven weapons. Each has a complete move list of
 | Twin blades | Two short blades | Fast and short. A six-hit string that alternates hands, a long air string, about five hits a second for little damage each. Weak against guards. |
 | Greatsword | One long wide blade | Slow, wide arcs that hit several enemies. Its wind-ups shrug off light hits, and it breaks posture quickly. Three lights and a chargeable overhead that cracks the floor. |
 | Staff | A blade at each end | Spins that hit in front and behind at once, and long thrusts. Light damage on one target, strong in a crowd. |
-| Lash | A whip of light | Twice the saber's reach. The tip cracks and hits hardest; right up close it misses. The heavy wraps a target and drags it to you, or drags you to something too big to pull. |
+| Lash | A whip of light | Twice the saber's reach, and all of it hits. The tip cracks and hits hardest, and its crack shoves enemies back to whip's length. The heavy wraps a target, drags it in and cracks it away, breaking a guard. The last light is a whirl that hits all round you. You can raise your guard in the middle of a string. |
 | Gauntlets | A short blade on each fist | The fastest strings and the shortest reach. Every punch that lands charges the fists, and the heavy spends the charge on a shockwave that grows with it. |
 | Drawblade | A long blade kept in its sheath | Quick draw cuts. Hold heavy to charge in the sheath through three levels, release to dash through the line, and the cuts land as the blade clicks home. Release just after a level's tick for a perfect draw. |
 

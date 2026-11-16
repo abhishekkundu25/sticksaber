@@ -45,6 +45,9 @@ export function playerCtrl(f, world, dt) {
       if (m.rise && !f.rose && mt >= m.rise && f.hitLanded && (inp.held('heavy') || inp.held('jump'))) {
         f.rose = true; f.vy = -840; f.onGround = false; f.y -= 1; f.jumping = false;
       }
+      // A light weapon lets go early: some moves name the moment from which the guard can come up,
+      // well before the move can be cancelled into anything else.
+      if (m.guardAt !== undefined && mt >= m.guardAt && inp.held('guard')) { enterGuard(f, world, inp); return; }
       if (!(mt >= m.cancel || (f.hitLanded && mt >= m.cancel * 0.75))) break;
       if (tryDash(f, world, inp, ax) || tryAttack(f, world, inp, ax, m) || trySpecial(f, world, inp, ax)) return;
       if (f.hitLanded && tryJump(f, world, inp, ax)) { f.setState('free'); return; }

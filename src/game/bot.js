@@ -159,10 +159,14 @@ export class BotInput {
     const FB = p.form?.bot; // a weapon form's own reach and strings (forms.js)
     const reach = (FB?.reach ?? 96) + 34 * (tgt.scale - 1);
     if (td > reach) { this.down[dir] = true; if (td > (this.show ? 260 : 420) && p.dashCd <= 0 && rng() < dt * (this.show ? 6 : 3)) this.press('dash'); return; }
+    // An enemy that counters from its guard is waiting for the next swing: stop feeding it and wait it out.
+    if (tgt.state === 'guard' && tgt.def.counter && !tgt.broken && !this.repeat && rng() < this.skill) { this.script.length = 0; this.press('guard', 0.22); this.wait = 0.18; return; }
     if (!this.script.length) {
       // `repeat` forces the same string every time, to check that the game punishes it.
       const pool = FB && rng() < 0.4 ? FB.combos : this.show ? SHOW : COMBOS;
       this.script = [...(this.repeat || pool[(rng() * pool.length) | 0])];
+      // The enemy has read a family of moves and says so over its head: change the attack, as the game asks.
+      if (tgt.reads && !this.repeat && rng() < this.skill) this.script = tgt.reads === 'light' ? (rng() < 0.5 ? ['heavy'] : ['down+heavy', 'light']) : ['light', 'light', 'light'];
       if (this.show && tgt.def.flying && !tgt.rag) this.script = ['jump', 'light', 'light', 'heavy']; // go up after a drone
       if (Math.abs(dx) > 8) p.facing = dx > 0 ? 1 : -1;
     }

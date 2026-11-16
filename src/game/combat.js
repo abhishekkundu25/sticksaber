@@ -40,16 +40,17 @@ function weaponTouches(A, h, c, B) {
   return -1;
 }
 
-// A whip connects along its outer part only, so it cannot hit what stands against the hand. The tip's
-// sweep counts as the tip. `A.tipK` records how far out it struck, 0 at the inner edge to 1 at the tip.
-const WHIP_DEAD = 0.3;
+// A whip connects along its whole length, and from the shoulder to the hand like any blade, so what
+// stands against the wielder is hit too. It is tested from the tip inward, so `A.tipK` records the
+// farthest point that struck: 0 at the hand, 1 at the tip. The tip's own sweep counts as the tip.
 function whipTouches(A, c) {
-  const q = A.lash, n = q.length >> 1, i0 = Math.floor((n - 1) * WHIP_DEAD);
+  const q = A.lash, n = q.length >> 1;
   for (let i = 0; i < 12; i += 3) if (distPointSeg(c[i], c[i + 1], A.ptx, A.pty, A.tx, A.ty) < c[i + 2] + 7) { A.tipK = 1; return i; }
-  for (let s = n - 2; s >= i0; s--) {
+  for (let s = n - 2; s >= 0; s--) {
     const o = s * 2;
-    for (let i = 0; i < 12; i += 3) if (distPointSeg(c[i], c[i + 1], q[o], q[o + 1], q[o + 2], q[o + 3]) < c[i + 2] + 7) { A.tipK = (s + 1 - i0) / (n - 1 - i0); return i; }
+    for (let i = 0; i < 12; i += 3) if (distPointSeg(c[i], c[i + 1], q[o], q[o + 1], q[o + 2], q[o + 3]) < c[i + 2] + 7) { A.tipK = (s + 1) / (n - 1); return i; }
   }
+  for (let i = 0; i < 12; i += 3) if (distPointSeg(c[i], c[i + 1], A.j[2], A.j[3], q[0], q[1]) < c[i + 2] + 7) { A.tipK = 0; return i; }
   return -1;
 }
 
@@ -121,8 +122,9 @@ export function applyHit(world, A, B, h, cx, cy) {
 
   // ── damage ──
   let dmg = h.dmg, post = h.post, fresh = false, punished = false, crit = false;
-  // A whip's tip bites far harder than the part near the hand.
-  if (A?.lash && A.blade.whip && !h.shape) { const k = 0.6 + 0.7 * A.tipK; dmg *= k; post *= k; }
+  // A whip's tip bites harder than the part near the hand: a bonus for holding the range, on top of
+  // a hit that is worth landing anywhere along it.
+  if (A?.lash && A.blade.whip && !h.shape) { const k = 0.9 + 0.35 * A.tipK; dmg *= k; post *= k; }
   const M = world.mods, mine = A?.isPlayer || !!h.fromPlayer;
   if (read) { dmg *= 0.4; post = 0; }
   if (mine) {
@@ -168,8 +170,13 @@ export function applyHit(world, A, B, h, cx, cy) {
 
   if (!B.isPlayer) {
     if (fam && B.def.adaptAt && !od) {
-      for (const k in B.adapt) if (k !== fam) B.adapt[k] = Math.max(0, B.adapt[k] - 0.6);
-      B.adapt[fam] = (B.adapt[fam] || 0) + 1;
+      // A reader counts attacks, not hits: a move that lands several times is still one move, so a
+      // weapon with many small hits is not read sooner than one with a few large ones.
+      if (!A || A !== B.adaptBy || A.atkSerial !== B.adaptSerial) {
+        B.adaptBy = A; B.adaptSerial = A?.atkSerial;
+        for (const k in B.adapt) if (k !== fam) B.adapt[k] = Math.max(0, B.adapt[k] - 0.6);
+        B.adapt[fam] = (B.adapt[fam] || 0) + 1;
+      }
       if (B.adapt[fam] >= B.def.adaptAt && B.reads !== fam) { B.reads = fam; world.onAdapt(B, fam); }
     }
     if (B.state !== 'stagger') { B.posture += post * (B.def.postureTaken ?? 1); B.postureDelay = 2.4; }
@@ -316,8 +323,13 @@ function block(world, D, A, h, cx, cy, dir) {
   D.blockT = 0.2; D.vx = dir * Math.min(h.kx, 320) * 0.7; D.pv[3] -= 4; D.shieldHit = 0.2;
   if (A) { A.hitLanded = true; if (A.isPlayer) world.style.blocked(); }
   const fam = A?.move?.fam;
-  if (A?.isPlayer && D.def.adaptAt && fam) D.adapt[fam] = (D.adapt[fam] || 0) + 0.5;
-  D.ai.blocked?.(D, world, A);
+  // A guard counts the attacks it has turned, not the hits: a move that lands three times on a shield
+  // is one move, so a weapon of many small hits does not draw a counter sooner than a saber does.
+  if (!A || A !== D.blockBy || A.atkSerial !== D.blockSerial) {
+    D.blockBy = A; D.blockSerial = A?.atkSerial;
+    if (A?.isPlayer && D.def.adaptAt && fam) D.adapt[fam] = (D.adapt[fam] || 0) + 0.5;
+    D.ai.blocked?.(D, world, A);
+  }
   if (D.posture >= D.maxPosture) {
     world.sfx('guardBreak', D.x); world.stop(0.1); world.shake(0.4);
     fx.ring(cx, cy, 10, 130, 0.35, D.def.shieldColor || D.color, 1, 5);
