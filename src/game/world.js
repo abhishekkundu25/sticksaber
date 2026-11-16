@@ -599,6 +599,11 @@ export class World {
     }
     if (this.mods.focusRegen && this.overdrive <= 0 && this.focus < this.maxFocus) this.focus = Math.min(this.maxFocus, this.focus + this.mods.focusRegen * dt);
     if (this.stasis > 0) this.stasis -= dt;
+    if (this.callT > 0 && (this.callT -= dt) <= 0 && this.player && !this.player.dead) {
+      const n = this.killRun, word = n === 2 ? 'DOUBLE' : n === 3 ? 'TRIPLE' : n === 4 ? 'QUADRUPLE' : 'RAMPAGE', pl = this.player;
+      this.fx.text(pl.x, pl.j[1] - 84, word, '#ffd36b', Math.min(28, 16 + n * 3), 1.1);
+      this.sfx('rankUp', pl.x, 0.7, 0.9 + Math.min(n, 8) * 0.14);
+    }
     if (this.swapT > 0) this.swapT -= dt;
     if (this.shardT > 0 && (this.shardT -= dt) <= 0) this.shardRun = 0;
     if (this.powerT > 0) this.powerT -= dt;
@@ -801,11 +806,8 @@ export class World {
     if (B.y < -60 || B.rag?.air) this.stats.airKills++;
     // Kills in quick succession are called out, each one a note higher.
     this.killRun = this.time - (this.killAt ?? -9) < 1.5 ? (this.killRun || 1) + 1 : 1; this.killAt = this.time;
-    if (this.killRun >= 2 && this.player && !this.player.dead && !this.training) {
-      const word = this.killRun === 2 ? 'DOUBLE' : this.killRun === 3 ? 'TRIPLE' : this.killRun === 4 ? 'QUADRUPLE' : 'RAMPAGE', pl0 = this.player;
-      fx.text(pl0.x, pl0.j[1] - 84, word, '#ffd36b', Math.min(28, 16 + this.killRun * 3), 1.1);
-      this.sfx('rankUp', pl0.x, 0.7, 0.9 + this.killRun * 0.14);
-    }
+    // (The word waits a moment, so several kills landing together are called once, by their total.)
+    if (this.killRun >= 2 && !this.training) this.callT = 0.16;
     // The room did it: a kill by a vent, a wall or the floor pays extra.
     if (h.hazard) { fx.text(cx, cy - 84, 'ENVIRONMENT', '#ff7a2e', 16, 1); this.gainFocus(20); this.style.bonus(12); this.stats.hazardKills++; }
     fx.spark(cx, cy, dir > 0 ? 0 : Math.PI, 1.5, 30, 900, B.color, { white: 0.3 });

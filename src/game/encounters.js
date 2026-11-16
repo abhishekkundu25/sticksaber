@@ -467,7 +467,12 @@ export class Director {
       const d = this.queue.shift();
       if (d === undefined) return this.advance();
       if (!d) continue;
-      if (!this.hooks.auto) { this.draft = d; this.state = 'draft'; this.t = 0; w.sfx(d.type === 'doors' ? 'doorsOpen' : 'draftOpen', w.player.x); w.bannerMsg = null; return; }
+      if (!this.hooks.auto) {
+        this.draft = d; this.state = 'draft'; this.t = 0; w.sfx(d.type === 'doors' ? 'doorsOpen' : 'draftOpen', w.player.x); w.bannerMsg = null;
+        // The name of what was just taken gets a moment to itself before the next screen fades in over it.
+        if (this.picked) { this.t = -0.75; this.picked.t = Math.min(this.picked.t, 0.95); }
+        return;
+      }
       this.settle(d);
     }
   }
