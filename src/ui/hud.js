@@ -1,10 +1,11 @@
 // HUD, banners and menus, drawn on the game canvas in logical (720-high) units.
 import { clamp } from '../core/math.js';
 import { RANK_NAMES, famLabel } from '../game/world.js';
-import { FLOORS, DIFFS, ANOMALIES, roman, seedLabel } from '../game/gen.js';
+import { DIFFS, MODES, ANOMALIES, DOORS, roman, seedLabel } from '../game/gen.js';
 import { AUG, AUGMENTS, RARITY, RARITY_COL } from '../game/augments.js';
 import { POWERS } from '../game/powers.js';
 import { FORMS } from '../game/forms.js';
+import { BOONS } from '../game/boons.js';
 
 const FONT = '"Avenir Next Condensed", "Bahnschrift", "DIN Condensed", "Roboto Condensed", "Arial Narrow", sans-serif';
 const PRESENTS = 'A B H I S H E K   K U N D U   P R E S E N T S';
@@ -40,15 +41,24 @@ export function draftCard(W, n, i) {
   const gap = 26, w = Math.min(300, (W - 100 - (n - 1) * gap) / Math.max(3, n)), total = n * w + (n - 1) * gap;
   return { x: W / 2 - total / 2 + i * (w + gap), y: 198, w, h: 330 };
 }
-// Where menu item `i` of `n` sits along the bottom of the title screen.
-export function menuItem(W, H, n, i) {
-  const gap = Math.min(300, (W - 80) / n);
-  return { x: W / 2 + (i - (n - 1) / 2) * gap - gap / 2, y: H - 130, w: gap, h: 70, cx: W / 2 + (i - (n - 1) / 2) * gap };
+// The button under the cards that leaves a room without taking anything.
+export function skipButton(W) { return { x: W / 2 - 130, y: 548, w: 260, h: 36 }; }
+// Things the quartermaster sells that are not cards.
+const ITEMS = { heal: { name: 'Field Repairs', color: '#7dffb0', glyph: 'plus', text: 'Recover 40% of your health now' } };
+const DOOR_TAG = { stair: 'SAFE', rest: 'ROOM', shop: 'ROOM', shrine: 'ROOM', armory: 'ROOM', elite: 'RISK', cursed: 'RISK', unknown: 'UNKNOWN' };
+// Where the title screen's items sit: the ways to play in a large row, the settings in a small one under it.
+export function menuLayout(W, H, menu) {
+  const rows = [menu.filter((m) => !m.row), menu.filter((m) => m.row)];
+  return menu.map((m) => {
+    const list = rows[m.row ? 1 : 0], i = list.indexOf(m), n = list.length, gap = Math.min(m.row ? 230 : 340, (W - 80) / n);
+    const cx = W / 2 + (i - (n - 1) / 2) * gap, cy = m.row ? H - 70 : H - 128;
+    return { x: cx - gap / 2, y: cy - (m.row ? 20 : 30), w: gap, h: m.row ? 40 : 56, cx, cy };
+  });
 }
 // The two buttons on the pause screen.
 export function pauseButton(W, H, i) { return { x: W / 2 + (i ? 20 : -240), y: H - 124, w: 220, h: 40 }; }
 const POWER_GLYPH = { throw: 'loop', crescent: 'up', arc: 'bolt', mend: 'plus', nova: 'star', stasis: 'clock', mirror: 'ghost', judgment: 'bars', flash: 'chev' };
-const FORM_GLYPH = { saber: 'slash', twin: 'twin', great: 'hammer', staff: 'long' };
+const FORM_GLYPH = { saber: 'slash', twin: 'twin', great: 'hammer', staff: 'long', lash: 'whip', gauntlets: 'fist', drawblade: 'draw' };
 
 export class Hud {
   constructor() {
@@ -109,12 +119,31 @@ export class Hud {
       if (world.boss && !world.boss.remove && world.boss.y > -2000) this.boss(ctx, W, H, world, world.boss, dt, app.touch);
       if (!dir.training) {
         const s = dir.stageDef;
-        this.text(ctx, `FLOOR ${s.n} / ${FLOORS}`, W - 36, 30, 17, '#ffffffdd', 'right', 700, 3);
-        const where = s.kind === 'boss' ? 'KEEPER' : s.kind === 'champion' ? 'CHAMPION' : `WAVE ${dir.wave + 1} / ${dir.waveCount}`;
+        this.text(ctx, `FLOOR ${s.n} / ${dir.count}`, W - 36, 30, 17, '#ffffffdd', 'right', 700, 3);
+        const where = s.kind === 'boss' ? 'KEEPER' : s.kind === 'champion' ? 'CHAMPION' : dir.wave >= dir.waveCount ? 'INTRUDER' : dir.obj && dir.obj.type !== 'hunt' ? 'OBJECTIVE' : `WAVE ${dir.wave + 1} / ${dir.waveCount}`;
         this.text(ctx, `SECTOR ${roman(s.sector + 1)}  ·  ${dir.sector.name.toUpperCase()}  ·  ${where}`, W - 36, 51, 11, '#ffffff88', 'right', 600, 2);
         let y = 69;
         if (s.anomaly) { this.text(ctx, `ANOMALY  ·  ${ANOMALIES[s.anomaly].name}`, W - 36, y, 11, '#ff8fe0', 'right', 700, 2); y += 16; }
-        if (dir.diff !== 'normal') this.text(ctx, DIFFS[dir.diff].name, W - 36, y, 10, '#ffffff55', 'right', 600, 3);
+        if (dir.mod.curse) { this.text(ctx, `CURSED  ·  ${dir.mod.curse.toUpperCase()}`, W - 36, y, 11, '#c084ff', 'right', 700, 2); y += 16; }
+        if (dir.mod.elite) { this.text(ctx, 'ELITE GUARD', W - 36, y, 11, '#ffd36b', 'right', 700, 2); y += 16; }
+        if (dir.diff !== 'normal') { this.text(ctx, DIFFS[dir.diff].name, W - 36, y, 10, '#ffffff55', 'right', 600, 3); y += 15; }
+        this.shards(ctx, W - 36, y + 6, world, dt);
+        const ch = dir.challenge;
+        if (ch && dir.state !== 'draft') {
+          // The floor's challenge: white while it can still be met, green once it is, grey when it is lost.
+          const col = ch.ok ? (ch.open ? '#ffffff' : '#7dffb0') : ch.open ? '#ffffffcc' : '#8fa3b866';
+          this.text(ctx, `${ch.name}${ch.count ? `  ${ch.count}` : ''}  ·  +${ch.pay}`, W - 36, y + 30, 11, col, 'right', 700, 2);
+          this.text(ctx, ch.text.toUpperCase(), W - 36, y + 45, 9, `${col.slice(0, 7)}88`, 'right', 600, 2);
+        }
+        const ob = dir.objective;
+        if (ob) {
+          const bw = 320, bx = W / 2 - bw / 2, by = 92;
+          this.text(ctx, ob.name, W / 2, by - 14, 13, '#ffffff', 'center', 700, 5);
+          ctx.fillStyle = '#00000088'; ctx.fillRect(bx - 2, by - 2, bw + 4, 10);
+          ctx.fillStyle = '#ffffff22'; ctx.fillRect(bx, by, bw, 6);
+          ctx.fillStyle = '#56e9ff'; ctx.fillRect(bx, by, bw * ob.k, 6);
+          this.text(ctx, ob.text, W / 2, by + 20, 11, '#9fe8ff', 'center', 600, 3);
+        }
       } else this.text(ctx, 'TRAINING ROOM', W - 36, 34, 14, '#ffffffaa', 'right', 600, 3);
       if (dir.hint && dir.hintT > 0 && app.state === 'play' && dir.state !== 'draft') {
         const a = Math.min(1, dir.hintT, dir.training ? 1 : (11 - dir.hintT) * 2);
@@ -180,7 +209,7 @@ export class Hud {
     const x = 36, y = 34, w = Math.min(420, 320 * Math.sqrt(p.maxHp / 100));
     const hp = Math.max(0, p.hp) / p.maxHp;
     this.hpLag += (hp - this.hpLag) * Math.min(1, dt * (hp < this.hpLag ? 2.5 : 20));
-    this.text(ctx, world.formId === 'saber' ? 'INITIATE ZERO' : `INITIATE ZERO  ·  ${world.form.name}`, x, y - 12, 12, '#ffffff99', 'left', 600, 3);
+    this.text(ctx, world.formId === 'saber' && !world.form2 ? 'INITIATE ZERO' : `INITIATE ZERO  ·  ${world.form.name}${world.form2 ? `   ⇄  ${FORMS[world.form2].name}  [${touch ? 'BLADE' : 'T'}]` : ''}`, x, y - 12, 12, '#ffffff99', 'left', 600, 3);
     this.text(ctx, `${Math.ceil(Math.max(0, p.hp))} / ${p.maxHp}`, x + w, y - 12, 11, '#ffffff66', 'right', 600, 1);
     ctx.fillStyle = '#00000088'; ctx.fillRect(x - 2, y - 2, w + 4, 14);
     ctx.fillStyle = '#ffffff1c'; ctx.fillRect(x, y, w, 10);
@@ -313,13 +342,22 @@ export class Hud {
     const a = Math.min(1, (b.max - b.t) * 3, b.t * 2), y = 214;
     const slide = (1 - Math.min(1, (b.max - b.t) * 3)) * 30;
     ctx.globalAlpha = a;
+    if (b.alarm) {
+      // A surprise breaks in: the title tears sideways in two colours and a red band runs under it.
+      const j = Math.sin(this.t * 61) * 5 * Math.max(0, (b.t - (b.max - 0.9)) / 0.9), k = Math.min(1, (b.max - b.t) * 4);
+      ctx.globalAlpha = a * 0.5; ctx.fillStyle = '#ff2e6e'; ctx.fillRect(W / 2 - 420 * k, y - 34, 840 * k, 2); ctx.fillRect(W / 2 - 420 * k, y + 34, 840 * k, 2);
+      ctx.globalAlpha = a * 0.12; ctx.fillRect(W / 2 - 420 * k, y - 32, 840 * k, 66);
+      ctx.globalAlpha = a * 0.7; this.text(ctx, b.title, W / 2 + slide + j + 3, y, 46, '#ff2e6e', 'center', 700, 14); this.text(ctx, b.title, W / 2 + slide - j - 3, y, 46, '#56e9ff', 'center', 700, 14);
+      ctx.globalAlpha = a;
+    }
     this.text(ctx, b.title, W / 2 + slide, y, 46, '#ffffff', 'center', 700, 14);
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(W / 2 - 150 * a, y + 34, 300 * a, 1.5);
+    ctx.fillStyle = b.alarm ? '#ff2e6e' : '#ffffff'; ctx.fillRect(W / 2 - 150 * a, y + 34, 300 * a, 1.5);
     if (b.sub) this.text(ctx, b.sub.toUpperCase(), W / 2 - slide, y + 56, 14, '#ffffffbb', 'center', 600, 5);
     if (b.sector !== undefined) {
       // The tower at a glance: ten sectors, the ones below you filled in.
-      for (let i = 0; i < 10; i++) {
-        const x = W / 2 + (i - 4.5) * 30, yy = y + 92, done = i < b.sector, here = i === b.sector;
+      const ns = b.sectors || 10;
+      for (let i = 0; i < ns; i++) {
+        const x = W / 2 + (i - (ns - 1) / 2) * 30, yy = y + 92, done = i < b.sector, here = i === b.sector;
         ctx.globalAlpha = a * (here ? 1 : done ? 0.75 : 0.3);
         ctx.fillStyle = here ? '#56e9ff' : '#ffffff';
         ctx.save(); ctx.translate(x, yy); ctx.rotate(Math.PI / 4); const r = here ? 6.5 : 4.5;
@@ -336,7 +374,7 @@ export class Hud {
     ctx.globalAlpha = a;
     this.text(ctx, 'YOU FELL', W / 2, H / 2 - 30, 70, '#ff5060', 'center', 800, 18);
     this.text(ctx, touch ? `TAP  to retry this ${what}` : `CLICK or ENTER  retry this ${what}        ESC  menu`, W / 2, H / 2 + 40, 16, '#ffffffcc', 'center', 600, 3);
-    this.text(ctx, `FLOOR ${dir.stageDef.n}  ·  your build is kept`, W / 2, H / 2 + 72, 12, '#ffffff77', 'center', 600, 3);
+    this.text(ctx, `FLOOR ${dir.stageDef.n} OF ${dir.count}  ·  your build is kept  ·  SCORE ${dir.score.toLocaleString('en-US')}`, W / 2, H / 2 + 72, 12, '#ffffff77', 'center', 600, 3);
     ctx.globalAlpha = 1;
   }
 
@@ -344,19 +382,20 @@ export class Hud {
     const a = clamp(dir.t, 0, 1);
     ctx.globalAlpha = a * 0.72; ctx.fillStyle = '#05060a'; ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = a;
-    this.text(ctx, 'EXAMINATION PASSED', W / 2, 150, 58, '#ffe2a0', 'center', 800, 14);
-    this.text(ctx, `${DIFFS[dir.diff].name}   ·   RUN SEED  ${seedLabel(dir.seed)}`, W / 2, H - 56, 12, '#ffffff77', 'center', 600, 4);
+    this.text(ctx, 'EXAMINATION PASSED', W / 2, 118, 58, '#ffe2a0', 'center', 800, 14);
+    this.text(ctx, `SCORE  ${dir.score.toLocaleString('en-US')}`, W / 2, 168, 22, '#ffffff', 'center', 700, 8);
+    this.text(ctx, `${dir.daily ? `DAILY  ${dir.daily}` : MODES[dir.mode].name}   ·   ${DIFFS[dir.diff].name}   ·   RUN SEED  ${seedLabel(dir.seed)}`, W / 2, H - 56, 12, '#ffffff77', 'center', 600, 4);
     ctx.fillStyle = '#ffe2a0'; ctx.fillRect(W / 2 - 220, 192, 440, 1.5);
     const hrs = Math.floor(dir.runTime / 3600), m = Math.floor((dir.runTime % 3600) / 60), s = Math.floor(dir.runTime % 60);
     const augs = Object.values(dir.build).reduce((x, n) => x + n, 0);
     const rows = [['TIME', `${hrs ? `${hrs}:${String(m).padStart(2, '0')}` : m}:${String(s).padStart(2, '0')}`], ['FALLS', dir.deaths], ['KILLS', world.stats.kills], ['BEST COMBO', world.style.best], ['PARRIES', world.stats.parries],
-      ['PERFECT DODGES', world.stats.dodges], ['POWERS USED', world.stats.powers], ['AUGMENTS', augs], ['HEALS INTERRUPTED', world.stats.interrupts], ['HITS TAKEN', world.stats.hitsTaken], ['CUTS', world.stats.cuts]];
+      ['PERFECT DODGES', world.stats.dodges], ['POWERS USED', world.stats.powers], ['AUGMENTS', augs], ['SHADES BANISHED', dir.tally.shades], ['CHALLENGES MET', dir.tally.feats], ['SHARDS EARNED', world.stats.shards], ['HITS TAKEN', world.stats.hitsTaken], ['CUTS', world.stats.cuts]];
     rows.forEach(([k, v], i) => {
-      const y = 226 + i * 30;
+      const y = 222 + i * 27;
       this.text(ctx, k, W / 2 - 20, y, 15, '#ffffff99', 'right', 600, 4);
       this.text(ctx, String(v), W / 2 + 20, y, 21, '#ffffff', 'left', 700, 2);
     });
-    this.text(ctx, touch ? 'TAP  to return to the menu' : 'ENTER  return to menu', W / 2, H - 90, 15, '#ffffffcc', 'center', 600, 3);
+    this.text(ctx, touch ? 'TAP  to return to the menu' : 'ENTER  return to menu        C  copy your result', W / 2, H - 90, 15, '#ffffffcc', 'center', 600, 3);
     ctx.globalAlpha = 1;
   }
 
@@ -391,71 +430,115 @@ export class Hud {
       case 'dice': L(-0.6, -0.6, 0.6, -0.6, 0.6, 0.6, -0.6, 0.6, -0.6, -0.6); O(-0.25, -0.25, 0.1, true); O(0.25, 0.25, 0.1, true); O(0, 0, 0.1, true); break;
       case 'wing': L(-0.85, 0.3, -0.2, -0.6, 0, 0.1, 0.2, -0.6, 0.85, 0.3); L(-0.5, 0.45, 0, 0.1, 0.5, 0.45); break;
       case 'gate': L(-0.6, 0.75, -0.6, -0.3); L(0.6, 0.75, 0.6, -0.3); ctx.beginPath(); ctx.arc(0, -0.3 * k, 0.6 * k, Math.PI, 0); ctx.stroke(); O(0, 0.15, 0.14, true); break;
+      // A handle and a whip curling out to a cracking tip.
+      case 'whip': ctx.lineWidth *= 1.8; L(-0.85, 0.85, -0.55, 0.55); ctx.lineWidth /= 1.8; ctx.beginPath(); ctx.moveTo(-0.55 * k, 0.55 * k); ctx.bezierCurveTo(0.4 * k, 0.2 * k, -0.5 * k, -0.6 * k, 0.55 * k, -0.6 * k); ctx.stroke(); L(0.68, -0.82, 0.68, -0.72); L(0.82, -0.6, 0.92, -0.6); L(0.68, -0.48, 0.68, -0.38); break;
+      // A fist with three short blades above the knuckles.
+      case 'fist': L(-0.5, -0.1, 0.5, -0.1, 0.5, 0.45, 0.2, 0.75, -0.3, 0.75, -0.5, 0.45, -0.5, -0.1); L(-0.5, 0.2, 0.2, 0.2); L(-0.35, -0.25, -0.35, -0.8); L(0, -0.25, 0, -0.85); L(0.35, -0.25, 0.35, -0.8); break;
+      // A sheath with the blade half drawn from it.
+      case 'draw': ctx.lineWidth *= 1.8; L(-0.9, 0.55, -0.1, 0.1); ctx.lineWidth /= 1.8; L(-0.1, 0.1, 0.85, -0.45); L(-0.2, -0.05, 0, 0.25); break;
       default: O(0, 0, 0.6);
     }
     ctx.restore();
   }
 
-  // The choice between floors: a few cards, one pick. Each card wears its own colour.
+  // Shards: the count, with a pulse when some have just been picked up.
+  shards(ctx, x, y, world, dt) {
+    this.shardShown = (this.shardShown ?? world.shards) + (world.shards - (this.shardShown ?? world.shards)) * Math.min(1, dt * 10);
+    const up = world.shardT > 0, k = 6 + (up ? Math.sin(this.t * 20) * 1.2 : 0);
+    const label = String(Math.round(this.shardShown)), tw = this.width(ctx, label, 15, 2);
+    ctx.save(); ctx.translate(x - tw - 14, y); ctx.rotate(Math.PI / 4); ctx.fillStyle = '#ffd36b'; ctx.fillRect(-k / 2, -k / 2, k, k); ctx.restore();
+    this.text(ctx, label, x, y + 1, 15, up ? '#fff0c0' : '#ffd36b', 'right', 700, 2);
+  }
+
+  // The choice between floors: a few cards, one pick. Each card wears its own colour. The same screen
+  // shows the doors, the quartermaster's stock, a shrine's pacts and an armoury's blades.
   draft(ctx, W, H, world, dir, touch) {
-    const d = dir.draft, n = d.options.length, a = clamp(dir.t * 2.4, 0, 1);
-    ctx.globalAlpha = a * 0.82; ctx.fillStyle = '#04060b'; ctx.fillRect(0, 0, W, H);
+    const d = dir.draft, n = d.options.length, a = clamp(dir.t * 2.4, 0, 1), shop = d.type === 'shop', accent = d.type === 'pact' ? '#ff5c8a' : d.type === 'doors' ? '#e6fdff' : shop ? '#ffb347' : '#56e9ff';
+    ctx.globalAlpha = a * 0.82; ctx.fillStyle = d.type === 'pact' ? '#0b0308' : '#04060b'; ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = a;
     this.text(ctx, d.title, W / 2, 104, 42, '#ffffff', 'center', 700, 14);
-    ctx.fillStyle = '#56e9ff'; ctx.fillRect(W / 2 - 140 * a, 136, 280 * a, 1.5);
+    ctx.fillStyle = accent; ctx.fillRect(W / 2 - 140 * a, 136, 280 * a, 1.5);
     this.text(ctx, d.sub.toUpperCase(), W / 2, 158, 13, '#ffffffaa', 'center', 600, 5);
+    if (!d.first) { this.text(ctx, 'SHARDS', W - 36, 96, 10, '#ffffff77', 'right', 600, 4); this.shards(ctx, W - 36, 116, world, 0.016); }
     for (let i = 0; i < n; i++) {
       const c = draftCard(W, n, i), sel = i === d.idx, id = d.options[i];
       const show = clamp(dir.t * 3.2 - i * 0.3, 0, 1);
-      const x = c.x, y = c.y + (1 - show) ** 2 * 60 - (sel ? 10 : 0), w = c.w, h = c.h, mx = x + w / 2;
-      const isP = d.type === 'power', isF = d.type === 'form';
-      const A = isP ? POWERS[id] : isF ? FORMS[id] : AUG[id];
-      const col = A.color || '#56e9ff', have = isP || isF ? 0 : dir.build[id] || 0;
-      const edge = isP || isF ? col : RARITY_COL[A.r];
-      ctx.globalAlpha = a * show;
+      const kind = d.kinds?.[i] || (d.type === 'power' ? 'power' : d.type === 'form' ? 'form' : 'aug');
+      const isP = kind === 'power', isF = kind === 'form', isD = kind === 'door', isI = kind === 'item', isB = kind === 'boon', sold = !!d.sold?.[i];
+      const x = c.x, y = c.y + (1 - show) ** 2 * 60 - (sel && !sold ? 10 : 0), w = c.w, h = c.h, mx = x + w / 2, small = w < 210;
+      const A = isP ? POWERS[id] : isF ? FORMS[id] : isD ? DOORS[id] : isI ? ITEMS[id] : isB ? BOONS[id] : AUG[id];
+      const col = A.color || '#56e9ff', have = kind === 'aug' ? dir.build[id] || 0 : 0;
+      const edge = kind === 'aug' ? RARITY_COL[A.r] : col, fade = sold ? 0.3 : 1;
+      ctx.globalAlpha = a * show * fade;
       ctx.fillStyle = '#0a0f18f2'; ctx.fillRect(x, y, w, h);
       // A wash of the card's colour, strongest at the top where the picture sits.
       ctx.fillStyle = col;
-      for (let b = 0; b < 7; b++) { ctx.globalAlpha = a * show * (sel ? 0.2 : 0.11) * (1 - b / 7) ** 1.5; ctx.fillRect(x, y + b * 24, w, 24); }
-      ctx.globalAlpha = a * show;
+      for (let b = 0; b < 7; b++) { ctx.globalAlpha = a * show * fade * (sel ? 0.2 : 0.11) * (1 - b / 7) ** 1.5; ctx.fillRect(x, y + b * 24, w, 24); }
+      ctx.globalAlpha = a * show * fade;
       ctx.fillRect(x, y, w, sel ? 5 : 3);
       ctx.strokeStyle = sel ? edge : `${col}55`; ctx.lineWidth = sel ? 2.5 : 1; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-      if (sel) {
+      if (sel && !sold) {
         // The chosen card glows; a legendary one shimmers.
         ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = a * (0.08 + Math.sin(this.t * 4) * 0.03); ctx.fillStyle = col; ctx.fillRect(x, y, w, h);
-        if (A.r === 2) { const sx = ((this.t * 0.7) % 1) * (w + 80) - 40; ctx.globalAlpha = a * 0.12; ctx.fillStyle = '#ffffff'; ctx.fillRect(x + clamp(sx, 0, w - 26), y, 26, h); }
+        if (A.r === 2 || A.r === 4) { const sx = ((this.t * 0.7) % 1) * (w + 80) - 40; ctx.globalAlpha = a * 0.12; ctx.fillStyle = '#ffffff'; ctx.fillRect(x + clamp(sx, 0, w - 26), y, 26, h); }
         ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = a;
       }
-      this.text(ctx, isP ? 'FOCUS POWER' : isF ? 'WEAPON FORM' : RARITY[A.r], mx, y + 26, 11, edge, 'center', 700, 5);
+      ctx.globalAlpha = a * show * fade;
+      this.text(ctx, isP ? 'FOCUS POWER' : isF ? 'WEAPON' : isD ? DOOR_TAG[id] : isI ? 'SUPPLIES' : isB ? 'BOON' : RARITY[A.r], mx, y + 26, 11, edge, 'center', 700, 5);
       if (!touch) this.text(ctx, String(i + 1), x + 14, y + 26, 12, '#ffffff55', 'left', 600, 0);
-      // The picture, in a ring of the card's colour.
-      ctx.globalAlpha = a * show * 0.28; ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(mx, y + 76, 30, 0, 6.283); ctx.stroke();
-      ctx.globalAlpha = a * show;
-      this.glyph(ctx, isP ? POWER_GLYPH[id] : isF ? FORM_GLYPH[id] || 'slash' : A.glyph, mx, y + 76, sel ? 19 : 17, col);
-      const size = w < 250 ? 21 : 25;
-      const name = this.wrap(ctx, A.name.toUpperCase(), w - 30, size, 700, 3);
-      name.forEach((l, k) => this.text(ctx, l, mx, y + 134 + k * (size + 3), size, '#ffffff', 'center', 700, 3));
+      if (isD) {
+        // A doorway: an arch of the door's colour with light coming through it.
+        const aw = Math.min(34, w * 0.16), top = y + 76, bot = y + 114;
+        ctx.globalCompositeOperation = 'lighter';
+        for (let q = 0; q < 4; q++) { ctx.globalAlpha = a * show * (sel ? 0.16 : 0.08) * (1 - q / 4); ctx.fillStyle = col; ctx.fillRect(mx - aw + q * 5, top + q * 4, (aw - q * 5) * 2, bot - top - q * 4); }
+        ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = a * show;
+        ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(mx - aw, bot); ctx.lineTo(mx - aw, top); ctx.arc(mx, top, aw, Math.PI, 0); ctx.lineTo(mx + aw, bot); ctx.stroke();
+        ctx.lineWidth = 1; ctx.globalAlpha = a * show * 0.5; ctx.beginPath(); ctx.moveTo(mx - aw - 16, bot); ctx.lineTo(mx + aw + 16, bot); ctx.stroke();
+        ctx.globalAlpha = a * show;
+        this.glyph(ctx, A.glyph, mx, y + 90, sel ? 14 : 12, col);
+      } else {
+        // The picture, in a ring of the card's colour.
+        ctx.globalAlpha = a * show * fade * 0.28; ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(mx, y + 76, small ? 24 : 30, 0, 6.283); ctx.stroke();
+        ctx.globalAlpha = a * show * fade;
+        this.glyph(ctx, isP ? POWER_GLYPH[id] : isF ? FORM_GLYPH[id] || 'slash' : A.glyph, mx, y + 76, (sel ? 19 : 17) * (small ? 0.8 : 1), col);
+      }
+      const size = small ? 17 : w < 250 ? 21 : 25, bs = small ? 12.5 : 15, lh = small ? 17 : 21;
+      const name = this.wrap(ctx, A.name.toUpperCase(), w - (small ? 16 : 30), size, 700, small ? 1.5 : 3);
+      name.forEach((l, k) => this.text(ctx, l, mx, y + 134 + k * (size + 3), size, '#ffffff', 'center', 700, small ? 1.5 : 3));
       const ty = y + 134 + name.length * (size + 3) + 2;
       ctx.fillStyle = `${col}66`; ctx.fillRect(mx - 40, ty - 9, 80, 1.5);
-      const body = this.wrap(ctx, isP || isF ? A.text : A.text(have + 1), w - 36, 15, 600, 0.5);
-      body.forEach((l, k) => this.text(ctx, l, mx, ty + 14 + k * 21, 15, '#e3edf8', 'center', 600, 0.5));
-      if (isF) {
-        (A.traits || []).slice(0, 4).forEach((tr, k) => this.text(ctx, tr.toUpperCase(), mx, ty + 26 + body.length * 21 + k * 17, 11, col, 'center', 600, 2));
+      const words = isD ? A.text(d.doors[i]) : kind === 'aug' ? A.text(have + 1) : A.text;
+      const body = this.wrap(ctx, words, w - (small ? 18 : 36), bs, 600, 0.5).slice(0, small ? 8 : 7);
+      body.forEach((l, k) => this.text(ctx, l, mx, ty + 14 + k * lh, bs, '#e3edf8', 'center', 600, 0.5));
+      if (d.prices) {
+        // The quartermaster's price: gold when it can be paid, red when it cannot.
+        const can = world.shards >= d.prices[i];
+        this.text(ctx, sold ? 'SOLD' : `${d.prices[i]}  SHARDS`, mx, y + h - 24, small ? 12 : 13, sold ? '#ffffff88' : can ? '#ffd36b' : '#ff6b6b', 'center', 700, 3);
+        if (!sold && !can && sel && d.deny > 0) { ctx.globalAlpha = a * d.deny * 2; ctx.strokeStyle = '#ff6b6b'; ctx.lineWidth = 3; ctx.strokeRect(x, y, w, h); ctx.globalAlpha = a; }
+      } else if (isF) {
+        (A.traits || []).slice(0, 4).forEach((tr, k) => this.text(ctx, tr.toUpperCase(), mx, ty + 26 + body.length * lh + k * 17, 11, col, 'center', 600, 2));
       } else if (isP) {
         const px = mx - (A.cost * 22 - 6) / 2;
         for (let k = 0; k < A.cost; k++) { ctx.fillStyle = '#56e9ff'; ctx.fillRect(px + k * 22, y + h - 48, 16, 6); }
         this.text(ctx, `COSTS ${A.cost} FOCUS`, mx, y + h - 24, 11, '#ffffff88', 'center', 600, 3);
-      } else {
+      } else if (kind === 'aug') {
         const px = mx - (A.max * 14 - 4) / 2;
         for (let k = 0; k < A.max; k++) { ctx.fillStyle = k < have ? '#ffffffaa' : k === have ? col : '#ffffff22'; ctx.fillRect(px + k * 14, y + h - 46, 10, 4); }
-        this.text(ctx, A.max === 1 ? 'ONE OF A KIND' : have ? `LEVEL ${have + 1} OF ${A.max}` : 'NEW', mx, y + h - 24, 11, '#ffffff88', 'center', 600, 3);
+        this.text(ctx, A.r === 4 ? 'CANNOT BE UNDONE' : A.max === 1 ? 'ONE OF A KIND' : have ? `LEVEL ${have + 1} OF ${A.max}` : 'NEW', mx, y + h - 24, 11, '#ffffff88', 'center', 600, 3);
       }
     }
     ctx.globalAlpha = a;
-    this.text(ctx, touch ? 'TAP a card to take it' : `CLICK a card        or  A / D  and  ENTER        or press  ${Array.from({ length: n }, (_, k) => k + 1).join('  ')}`, W / 2, H - 112, 14, '#ffffffcc', 'center', 600, 3);
+    if (d.skip) {
+      const k = skipButton(W), hot = d.idx === n || this.hover === 'skip';
+      ctx.fillStyle = hot ? '#ffffff22' : '#ffffff0d'; ctx.fillRect(k.x, k.y, k.w, k.h);
+      ctx.strokeStyle = hot ? '#ffffff' : '#ffffff55'; ctx.lineWidth = hot ? 2 : 1; ctx.strokeRect(k.x + 0.5, k.y + 0.5, k.w - 1, k.h - 1);
+      this.text(ctx, touch ? d.skip : `${d.skip}   ·   ESC`, W / 2, k.y + k.h / 2 + 1, 13, hot ? '#ffffff' : '#ffffffbb', 'center', 700, 4);
+    }
+    const how = shop ? (touch ? 'TAP a card to buy it' : 'CLICK a card to buy it        or  A / D  and  ENTER') : touch ? 'TAP a card to take it' : `CLICK a card        or  A / D  and  ENTER        or press  ${Array.from({ length: n }, (_, k) => k + 1).join('  ')}`;
+    this.text(ctx, how, W / 2, H - 112, 14, '#ffffffcc', 'center', 600, 3);
     // What the build already holds.
     const own = AUGMENTS.filter((g) => dir.build[g.id]).map((g) => `${g.name}${dir.build[g.id] > 1 ? ` ${roman(dir.build[g.id])}` : ''}`);
-    const lines = this.wrap(ctx, own.length ? own.join('   ·   ') : d.type === 'form' ? 'You keep this blade for the whole run' : 'Your build is empty', W - 220, 12, 600, 1).slice(0, 3);
+    const lines = this.wrap(ctx, own.length ? own.join('   ·   ') : d.first ? 'An armoury on the way up will trade it for another' : 'Your build is empty', W - 220, 12, 600, 1).slice(0, 3);
     lines.forEach((l, k) => this.text(ctx, l.toUpperCase(), W / 2, H - 78 + k * 17, 12, '#ffffff66', 'center', 600, 1));
     ctx.globalAlpha = 1;
   }
@@ -464,7 +547,7 @@ export class Hud {
     if (!this.menuGrad || this.menuH !== H) {
       const gr = this.menuGrad = ctx.createLinearGradient(0, 0, 0, H); this.menuH = H;
       // Dark behind the title and the menu row, clear across the band where the fight happens.
-      gr.addColorStop(0, '#04060bd0'); gr.addColorStop(0.3, '#04060b50'); gr.addColorStop(0.46, '#04060b10'); gr.addColorStop(0.8, '#04060b10'); gr.addColorStop(0.9, '#04060ba8'); gr.addColorStop(1, '#04060bf0');
+      gr.addColorStop(0, '#04060bd0'); gr.addColorStop(0.3, '#04060b50'); gr.addColorStop(0.46, '#04060b10'); gr.addColorStop(0.7, '#04060b10'); gr.addColorStop(0.8, '#04060ba8'); gr.addColorStop(1, '#04060bf0');
     }
     ctx.fillStyle = this.menuGrad; ctx.fillRect(0, 0, W, H);
     const cx = W / 2, ty = 150;
@@ -485,15 +568,18 @@ export class Hud {
     ctx.fillStyle = '#aeb9c8'; ctx.fillRect(cx - bw / 2 - 46, ty + 67, 46, 6);
     this.text(ctx, 'A S C E N D   T H E   S P I R E', cx, ty + 104, 14, '#ffffff99', 'center', 600, 4);
     // Menu runs along the bottom so the sparring match behind it stays visible.
-    const n = app.menu.length, gap = Math.min(300, (W - 80) / n);
+    const L = menuLayout(W, H, app.menu), note = app.menu[app.idx]?.note;
     app.menu.forEach((m, i) => {
-      const x = cx + (i - (n - 1) / 2) * gap, y = H - 96, sel = i === app.idx;
-      this.text(ctx, m.label, x, y, sel ? 21 : 16, sel ? '#56e9ff' : '#ffffffaa', 'center', sel ? 700 : 600, sel ? 3 : 2.5);
-      if (sel) { ctx.fillStyle = '#56e9ff'; ctx.fillRect(x - 100, y + 19, 200, 1.5); }
-      if (sel && m.note) this.text(ctx, m.note.toUpperCase(), x, y - 28, 11, '#ffffffaa', 'center', 600, 2);
+      const { cx: x, cy: y } = L[i], sel = i === app.idx, big = !m.row;
+      const size = big ? (sel ? 24 : 19) : sel ? 15 : 13;
+      this.text(ctx, m.label, x, y, size, sel ? '#56e9ff' : big ? '#ffffffcc' : '#ffffff88', 'center', sel ? 700 : 600, big ? 3.5 : 2.5);
+      if (m.sub) this.text(ctx, m.sub, x, y + 22, 10, sel ? '#9fe8ff' : '#ffffff66', 'center', 600, 3);
+      if (sel) { const hw = big ? 110 : 70; ctx.fillStyle = '#56e9ff'; ctx.fillRect(x - hw, y + (big ? (m.sub ? 34 : 20) : 14), hw * 2, 1.5); }
     });
-    this.text(ctx, app.touch ? 'TAP  to choose' : 'CLICK  or  A / D  and  ENTER      F  fullscreen      M  mute      G  graphics', cx, H - 36, 13, '#ffffff77', 'center', 600, 3);
-    this.text(ctx, `${FLOORS} FLOORS  ·  TEN SECTORS  ·  EVERY RUN DIFFERENT`, cx, ty + 128, 11, '#ffffff55', 'center', 600, 4);
+    if (note) this.text(ctx, note.toUpperCase(), cx, H - 176, 11, '#ffffffaa', 'center', 600, 3);
+    this.text(ctx, app.touch ? 'TAP  to choose' : 'CLICK  or  ARROWS  and  ENTER      F  fullscreen      M  mute      G  graphics', cx, H - 26, 11, '#ffffff66', 'center', 600, 3);
+    const M = MODES[app.mode] || MODES.sprint;
+    this.text(ctx, `${M.floors} FLOORS  ·  ${M.sectors === 3 ? 'THREE' : 'TEN'} SECTORS  ·  EVERY RUN DIFFERENT`, cx, ty + 128, 11, '#ffffff55', 'center', 600, 4);
   }
 
   controls(ctx, W, H, foot, title = 'CONTROLS') {

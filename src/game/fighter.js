@@ -25,6 +25,10 @@ export class Fighter {
     this.state = 'free'; this.st = 0; this.stDur = 0; this.t = rng() * 10;
     this.move = null; this.mt = 0; this.hitIdx = -1; this.hitSet = new Set(); this.activeHit = null;
     this.hitLanded = false; this.charging = false; this.chargeT = 0; this.charged = false;
+    // Set by whatever drives this body (input, AI) while it wants a chargeable move held.
+    this.holdCharge = false;
+    // Weapon-form state, kept here so any fighter can use a form, not only the player.
+    this.form = null; this.lash = null; this.lashO = null; this.tipK = 0; this.fistCharge = 0; this.sheathed = false; this.drawLevel = 0; this.cuts = null; this.marks = null;
     this.stance = makeStance(def.stance);
     this.guardStance = def.guardPose ? makeStance({ ...def.stance, ...def.guardPose }) : null;
     this.p = new Float32Array(N); this.pv = new Float32Array(N); this.tgt = new Float32Array(N);
@@ -124,8 +128,8 @@ export class Fighter {
 
     this.moveX = 0; this.stepping = false;
     // The controller runs even while limp so the player can tech out of a knockdown.
-    if (!this.dead) this.def.ctrl?.(this, world, dt);
-    if (this.rag) { this.updateRagdoll(world, dt); this.updateRibbons(dt); return; }
+    if (!this.dead && !this.calm) this.def.ctrl?.(this, world, dt);
+    if (this.rag) { this.updateRagdoll(world, dt); this.blade.tick?.(this, world, dt); this.updateRibbons(dt); return; }
 
     let grav = 1, fric = 2600;
     switch (this.state) {
@@ -156,6 +160,7 @@ export class Fighter {
       // A rider goes where its mount goes and counts as standing.
       this.x = mt.saddleX ?? mt.cx; this.y = (mt.saddleY ?? mt.cy - 16 * mt.scale) + 24 * this.scale; this.vx = 0; this.vy = 0; this.onGround = true;
     } else {
+      if (this.def.rooted) this.vx = 0; // a prop stays where it was put
       if (!this.onGround) this.vy += G * grav * (this.gravMul ?? 1) * world.gravK * dt;
       this.x += this.vx * dt; this.y += this.vy * dt;
       const gy = world.groundAt(this.x, this.y, this.vy, dt, this);
@@ -175,12 +180,18 @@ export class Fighter {
       const k = EASE.io(clamp(this.st / this.stDur, 0, 1));
       for (let i = 0; i < NJ * 2; i++) this.j[i] = this.jb[i] + (this.j[i] - this.jb[i]) * k;
     }
+    this.blade.tick?.(this, world, dt); // a weapon form's own per-frame work (whip, sheath, fist charge)
     this.sampleTrail(world.time);
     this.updateRibbons(dt);
   }
 
   tickMove(world, dt) {
     const m = this.move, prev = this.mt;
+    // A chargeable move holds at its charge point for as long as the controller asks, up to its cap.
+    if (m.charge && !this.chargeDone && prev >= m.charge) {
+      if (this.holdCharge && this.chargeT < (m.chargeMax ?? 0.6)) { this.charging = true; this.chargeT += dt; world.chargeFx(this, dt); }
+      else { this.charging = false; this.chargeDone = true; this.charged = this.chargeT >= 0.3; }
+    }
     if (!this.charging) this.mt += dt;
     const mt = this.mt;
     for (const ev of m.ev) if (prev < ev[0] && mt >= ev[0]) this.fire(world, ev);
@@ -225,6 +236,7 @@ export class Fighter {
     else if (type === 'vent') { if (!this.def.heatColors) return; this.vent = 1.7; this.heat = 0; this.color = this.def.heatColors[0]; world.sfx('vent', this.x); }
     else if (type === 'fx') world.moveFx(this, arg);
     else if (type === 'spawn') world.spawnFrom(this, arg);
+    else if (type === 'form') arg(world, this); // a weapon form's own mechanic, written in forms.js
   }
 
   land(world) {
@@ -334,7 +346,7 @@ export class Fighter {
 
   sampleTrail(time) {
     const sp = Math.abs(this.tx - this.ptx) + Math.abs(this.ty - this.pty);
-    const on = this.armed && this.bladeOn > 0.5 && (this.state === 'attack' || sp > 5);
+    const on = this.armed && this.bladeOn > 0.5 && !this.sheathed && (this.state === 'attack' || sp > 5);
     const o = this.trailHead * TRAIL_STRIDE, tr = this.trail;
     tr[o] = this.bx; tr[o + 1] = this.by; tr[o + 2] = this.tx; tr[o + 3] = this.ty; tr[o + 4] = time; tr[o + 5] = on ? 1 : 0;
     this.trailHead = (this.trailHead + 1) % TRAIL_N;

@@ -4,7 +4,9 @@
 //   node tools/beast-shot.js lineup seeds    only those sheets
 //   node tools/beast-shot.js gait:hound atk:charger
 // Sheets: lineup (every plan beside a humanoid), seeds (six seeds of each plan), gait:<plan> (walk,
-// run, stop and turn), atk:<plan> (every attack of that plan, frame by frame), all-gaits, all-attacks.
+// run, stop and turn), atk:<plan> (every attack of that plan, frame by frame), all-gaits, all-attacks,
+// limp:<plan> (live pose, then knocked limp: in the air, landing, at rest, and getting up; three
+// rows: launched, launched the other way, killed), all-limp.
 import puppeteer from 'puppeteer-core';
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -54,6 +56,7 @@ await page.evaluate(async () => {
       return e;
     },
     tick(n) { for (let i = 0; i < n; i++) g.tick(1 / 60); },
+    draw() { g.renderer.draw(w, w.time); },
     sheet(cols, rows, cw, ch, z = 1) {
       const c = document.createElement('canvas'); c.width = cols * cw * z; c.height = rows * ch * z;
       const x = c.getContext('2d'); x.scale(z, z); x.fillStyle = '#000'; x.fillRect(0, 0, cols * cw, rows * ch);
@@ -188,16 +191,55 @@ async function attacks(plan) {
   await save(`atk-${plan}`, url);
 }
 
+// Knocked limp, three ways, and back up. Each row shows the frame before and after each change of
+// state, so any swap of shape between the live and the limp body shows as two cells that differ.
+async function limp(plan) {
+  const url = await page.evaluate((plan) => {
+    const S = window.__bs, g = window.__game, w = g.world;
+    const cols = 11, sheet = S.sheet(cols, 3, 250, 210, 0.9);
+    const rows = [['launch', 1, 520, -760, 3], ['launch back', 2, -420, -900, -4], ['killed', 3, 460, -620, 6]];
+    rows.forEach(([name, seed, kx, ky, spin], r) => {
+      S.room(-1400);
+      const e = S.beast(plan, seed, 6, -150, null);
+      e.face(400);
+      if (plan === 'flyer') { e.y = -170; e.onGround = false; e.gravMul = 0; }
+      S.tick(30);
+      const camY = -80;
+      const shot = (c, label) => { const camX = e.cx, cy = Math.min(camY, e.cy + 30); S.cam(camX, cy, 1.15); S.draw(); S.grab(sheet, r * cols + c, camX, cy, label); };
+      shot(0, `${name}: live`);
+      if (name === 'killed') e.die(kx, ky, spin); else e.toRagdoll(kx, ky, spin);
+      shot(1, 'limp, same frame');
+      let t = 0, landed = false, rested = false, gotUp = -1, dur = 0;
+      for (let fr = 1; fr < 360; fr++) {
+        S.tick(1); t += 1 / 60;
+        if (fr === 6) shot(2, `air ${t.toFixed(2)}`);
+        if (fr === 18) shot(3, `air ${t.toFixed(2)}`);
+        if (e.rag && !landed && !e.rag.air && fr > 4) { landed = true; shot(4, `land ${t.toFixed(2)}`); }
+        if (e.rag && landed && !rested && e.rag.rest > 0.2) { rested = true; shot(5, `rest ${t.toFixed(2)}`); }
+        if (e.dead) { if (t > 2.4) { shot(6, `dead ${t.toFixed(1)}s`); break; } continue; }
+        if (e.rag) { shot(6, `last limp ${t.toFixed(2)}`); continue; }
+        if (gotUp < 0) { gotUp = fr; dur = e.stDur; shot(7, `getup +0 roll${e.roll.toFixed(1)}`); }
+        if (fr === gotUp + 1) shot(8, `getup +1 roll${e.roll.toFixed(1)}`);
+        if (fr === gotUp + Math.round(dur * 30)) shot(9, `getup mid roll${e.roll.toFixed(1)}`);
+        if (fr === gotUp + Math.round(dur * 60) + 4) { shot(10, `stood f${e.facing}`); break; }
+      }
+    });
+    return sheet.c.toDataURL('image/png');
+  }, plan);
+  await save(`limp-${plan}`, url);
+}
+
 // Draw cost: canvas calls and time for ten beasts against ten humanoids in the same room.
 async function bench() {
   const res = await page.evaluate((plans) => {
     const S = window.__bs, g = window.__game, w = g.world, R = g.renderer, ctx = R.ctx, gl = R.g;
     const out = {};
-    for (const set of ['humanoids', 'beasts', 'humanoids', 'beasts']) {
+    for (const set of ['humanoids', 'beasts', 'limp', 'humanoids', 'beasts', 'limp']) {
       S.room(-1000);
       for (let i = 0; i < 10; i++) {
         const x = -800 + i * 170;
-        if (set === 'beasts') { const e = S.beast(plans[i % plans.length], i + 1, 5, x); e.def = { ...e.def, ctrl: (f) => { f.moveX = Math.sin(w.time + i) > 0 ? 0.6 : -0.6; } }; if (e.def.flying) { e.y = -150; e.onGround = false; } }
+        if (set === 'limp') { const e = S.beast(plans[i % plans.length], i + 1, 5, x); S.tick(2); e.toRagdoll(0, -300, 1); e.getUp = () => {}; }
+        else if (set === 'beasts') { const e = S.beast(plans[i % plans.length], i + 1, 5, x); e.def = { ...e.def, ctrl: (f) => { f.moveX = Math.sin(w.time + i) > 0 ? 0.6 : -0.6; } }; if (e.def.flying) { e.y = -150; e.onGround = false; } }
         else { const e = w.spawnEnemy(['initiate', 'bulwark', 'duelist', 'lancer', 'brute'][i % 5], x, false); e.def = { ...e.def, ctrl: (f) => { f.moveX = Math.sin(w.time + i) > 0 ? 0.6 : -0.6; } }; }
       }
       S.cam(0, -150, 0.6); S.tick(20);
@@ -235,6 +277,8 @@ for (const j of jobs) {
   else if (j === 'bench') await bench();
   else if (j === 'all-gaits') for (const p of BEAST_PLANS) await gait(p);
   else if (j === 'all-attacks') for (const p of BEAST_PLANS) await attacks(p);
+  else if (j === 'all-limp') for (const p of BEAST_PLANS) await limp(p);
+  else if (j.startsWith('limp:')) await limp(j.slice(5));
   else if (j.startsWith('gait:')) await gait(j.slice(5));
   else if (j.startsWith('atk:')) await attacks(j.slice(4));
 }

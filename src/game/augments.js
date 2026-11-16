@@ -13,6 +13,8 @@ export const baseMods = () => ({
   odTime: 0, odShield: 0, burstDmg: 0, throwDmg: 1, throwRange: 1,
   secondWind: 0, storm: 0, freeCast: 0, reap: 0,
   undertow: 0, reflect: 0, pin: 0, dashCut: 0, meteor: 0, airJumps: 0,
+  // Pacts and the second sheath.
+  shardK: 1, healK: 1, enemyHp: 1, enemyRate: 1, lowDmg: 0, hurtFocus: 0, noWaveHeal: 0, bloodCast: 0, shopK: 1, sheath: 0,
 });
 
 const pct = (v) => `${Math.round(v * 100)}%`;
@@ -52,6 +54,7 @@ export const AUGMENTS = [
   { id: 'colossus', color: '#ffb080', glyph: 'plus', name: 'Colossus', r: 2, max: 1, text: () => 'Maximum health +40. You take 12% less damage', apply: (m) => { m.maxHp += 40; m.taken *= 0.88; } },
   { id: 'whet', color: '#ff6a55', glyph: 'slash', name: 'Whetstone', r: 2, max: 1, text: () => 'All damage +20%', apply: (m) => { m.dmg *= 1.2; } },
   { id: 'reaper', color: '#c084ff', glyph: 'skull', name: 'Reaper', r: 2, max: 1, text: () => 'Kills heal 3 more and refill a fifth of a focus pip', apply: (m) => { m.killHeal += 3; m.reap = 20; } },
+  { id: 'sheath', color: '#9fe8ff', glyph: 'twin', name: 'Second Sheath', r: 2, max: 1, text: () => 'Carry two weapons. The next one you take joins the one you hold. T switches, and the first hit after a switch lands half again as hard', apply: (m) => { m.sheath = 1; } },
 
   // Techniques change what a move does. One copy each, offered after event floors and now and then elsewhere.
   { id: 'undertow', color: '#6bd0ff', glyph: 'loop', name: 'Undertow', r: 3, max: 1, text: () => 'Your launcher first drags nearby enemies in, so it lifts the whole group', apply: (m) => { m.undertow = 1; } },
@@ -61,9 +64,21 @@ export const AUGMENTS = [
   { id: 'meteor', color: '#ffa060', glyph: 'flame', name: 'Meteor', r: 3, max: 1, text: () => 'Your plunge calls a pillar of light down where you land', apply: (m) => { m.meteor = 1; } },
   { id: 'aerial', color: '#b9c8ff', glyph: 'wing', name: 'Aerialist', r: 3, max: 1, text: () => 'One more jump and one more dash in the air', apply: (m) => { m.airJumps = 1; } },
 ];
+// Pacts are offered at shrines and nowhere else: a great deal of power with a price that lasts the
+// run. `once(world)` is what a pact does at the moment it is taken.
+AUGMENTS.push(
+  { id: 'glass', color: '#ff5c8a', glyph: 'star', name: 'Glass Heart', r: 4, max: 1, text: () => 'All damage +40%. Maximum health -30', apply: (m) => { m.dmg *= 1.4; m.maxHp -= 30; } },
+  { id: 'hunger', color: '#ff7a5c', glyph: 'fang', name: 'Hunger', r: 4, max: 1, text: () => 'Every kill returns 6 health. Nothing heals you between waves', apply: (m) => { m.killHeal += 6; m.noWaveHeal = 1; } },
+  { id: 'debt', color: '#ffd36b', glyph: 'orb', name: 'Debt', r: 4, max: 1, text: () => 'Take 150 shards now. Everything in the tower has 15% more health', apply: (m) => { m.enemyHp *= 1.15; }, once: (w) => { w.shards += 150; w.stats.shards += 150; } },
+  { id: 'hubris', color: '#56e9ff', glyph: 'bars', name: 'Hubris', r: 4, max: 1, text: () => 'Focus gained +60%. Every hit you take costs half a pip', apply: (m) => { m.focus *= 1.6; m.hurtFocus = 50; } },
+  { id: 'razoredge', color: '#ff3b5e', glyph: 'slash', name: 'Last Stand', r: 4, max: 1, text: () => 'Below 40% health you deal double damage. All healing is halved', apply: (m) => { m.lowDmg = 1; m.healK *= 0.5; } },
+  { id: 'overclock', color: '#ffe45c', glyph: 'chev', name: 'Overclock', r: 4, max: 1, text: () => 'You run 15% faster with a blade 12% longer. Everything hunting you is 10% faster too', apply: (m) => { m.speed *= 1.15; m.blade *= 1.12; m.enemyRate *= 1.1; } },
+  { id: 'tithe', color: '#c084ff', glyph: 'drop', name: 'Blood Tithe', r: 4, max: 1, text: () => 'With no Focus left, a power costs 14 health for each pip instead', apply: (m) => { m.bloodCast = 14; } },
+  { id: 'greed', color: '#ffb347', glyph: 'dice', name: 'Greed', r: 4, max: 1, text: () => 'The fallen leave twice the shards. You take 15% more damage', apply: (m) => { m.shardK *= 2; m.taken *= 1.15; } },
+);
 export const AUG = Object.fromEntries(AUGMENTS.map((a) => [a.id, a]));
-export const RARITY = ['COMMON', 'RARE', 'LEGENDARY', 'TECHNIQUE'];
-export const RARITY_COL = ['#9fb4c8', '#56e9ff', '#ffd36b', '#ff8fe0'];
+export const RARITY = ['COMMON', 'RARE', 'LEGENDARY', 'TECHNIQUE', 'PACT'];
+export const RARITY_COL = ['#9fb4c8', '#56e9ff', '#ffd36b', '#ff8fe0', '#ff5c8a'];
 
 // Reduce a build ({ id: stacks }) to the modifier table.
 export function buildMods(build) {
@@ -75,7 +90,7 @@ export function buildMods(build) {
 // Three distinct augments the build can still take. `tier` 2 offers legendaries first; otherwise
 // rares turn up more often the higher the floor. `r` is a random function returning [0, 1).
 export function draftAugments(build, r, tier = 0, floor = 1) {
-  const open = AUGMENTS.filter((a) => (build[a.id] || 0) < a.max);
+  const open = AUGMENTS.filter((a) => a.r < 4 && (build[a.id] || 0) < a.max);
   const out = [];
   const take = (pool) => {
     const left = pool.filter((a) => !out.includes(a));
@@ -92,6 +107,13 @@ export function draftAugments(build, r, tier = 0, floor = 1) {
     if (!take(open.filter((a) => a.r === want)) && !take(open.filter((a) => a.r < 2)) && !take(open.filter((a) => a.r !== 2)) && !take(open)) break;
   }
   return out.map((a) => a.id);
+}
+
+// Up to three pacts the build has not made yet.
+export function draftPacts(build, r) {
+  const left = AUGMENTS.filter((a) => a.r === 4 && !build[a.id]), out = [];
+  while (left.length && out.length < 3) out.push(left.splice((r() * left.length) | 0, 1)[0].id);
+  return out;
 }
 
 export const augmentText = (id, build) => AUG[id].text((build[id] || 0) + 1);

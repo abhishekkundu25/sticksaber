@@ -8,9 +8,12 @@ import { Beast, BEAST_PLANS, BEAST_INFO, makeBeast } from '../src/game/beasts.js
 import { MOVES, fairTells } from '../src/game/moves.js';
 import { applyHit } from '../src/game/combat.js';
 import { makeRng, seedRng } from '../src/core/math.js';
+import { Ragdoll } from '../src/game/ragdoll.js';
+import { bind } from '../src/game/bonds.js';
 
 const DT = 1 / 120;
-const finite = (f) => [f.x, f.y, f.vx, f.vy, f.hp, f.posture, f.bx, f.by, f.tx, f.ty, f.saddleX, f.saddleY, ...f.j, ...f.p].every(Number.isFinite);
+const finite = (f) => [f.x, f.y, f.vx, f.vy, f.hp, f.posture, f.bx, f.by, f.tx, f.ty, f.saddleX ?? 0, f.saddleY ?? 0, f.hdA ?? 0, f.spA ?? 0, f.roll ?? 1, ...f.j, ...f.p,
+  ...(f.tl ?? []), ...(f.xl ?? []), ...(f.wg ?? [])].every(Number.isFinite);
 function hueOf(hex) {
   const n = parseInt(hex.slice(1), 16), r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
@@ -100,7 +103,7 @@ test('each plan fights the scripted player for 10 seconds with every number fini
   }
 });
 
-test('a beast can be hit, ragdolled, killed and chopped', () => {
+test('a beast can be hit, ragdolled and killed, and its corpse is knocked about but not cut up', () => {
   for (const plan of BEAST_PLANS) {
     const def = makeBeast(makeRng(7 + plan.length), `k_${plan}`, plan, 1, new Set());
     const world = arena(def);
@@ -120,7 +123,7 @@ test('a beast can be hit, ragdolled, killed and chopped', () => {
     p.hitSet?.clear?.();
     const cuts = e.rag.cuts.length;
     applyHit(world, p, e, { dmg: 5, post: 0, kx: 200, ky: 0, kind: 'flinch', stop: 0, shake: 0, stun: 0.3 }, e.j[2], e.j[3]);
-    assert.ok(e.rag.cuts.length > cuts, `${plan}: corpse not chopped`);
+    assert.equal(e.rag.cuts.length, cuts, `${plan}: an animal was dismembered`);
     for (let i = 0; i < 120; i++) { world.step(DT); assert.ok(finite(e)); }
   }
 });
@@ -157,4 +160,139 @@ test('mounts expose a saddle on their back', () => {
     for (let i = 0; i < 30; i++) world.step(DT);
     assert.ok(Math.abs(e.saddleX - e.cx) < 40 * e.scale && e.saddleY < Math.min(e.j[3], e.j[5]), `${plan}: saddle at ${e.saddleX},${e.saddleY}`);
   }
+});
+
+// Every point the beast draw functions pose a body from, in world space. Head and spine frames
+// include the roll, so a body that flips its drawn side shows up as a jump here.
+function drawn(f) {
+  const out = [...f.j, ...f.tl, ...f.xl];
+  if (f.B.wing) out.push(...f.wg);
+  const B = f.B, s = f.scale, FX = f.facing * f.xm, c = Math.cos(f.hdA), sn = Math.sin(f.hdA);
+  for (const [a, b] of [[1, 0], [-0.3, 0.8], [0.6, -0.6]]) {
+    out.push(f.j[0] + (c * a * B.head * s - sn * b * B.headR * s * f.roll) * FX, f.j[1] - (sn * a * B.head * s + c * b * B.headR * s * f.roll));
+  }
+  const dx = f.j[2] - f.j[4], dy = f.j[3] - f.j[5], d = Math.hypot(dx, dy) || 1, g = B.girth * s * f.roll;
+  out.push((f.j[2] + f.j[4]) / 2 + (dy / d) * f.facing * g, (f.j[3] + f.j[5]) / 2 - (dx / d) * f.facing * g);
+  return out;
+}
+const jump = (a, b) => { let m = 0; for (let i = 0; i < a.length; i += 2) m = Math.max(m, Math.hypot(a[i] - b[i], a[i + 1] - b[i + 1])); return m; };
+
+test('each plan goes limp as itself, comes to rest in the arena and stands up without a visible swap', () => {
+  for (const plan of BEAST_PLANS) {
+    for (const [seed, kx, ky, spin] of [[1, 520, -760, 3], [2, -420, -900, -4], [3, 300, -500, 6]]) {
+      const def = makeBeast(makeRng(seed * 31 + plan.length), `l_${plan}_${seed}`, plan, 6, new Set());
+      const world = arena(def, seed);
+      world.lockInput = true;
+      const e = world.spawnEnemy(def.kind, 200, false);
+      e.def = { ...e.def, ctrl: null };
+      if (def.flying) { e.y = -160; e.onGround = false; e.gravMul = 0; }
+      for (let i = 0; i < 30; i++) world.step(DT);
+      const live = drawn(e);
+      e.toRagdoll(kx, ky, spin);
+      assert.ok(e.rag && !(e.rag instanceof Ragdoll && e.rag.constructor === Ragdoll), `${plan}: a humanoid ragdoll`);
+      assert.ok(e.rag.n > 11, `${plan}: the limp body has no animal parts`);
+      assert.ok(jump(live, drawn(e)) < 1e-3, `${plan}: the body changes shape as it goes limp`);
+      let prev = drawn(e), up = false, landed = false;
+      for (let t = 0; t < 6 && !up; t += DT) {
+        const wasLimp = !!e.rag;
+        world.step(DT);
+        assert.ok(finite(e), `${plan} ${seed}: not finite at ${t.toFixed(2)}`);
+        const now = drawn(e);
+        // Thrown hard, a point travels up to ~25 px a step; a swap of shape moves far more.
+        assert.ok(jump(prev, now) < 40, `${plan} ${seed}: a point jumped ${jump(prev, now).toFixed(0)} px at ${t.toFixed(2)} (${wasLimp ? 'limp' : e.state})`);
+        prev = now;
+        if (e.rag) {
+          if (!e.rag.air) landed = true;
+          for (let i = 0; i < e.rag.n; i++) {
+            assert.ok(e.rag.y[i] <= 0.01, `${plan}: point ${i} under the floor`);
+            assert.ok(e.rag.x[i] >= world.minX - 0.01 && e.rag.x[i] <= world.maxX + 0.01, `${plan}: point ${i} outside the arena`);
+          }
+        }
+        if (wasLimp && !e.rag) {
+          up = true;
+          assert.equal(e.state, 'getup');
+          assert.ok(Math.abs(e.facing) === 1);
+          // It faces the way its head lay, so it stands up without turning on the spot.
+          assert.ok((e.j[2] - e.j[4]) * e.facing >= -4, `${plan}: stands up facing away from its own head`);
+        }
+      }
+      assert.ok(landed && up, `${plan} ${seed}: landed ${landed}, got up ${up}`);
+      for (let i = 0; i < 120; i++) {
+        world.step(DT);
+        const now = drawn(e);
+        // Only the blend up from the floor is checked; after it the live animation takes over.
+        if (e.state === 'getup') assert.ok(jump(prev, now) < 40, `${plan}: a point jumped ${jump(prev, now).toFixed(0)} px while standing up`);
+        prev = now;
+      }
+      assert.equal(e.state === 'getup' || e.state === 'ragdoll', false, `${plan}: still ${e.state}`);
+      assert.ok(Math.abs(e.roll - 1) < 1e-6);
+    }
+  }
+});
+
+test('heavy animals travel less when launched, and juggles still carry every plan', () => {
+  const travel = {};
+  for (const plan of BEAST_PLANS) {
+    const def = makeBeast(makeRng(17 + plan.length), `w_${plan}`, plan, 3, new Set());
+    const world = arena(def, 9);
+    world.lockInput = true;
+    const e = world.spawnEnemy(def.kind, 0, false);
+    e.def = { ...e.def, ctrl: null };
+    for (let i = 0; i < 20; i++) world.step(DT);
+    // Centre of mass: the limp body's own weights, the live body's joints.
+    const mid = () => { if (!e.rag) return (e.j[2] + e.j[4]) / 2; let m = 0, x = 0; for (let i = 0; i < e.rag.n; i++) if (e.rag.w[i]) { m += 1 / e.rag.w[i]; x += e.rag.x[i] / e.rag.w[i]; } return x / m; };
+    e.toRagdoll(0, 0, 0); const x0 = mid(); e.rag = null; e.setState('free');
+    e.toRagdoll(500, -700, 0);
+    let air = 0;
+    for (let i = 0; i < 40; i++) {
+      world.step(DT);
+      if (i === 11) travel[plan] = mid() - x0;
+      if (e.rag.air || i < 6) air++; // a low body counts as down until it clears the floor
+      // Hits in the air: each keeps it up there.
+      if (i % 12 === 11) { e.rag.kick(120, -520, 0); e.juggle++; }
+    }
+    assert.ok(e.rag && air >= 38, `${plan}: fell out of the juggle (${air} of 40 steps in the air)`);
+    assert.ok(e.juggle === 3);
+  }
+  assert.ok(travel.charger < travel.hound * 0.75 && travel.ape < travel.hound * 0.85, JSON.stringify(travel));
+});
+
+test('a rider thrown from a dying mount falls as its own body', () => {
+  const def = makeBeast(makeRng(11), 'r_charger', 'charger', 3, new Set());
+  const world = arena(def, 5);
+  world.lockInput = true;
+  const mount = world.spawnEnemy(def.kind, 300, false);
+  const rider = world.spawnEnemy('initiate', 300, false);
+  mount.def = { ...mount.def, ctrl: null }; rider.def = { ...rider.def, ctrl: null };
+  bind(world, 'rider', [rider, mount]);
+  for (let i = 0; i < 30; i++) world.step(DT);
+  assert.equal(rider.riding, mount);
+  applyHit(world, world.player, mount, { dmg: 9999, post: 0, kx: 400, ky: -500, kind: 'knock', stop: 0, shake: 0, stun: 0.3 }, mount.cx, mount.cy);
+  assert.ok(mount.dead && mount.rag);
+  let apart = 0;
+  for (let i = 0; i < 120; i++) {
+    world.step(DT);
+    assert.ok(finite(rider) && finite(mount));
+    apart = Math.max(apart, Math.hypot(rider.x - mount.saddleX, rider.y - mount.saddleY - 24 * rider.scale));
+  }
+  assert.equal(rider.riding, null);
+  assert.equal(mount.rider, null);
+  assert.ok(rider.rag !== mount.rag);
+  assert.ok(apart > 40, 'the rider stayed glued to the saddle');
+});
+
+test('the humanoid ragdoll behaves exactly as before', () => {
+  // A fingerprint of a fixed humanoid fall, a cut and a platform landing, recorded before animals got
+  // their own ragdoll. If this moves, the humanoid ragdoll changed.
+  seedRng(1234);
+  const j = [0, -150, 0, -120, 0, -82, 12, -104, 24, -92, -10, -104, -20, -90, 8, -56, 10, -4, -8, -56, -10, -4];
+  const r = new Ragdoll(j, [14, 38, 20, 20, 20, 20, 26, 26, 26, 26], 1);
+  r.kick(300, -700, 3);
+  let h = 0;
+  for (let i = 0; i < 400; i++) {
+    r.step(1 / 120, -1000, 1000, i > 200 ? [{ solid: true, x: 500, w: 300, y: -120 }] : null);
+    if (i === 150) r.chop(r.x[1], r.y[1], 200, -100);
+    for (let k = 0; k < r.n; k++) h = (h * 31 + Math.round(r.x[k] * 100) + Math.round(r.y[k] * 100)) | 0;
+  }
+  assert.deepEqual([h, r.rest.toFixed(4), r.n], [-1601036175, '1.6500', 13]);
 });

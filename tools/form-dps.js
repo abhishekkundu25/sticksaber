@@ -8,12 +8,21 @@ import { FORMS, FORM_IDS } from '../src/game/forms.js';
 import { seedRng } from '../src/core/math.js';
 
 // Strings, as button tokens. `d` holds down, a trailing `!` holds the button long enough to rise
-// with a launcher, `!!` charges a heavy.
+// with a launcher, `!!` charges a heavy, and `@s` holds it for `s` seconds.
 export const STRINGS = {
   saber: { L: 'L L L L', LF: 'L L L H', AIR: 'dH! L L L' },
   twin: { L: 'L L L L L L', LF: 'L L L H', AIR: 'dH! L L L L L' },
   great: { L: 'L L L', LF: 'L L L H', AIR: 'dH! L L' },
   staff: { L: 'L L L L', LF: 'L L L H', AIR: 'dH! L L L' },
+  lash: { L: 'L L L L', LF: 'L L L H', AIR: 'dH! L L L' },
+  gauntlets: { L: 'L L L L L', LF: 'L L L H', AIR: 'dH! L L L L' },
+  drawblade: { L: 'L L L L', LF: 'L L L H', AIR: 'dH! L L L' },
+};
+// Each form's signature, measured on its own: it has no counterpart on the saber.
+export const SIGNATURES = {
+  lash: { pull: 'H L L', far: 'H L L' }, // `far` starts out of reach of the lights
+  gauntlets: { charged: 'L L L L L L H', blast: 'L H' }, // L1 branches into the heavy
+  drawblade: { draw1: 'H@0.45', draw2: 'H@0.85', perfect3: 'H@1.25', late3: 'H@1.5' },
 };
 
 class ScriptInput {
@@ -86,8 +95,8 @@ export function measure(formId, tokens, { reps = 8, stale = false, log = false, 
 }
 
 function fire(inp, tok) {
-  const bang = tok.match(/!*$/)[0].length, t = tok.replace(/!+$/, '');
-  const hold = bang === 2 ? 0.62 : bang === 1 ? 0.4 : 0.06;
+  const at = tok.match(/@([\d.]+)$/), bang = tok.match(/!*$/)[0].length, t = tok.replace(/!+$|@[\d.]+$/, '');
+  const hold = at ? +at[1] : bang === 2 ? 0.62 : bang === 1 ? 0.4 : 0.06;
   if (t[0] === 'd') { inp.press('down', 0.2); }
   const b = t.slice(-1);
   inp.press(b === 'L' ? 'light' : b === 'H' ? 'heavy' : b === 'J' ? 'jump' : 'dash', hold);
@@ -96,17 +105,28 @@ function fire(inp, tok) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [form, str] = process.argv.slice(2);
   if (form) {
-    const r = measure(form, (STRINGS[form][str] || str).split(' '), { log: true });
+    const r = measure(form, (STRINGS[form][str] || SIGNATURES[form]?.[str] || str).split(' '), { log: true, dist: process.env.DIST ? +process.env.DIST : undefined });
     console.log(r);
   } else {
     const base = {};
-    console.log('form    string  dps(raw)  vs saber  hits/s  dmg/hit  dps(stale)');
+    let baseMean = 0;
+    console.log('form      string  dps(raw)  vs saber  hits/s  dmg/hit  dps(stale)');
     for (const id of FORM_IDS) {
-      for (const s of Object.keys(STRINGS[id])) {
+      let sum = 0;
+      const keys = Object.keys(STRINGS[id]);
+      for (const s of keys) {
         const tok = STRINGS[id][s].split(' '), r = measure(id, tok), q = measure(id, tok, { stale: true });
         if (id === 'saber') base[s] = r.dps;
-        console.log(`${id.padEnd(7)} ${s.padEnd(6)} ${r.dps.toFixed(1).padStart(8)}  ${((r.dps / base[s] - 1) * 100).toFixed(0).padStart(6)}%  ${r.hps.toFixed(2).padStart(6)}  ${r.perHit.toFixed(1).padStart(7)}  ${q.dps.toFixed(1).padStart(9)}`);
+        sum += r.dps;
+        console.log(`${id.slice(0, 9).padEnd(9)} ${s.padEnd(6)} ${r.dps.toFixed(1).padStart(8)}  ${((r.dps / base[s] - 1) * 100).toFixed(0).padStart(6)}%  ${r.hps.toFixed(2).padStart(6)}  ${r.perHit.toFixed(1).padStart(7)}  ${q.dps.toFixed(1).padStart(9)}`);
       }
+      if (id === 'saber') baseMean = sum / keys.length;
+      console.log(`${id.slice(0, 9).padEnd(9)} mean   ${(sum / keys.length).toFixed(1).padStart(8)}  ${((sum / keys.length / baseMean - 1) * 100).toFixed(0).padStart(6)}%`);
+    }
+    console.log('\nsignatures         dps   dmg/string  secs');
+    for (const id in SIGNATURES) for (const [s, str] of Object.entries(SIGNATURES[id])) {
+      const r = measure(id, str.split(' '), { reps: 4, dist: s === 'far' ? 200 : undefined });
+      console.log(`${id.slice(0, 9).padEnd(9)} ${s.padEnd(8)} ${r.dps.toFixed(1).padStart(5)}  ${r.perString.toFixed(1).padStart(10)}  ${r.secs.toFixed(2)}`);
     }
   }
 }

@@ -25,6 +25,7 @@ function weaponTouches(A, h, c, B) {
     for (let i = 0; i < 12; i += 3) if (Math.hypot(c[i] - ox, c[i + 1] - oy) < r + c[i + 2]) return i;
     return -1;
   }
+  if (A.lash && A.blade.whip) return whipTouches(A, c);
   const pad = 7, sx = A.j[2], sy = A.j[3];
   const mx = (A.bx + A.tx) / 2, my = (A.by + A.ty) / 2, pmx = (A.pbx + A.ptx) / 2, pmy = (A.pby + A.pty) / 2;
   for (let i = 0; i < 12; i += 3) {
@@ -39,6 +40,19 @@ function weaponTouches(A, h, c, B) {
   return -1;
 }
 
+// A whip connects along its outer part only, so it cannot hit what stands against the hand. The tip's
+// sweep counts as the tip. `A.tipK` records how far out it struck, 0 at the inner edge to 1 at the tip.
+const WHIP_DEAD = 0.3;
+function whipTouches(A, c) {
+  const q = A.lash, n = q.length >> 1, i0 = Math.floor((n - 1) * WHIP_DEAD);
+  for (let i = 0; i < 12; i += 3) if (distPointSeg(c[i], c[i + 1], A.ptx, A.pty, A.tx, A.ty) < c[i + 2] + 7) { A.tipK = 1; return i; }
+  for (let s = n - 2; s >= i0; s--) {
+    const o = s * 2;
+    for (let i = 0; i < 12; i += 3) if (distPointSeg(c[i], c[i + 1], q[o], q[o + 1], q[o + 2], q[o + 3]) < c[i + 2] + 7) { A.tipK = (s + 1 - i0) / (n - 1 - i0); return i; }
+  }
+  return -1;
+}
+
 export function resolveCombat(world) {
   const fs = world.fighters;
   for (let a = 0; a < fs.length; a++) {
@@ -48,10 +62,11 @@ export function resolveCombat(world) {
       const B = fs[b];
       const h = A.activeHit;
       if (!h) break; // a clash or parry earlier in this loop ended the attack
-      if (B.team === A.team || B.remove || B.phantom || A.hitSet.has(B)) continue;
+      // Same side, unless the two have fallen out with each other.
+      if ((B.team === A.team && !(A.feud && B.feud && A.feud !== B.feud)) || B.remove || B.phantom || A.hitSet.has(B)) continue;
       const c = hurtCircles(B);
       const i = weaponTouches(A, h, c, B);
-      if (i >= 0) applyHit(world, A, B, h, c[i], c[i + 1]);
+      if (i >= 0) { const r = applyHit(world, A, B, h, c[i], c[i + 1]); h.onHit?.(world, A, B, r); } // a form's own follow-up
     }
   }
 }
@@ -63,6 +78,7 @@ export function applyHit(world, A, B, h, cx, cy) {
   const fx = world.fx;
 
   if (B.dead) {
+    if (!B.rag) return 'corpse'; // a broken prop leaves nothing to cut
     // Corpses stay physical for a moment: every further cut slices off another piece.
     if (B.deadT < 3.4 && (A?.isPlayer || h.fromPlayer)) {
       const [ix, iy] = cutImpulse(A, dir);
@@ -105,6 +121,8 @@ export function applyHit(world, A, B, h, cx, cy) {
 
   // ── damage ──
   let dmg = h.dmg, post = h.post, fresh = false, punished = false, crit = false;
+  // A whip's tip bites far harder than the part near the hand.
+  if (A?.lash && A.blade.whip && !h.shape) { const k = 0.6 + 0.7 * A.tipK; dmg *= k; post *= k; }
   const M = world.mods, mine = A?.isPlayer || !!h.fromPlayer;
   if (read) { dmg *= 0.4; post = 0; }
   if (mine) {
@@ -121,12 +139,16 @@ export function applyHit(world, A, B, h, cx, cy) {
     dmg *= 1 + world.style.rank * M.rankDmg + (fresh ? M.fresh : 0);
     if (heavy) post *= M.post;
     if (M.crit && rng() < M.crit) { dmg *= 2; crit = true; world.stats.crits++; }
+    const pl = world.player;
+    if (M.lowDmg && pl && pl.hp < pl.maxHp * 0.4) dmg *= 2;
+    // Second Sheath: the first cut with a fresh weapon.
+    if (world.swapT > 0 && A?.isPlayer && !A.phantom) { dmg *= 1.5; world.swapT = 0; fx.text(cx, cy - 110, 'SWITCH', world.form.color, 15, 0.7); }
     // Stale hits earn nothing: Focus is paid for with variety.
     if (!r.stale && !power) world.gainFocus(6 * r.mul * (fresh ? 1.5 : 1) * (1 + world.style.rank * 0.12));
     if (A) A.hitLanded = true;
     if (M.burn) { if (B.burnT <= 0) world.sfx('burn', cx, 0.5); B.burnT = 2; B.burnDps = M.burn * (B.def.boss ? 0.5 : 1); }
     if (M.execute && !B.def.boss && (B.hp - dmg) / B.maxHp < M.execute && B.hp - dmg > 0) { dmg = B.hp + 1; fx.text(cx, cy - 78, 'EXECUTED', '#ffd36b', 15, 0.8); }
-  } else dmg *= world.enemyDmg * (A ? A.dmgMul : 1) * (B.isPlayer ? M.taken : 1);
+  } else dmg *= world.enemyDmg * (A ? A.dmgMul : 1) * (B.isPlayer ? M.taken * (world.frail || 1) : 1);
   if (world.anom === 'glass') dmg *= 1.5;
   // A warded enemy takes a third until its warder falls.
   const warded = B.ward && !B.ward.dead;
@@ -214,6 +236,8 @@ function react(world, A, B, h, dir) {
 }
 
 function kill(world, A, B, h, cx, cy, dir) {
+  // A prop has no body to throw: it breaks where it stands.
+  if (B.def.prop) { B.dead = true; B.hp = 0; B.remove = true; B.activeHit = null; world.onProp(A, B, cx, cy, dir); return 'kill'; }
   const spike = h.kind === 'spike';
   const kvx = dir * Math.max(Math.abs(h.kx), 280) * 1.2;
   const kvy = spike ? Math.abs(h.ky) * 0.8 : Math.min(h.ky, -260) - 140;

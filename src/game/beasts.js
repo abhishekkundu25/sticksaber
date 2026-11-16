@@ -1,9 +1,13 @@
 // Animal enemies. A Beast is a Fighter whose 11 joints are read as an animal:
 //   0 head (where the eye is)   1 shoulder, front of the spine   2 hip, rear of the spine
 //   3-4 near front limb         5-6 far front limb               7-8 near hind limb   9-10 far hind limb
-// so the ragdoll, chopping, hit tests and effects work on it unchanged. Wings are the front limbs.
-// Tails, extra legs, heads and wings are derived from those joints every frame and drawn by
-// render/beastdraw.js. Bodies are generated per seed by makeBeast().
+// so hit tests and effects work on it unchanged. Wings are the front limbs. Tails, extra legs,
+// heads and wings are derived from those joints every frame and drawn by render/beastdraw.js.
+// Bodies are generated per seed by makeBeast().
+//
+// Limp, a beast uses its own BeastRagdoll: the 11 joints plus a snout, the tail and the extra legs,
+// with its plan's weight. The same draw function poses the same shapes from those points, so the
+// body never turns into a stick figure. Animals are not dismembered.
 //
 // Pose channels mean something else on a beast. Moves prefixed bt_ are only ever played by beasts,
 // and every channel is relative to the body's own size, so one move fits every seed of a plan:
@@ -18,6 +22,7 @@
 import { clamp, approach, ik2, rand, rng, TAU, EASE } from '../core/math.js';
 import { registerMove, sampleMove, fillStance, C, N, MOVES } from './moves.js';
 import { Fighter } from './fighter.js';
+import { Ragdoll, G as GRAVITY } from './ragdoll.js';
 import { initAi, weighted, mercy } from './enemies.js';
 import { breakPosture } from './combat.js';
 
@@ -26,6 +31,7 @@ const PI = Math.PI;
 const L = new Float32Array(22), IK = new Float32Array(4), GF = new Float32Array(2), HP = new Float32Array(2);
 const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 const frac = (v) => v - Math.floor(v);
+const wrapPi = (a) => a - TAU * Math.round(a / TAU);
 
 // ───────────── plans ─────────────
 export const BEAST_PLANS = ['hound', 'charger', 'raptor', 'stalker', 'scorpion', 'flyer', 'ape', 'spitter'];
@@ -222,13 +228,20 @@ export class Beast extends Fighter {
     this.wg = new Float32Array(16); // wing finger tips: near then far, 4 points each
     this.saddleX = this.x; this.saddleY = -B.hipH * this.scale;
     this.legLen = (B.hl[0] + B.hl[1]);
+    // Getting up blends the derived parts from where the limp body left them, like the joints.
+    this.tb = new Float32Array(this.tl.length); this.xb = new Float32Array(this.xl.length); this.wgb = new Float32Array(16);
+    this.guHd = 0; this.guRoll = 1; this.guK = 1;
+    this.roll = 1;   // the drawn body's up side: -1 shows it belly up, eased through 0 as it rolls over
+    this.wsg = [1, 1]; // which side of a limp wing the fingers fan to, fixed when it goes limp
   }
 
   update(world, dt) {
     if (!this.dead && !this.def.blade.gun) this.bladeOn = approach(this.bladeOn, this.state === 'attack' ? 1 : 0.4, dt * 5);
+    const limp = !!this.rag;
     super.update(world, dt);
-    // Stand-up blends the joints after computeJoints; rebuild the parts hung off them.
-    if (this.state === 'getup' && !this.rag) this.derive();
+    // Stand-up blends the joints after computeJoints; rebuild the parts hung off them. Not on the
+    // frame it gets up: that frame is still drawn from the limp body.
+    if (this.state === 'getup' && !this.rag && !limp) this.derive();
   }
 
   // Gait, weight and reactions. The spring integration is the Fighter's.
@@ -321,6 +334,14 @@ export class Beast extends Fighter {
     this.spA = th; this.hdA = na + B.head0 + p[HA];
     const aiming = this.state === 'attack' && this.move.aim && this.aimLocal !== undefined && this.mt < this.move.dur - 0.5;
     if (aiming) this.hdA += (this.aimLocal - this.hdA) * 0.75;
+    // Standing up: the head turns and the body rolls over from where the limp body lay, at the same
+    // pace as the Fighter blends the joints.
+    this.roll = 1; this.guK = 1;
+    if (this.state === 'getup' && this.stDur > 0) {
+      const k = this.guK = EASE.io(clamp(this.st / this.stDur, 0, 1));
+      this.hdA = this.guHd + wrapPi(this.hdA - this.guHd) * k;
+      this.roll = this.guRoll + (1 - this.guRoll) * k;
+    }
     for (let k = 0; k < 4; k++) this.limb(k, k < 2 ? shX : hipX, k < 2 ? shY : hipY);
     for (let i = 0; i < 22; i += 2) { j[i] = this.x + L[i] * s * f * xm; j[i + 1] = this.y - L[i + 1] * s; }
     this.derive();
@@ -400,7 +421,7 @@ export class Beast extends Fighter {
         this.gait(B.xo[i] + (B.xo2[i] - B.xo[i]) * gb);
         let tx = B.xf[i] + GF[0], ty = GF[1];
         if (this.airK > 0) { tx += (rx + (B.xf[i] - rx) * 0.6 - tx) * this.airK; ty += (ry * 0.6 - ty) * this.airK; }
-        ik2(rx, ry, tx, Math.max(0, ty), B.xl[0], B.xl[1], B.xf[i] > rx ? 1 : -1, IK);
+        ik2(rx, ry, tx, Math.max(0, ty), B.xl[0], B.xl[1], B.xk[i], IK);
         const o = i * 6;
         xl[o] = this.x + rx * s * fx; xl[o + 1] = this.y - ry * s;
         xl[o + 2] = this.x + IK[0] * s * fx; xl[o + 3] = this.y - IK[1] * s;
@@ -411,13 +432,22 @@ export class Beast extends Fighter {
       // Wing tips spread from the wrist: three fingers or primaries.
       const wg = this.wg;
       for (let w = 0; w < 2; w++) {
-        const a2 = (w ? this.wa1 : this.wa0) ?? 0;
+        const a2 = (w ? this.wa1 : this.wa0) ?? 0, sn = Math.sin(a2);
+        // The fingers fan to one side of the forearm; keep that side until the wing has clearly
+        // swung over, or a wing tucked straight back flickers between the two.
+        if (Math.abs(sn) > 0.3) this.wsg[w] = Math.sign(sn);
         const wx = j[w ? 12 : 8], wy = j[w ? 13 : 9];
         for (let i = 0; i < 3; i++) {
-          const ang = a2 + Math.sign(Math.sin(a2) || 1) * B.wingFan[i], ln = B.wingLen[i] * s * (w ? 0.9 : 1);
+          const ang = a2 + this.wsg[w] * B.wingFan[i], ln = B.wingLen[i] * s * (w ? 0.9 : 1);
           wg[w * 8 + i * 2] = wx + Math.cos(ang) * ln * fx; wg[w * 8 + i * 2 + 1] = wy - Math.sin(ang) * ln;
         }
       }
+    }
+    if (this.guK < 1) {
+      const k = this.guK, tl = this.tl, tb = this.tb, xl = this.xl, xb = this.xb, wg = this.wg, wgb = this.wgb;
+      for (let i = 0; i < tl.length; i++) tl[i] = tb[i] + (tl[i] - tb[i]) * k;
+      for (let i = 0; i < xl.length; i++) xl[i] = xb[i] + (xl[i] - xb[i]) * k;
+      for (let i = 0; i < 16; i++) wg[i] = wgb[i] + (wg[i] - wgb[i]) * k;
     }
     this.placeWeapon();
     // The seat: on top of the back, a little ahead of the middle.
@@ -466,31 +496,69 @@ export class Beast extends Fighter {
     return out;
   }
 
-  // Limp: keep the natural weapon on the head or the tail instead of the forearm.
+  toRagdoll(vx, vy, spin = 0) {
+    this.turnT = 0;
+    this.rag = new BeastRagdoll(this);
+    this.rag.kick(vx, vy, spin);
+    this.setState('ragdoll');
+    this.onGround = false; this.vx = 0; this.vy = 0; this.stepping = false;
+  }
+
   updateRagdoll(world, dt) {
+    const P = LIMP[this.B.plan];
+    this.rag.want = this.dead ? P.deadUp : P.up;
     super.updateRagdoll(world, dt);
     if (!this.rag) return;
-    const B = this.B, j = this.j, len = B.wLen * this.scale;
-    let a = -1, b = -1, c = -1;
-    if (B.weapon === 'sting') { a = 4; b = 2; } else if (B.weapon !== 'claw') { a = 0; b = 2; c = 0; }
-    if (a >= 0) {
-      const dx = j[a] - j[b], dy = j[a + 1] - j[b + 1], d = Math.hypot(dx, dy) || 1;
-      const ox = c >= 0 ? j[0] : j[4], oy = c >= 0 ? j[1] : j[5];
-      this.bx = ox; this.by = oy; this.tx = ox + (dx / d) * len; this.ty = Math.min(-2, oy + (dy / d) * len);
-      this.t2x = this.bx; this.t2y = this.by;
+    this.xm = approach(this.xm, 1, dt * 3);
+    const p = this.p;
+    p[HR] = approach(p[HR], 0.3, dt * 2); p[ROT] = approach(p[ROT], 0, dt * 3);
+    this.limpParts();
+    this.saddleX = (this.j[2] + this.j[4]) / 2; this.saddleY = Math.min(this.j[3], this.j[5]) - this.B.backH * this.scale;
+  }
+
+  // Everything the drawing reads, read back from the limp body's points.
+  limpParts() {
+    const B = this.B, rg = this.rag, x = rg.x, y = rg.y, k = this.facing / this.xm;
+    this.spA = Math.atan2(y[2] - y[1], (x[1] - x[2]) * k);
+    this.hdA = Math.atan2(y[0] - y[11], (x[11] - x[0]) * k);
+    const T = B.tail;
+    if (T.n) {
+      const tl = this.tl, o = rg.t0;
+      for (let i = 0; i <= T.n; i++) { tl[i * 2] = x[o + i]; tl[i * 2 + 1] = y[o + i]; }
+      this.tailA = Math.atan2(y[o + T.n - 1] - y[o + T.n], (x[o + T.n] - x[o + T.n - 1]) * k);
     }
-    this.saddleX = (j[2] + j[4]) / 2; this.saddleY = Math.min(j[3], j[5]) - B.backH * this.scale;
+    for (let i = 0, o = rg.x0, xl = this.xl; i < B.xn * 3; i++) { xl[i * 2] = x[o + i]; xl[i * 2 + 1] = y[o + i]; }
+    if (B.wing) {
+      const wg = this.wg, s = this.scale, fx = this.facing * this.xm;
+      for (let w = 0; w < 2; w++) {
+        const e = w ? 5 : 3, r = w ? 6 : 4, a2 = Math.atan2(y[e] - y[r], (x[r] - x[e]) * k);
+        for (let i = 0; i < 3; i++) {
+          const ang = a2 + this.wsg[w] * B.wingFan[i], ln = B.wingLen[i] * s * (w ? 0.9 : 1);
+          wg[w * 8 + i * 2] = x[r] + Math.cos(ang) * ln * fx; wg[w * 8 + i * 2 + 1] = y[r] - Math.sin(ang) * ln;
+        }
+      }
+    }
+    this.placeWeapon();
   }
 
   getUp(dur) {
-    const rg = this.rag, mid = (rg.x[1] + rg.x[2]) / 2;
+    const rg = this.rag, mid = (rg.x[1] + rg.x[2]) / 2, was = this.facing;
+    this.limpParts();
     if (Math.abs(rg.x[1] - rg.x[2]) > 4) this.facing = rg.x[1] > rg.x[2] ? 1 : -1;
     this.lastF = this.facing;
+    // Facing the other way means it lay belly up: start the roll drawn as it was, and turn the head
+    // angle into the new facing so the first frame matches the last limp one.
+    this.guRoll = this.facing === was ? 1 : -1;
+    this.guHd = Math.atan2(rg.y[0] - rg.y[11], (rg.x[11] - rg.x[0]) * this.facing / this.xm);
+    this.tb.set(this.tl); this.xb.set(this.xl); this.wgb.set(this.wg);
     super.getUp(dur);
+    // This frame is still drawn from the limp points, in the new facing.
+    this.roll = this.guRoll; this.hdA = this.guHd;
     this.x = mid;
     const p = this.p;
-    p[PY] = 0.42; p[LEAN] = 0.1; p[HEAD] = -0.4; p[PX] = 0; p[UA] = 0; p[LA] = 0; p[ROT] = 0; p[HR] = 0.3;
-    this.gamp = 0; this.airK = 0; this.vx = 0; this.lastVx = 0; this.accS = 0;
+    // A flyer gets up with its wings still tucked, as they were while it lay limp.
+    p[PY] = 0.42; p[LEAN] = 0.1; p[HEAD] = -0.4; p[PX] = 0; p[UA] = 0; p[LA] = 0; p[ROT] = this.B.wing ? -1 : 0; p[HR] = 0.3;
+    this.gamp = 0; this.airK = 0; this.vx = 0; this.lastVx = 0; this.accS = 0; this.turnT = 0;
   }
 
   land(world) {
@@ -511,6 +579,256 @@ export class Beast extends Fighter {
       return;
     }
     super.fire(world, ev);
+  }
+}
+
+// ───────────── limp bodies ─────────────
+// How each plan falls. tx, ty, spin, scat scale a knock (sideways travel, lift, tumble, limb scatter);
+// lift stays near 1 so air combos keep working. bounce scales the Ragdoll's bounce, fric is the
+// ground friction per second, core the weight of the spine against a limb. curl folds the legs to
+// this share of their length. up is the side it twists to land on while alive (1 back up, -1 belly
+// up), deadUp the same once dead. fold sweeps wings back against the body.
+const LIMP = {
+  hound: { tx: 1, ty: 1, spin: 1, scat: 1, bounce: 1.1, fric: 9, core: 3, up: 1, deadUp: 0 },
+  charger: { tx: 0.6, ty: 0.8, spin: 0.4, scat: 0.5, bounce: 0.35, fric: 2.2, core: 7, up: 1, deadUp: 0 },
+  raptor: { tx: 1, ty: 1, spin: 0.9, scat: 0.9, bounce: 1, fric: 8, core: 3, up: 1, deadUp: 0 },
+  stalker: { tx: 1.1, ty: 1, spin: 1.2, scat: 1, bounce: 1.2, fric: 7, core: 2, curl: 0.62, up: 1, deadUp: -1 },
+  scorpion: { tx: 0.8, ty: 0.92, spin: 0.7, scat: 0.7, bounce: 0.6, fric: 6, core: 3, curl: 0.55, up: -1, deadUp: -1 },
+  flyer: { tx: 1.15, ty: 1, spin: 1.2, scat: 0.8, bounce: 0.8, fric: 8, core: 2, fold: true, up: 0, deadUp: 0 },
+  ape: { tx: 0.7, ty: 0.9, spin: 0.6, scat: 0.6, bounce: 0.5, fric: 5, core: 6, up: 1, deadUp: 0 },
+  spitter: { tx: 0.9, ty: 0.95, spin: 0.9, scat: 0.9, bounce: 1.4, fric: 7, core: 3, up: 1, deadUp: 0 },
+};
+const SCR = 64; // more points than any plan has
+const PX0 = new Float32Array(SCR), PY0 = new Float32Array(SCR), PVX = new Float32Array(SCR), PVY = new Float32Array(SCR), HIT = new Uint8Array(SCR);
+
+// A Ragdoll laid out as an animal. Points: the 11 joints, 11 the snout, then the tail from its root,
+// then root, knee and foot of each extra leg. Tail and extra-leg roots ride on the spine. Rest lengths
+// come from the pose it went limp in, so the first limp frame is the last live one. Fields other code
+// reads (x, y, n, air, rest, grounded, floorY, cuts, bounce, gravScale, kick) mean what they mean on
+// the Ragdoll.
+class BeastRagdoll extends Ragdoll {
+  constructor(f) {
+    super(f.j, f.lens, f.scale);
+    const B = f.B, s = f.scale, P = this.P = LIMP[B.plan], T = B.tail, j = f.j;
+    const nt = T.n ? T.n + 1 : 0, n = 12 + nt + B.xn * 3;
+    this.n = n; this.f = f.facing; this.want = 0;
+    this.t0 = 12; this.x0 = 12 + nt;
+    const x = this.x = new Float32Array(n), y = this.y = new Float32Array(n);
+    this.vx = new Float32Array(n); this.vy = new Float32Array(n);
+    const r = this.r = new Float32Array(n), w = this.w = new Float32Array(n).fill(1);
+    for (let i = 0; i < 11; i++) { x[i] = j[i * 2]; y[i] = j[i * 2 + 1]; }
+    f.headPt(1, 0); x[11] = HP[0]; y[11] = HP[1];
+    for (let i = 0; i < nt; i++) { x[12 + i] = f.tl[i * 2]; y[12 + i] = f.tl[i * 2 + 1]; }
+    for (let i = 0; i < B.xn * 3; i++) { x[this.x0 + i] = f.xl[i * 2]; y[this.x0 + i] = f.xl[i * 2 + 1]; }
+
+    const lw = B.lw * s, d0 = (a, b) => Math.hypot(x[b] - x[a], y[b] - y[a]);
+    r.fill(lw * 0.5);
+    r[0] = B.headR * s * 0.8; r[11] = B.headR * s * 0.5;
+    r[1] = r[2] = B.girth * s * (B.wing ? 0.6 : 0.75);
+    w[1] = w[2] = 1 / P.core; w[0] = w[11] = 0.5;
+    // "Down": the spine is as low as a humanoid's counts as down (so a body popped by hits on the
+    // floor still gets up in time, as before), or as thick as it is, or the body stands on the floor
+    // no taller than it stands alive (a spider on its curled legs).
+    this.low = -Math.max(34 * s, r[1] * 1.25 + 6 * s); this.stand = -(B.hipH * s * 1.7 + 8);
+
+    const bones = this.bones = [[1, 2], [1, 0], [0, 11]], lims = this.lims = [], hinges = this.hinges = [], att = this.att = [];
+    lims.push([0, 2, 0.75 * d0(0, 2), 1e9], [11, 1, 0.8 * d0(11, 1), 1e9]);
+    // Attach a point to the spine where it is now: along the hip to shoulder line and out from it.
+    const frame = () => { const ux = x[1] - x[2], uy = y[1] - y[2], d = Math.hypot(ux, uy) || 1; return [ux / d, uy / d, (uy / d) * this.f, -(ux / d) * this.f]; };
+    const [ux, uy, nx, ny] = frame();
+    const sl = d0(1, 2) || 1;
+    this.host = new Float32Array(n).fill(-1);
+    const attach = (p) => {
+      const dx = x[p] - x[2], dy = y[p] - y[2], a = dx * ux + dy * uy;
+      att.push([p, a, dx * nx + dy * ny]); w[p] = 0; r[p] = 1; this.host[p] = clamp(a / sl, 0, 1);
+    };
+    // Hold a point near (ox, oy) from `from`, in the body's frame (forward, up), by its distance from
+    // the spine points. Distances push along the line between two points, so a held pose turns
+    // nothing and moves nothing; a pull toward a target would spin the body for ever.
+    const hold = (p, from, ox, oy, sp) => {
+      const tx = x[from] + ux * ox + nx * oy, ty = y[from] + uy * ox + ny * oy;
+      for (const q of sp) { const d = Math.hypot(tx - x[q], ty - y[q]); lims.push([p, q, d * 0.88, d * 1.12]); }
+    };
+    const limb = (root, knee, foot, role, fwd) => {
+      bones.push([root, knee], [knee, foot]);
+      const len = d0(root, knee) + d0(knee, foot);
+      const cr = (x[foot] - x[root]) * (y[knee] - y[root]) - (y[foot] - y[root]) * (x[knee] - x[root]);
+      if (role !== 'wing' && Math.abs(cr) > len * len * 0.01) hinges.push([root, knee, foot, Math.sign(cr)]);
+      if (role === 'wing') {
+        if (P.fold) {
+          // Swept back along the body, the way it tucks its wings in flight.
+          const l1 = d0(root, knee), l2 = d0(knee, foot), ex = Math.cos(2.75) * l1, ey = Math.sin(2.75) * l1;
+          hold(knee, root, ex, ey, [2]); hold(foot, root, ex + Math.cos(3.05) * l2, ey + Math.sin(3.05) * l2, [1, 2]);
+        }
+        return;
+      }
+      lims.push([root, foot, 0.4 * len, P.curl && role === 'leg' ? P.curl * len : 1e9]);
+      // Curled: the foot drawn in under the belly.
+      if (P.curl && role === 'leg') hold(foot, root, fwd * len, -0.45 * len, root === 1 ? [2] : root === 2 ? [1] : [1, 2]);
+      r[foot] = lw * 0.45;
+    };
+    for (let k = 0; k < 4; k++) limb(k < 2 ? 1 : 2, 3 + k * 2, 4 + k * 2, B.roles[k], k < 2 ? 0.2 : -0.2);
+    if (nt) {
+      const o = this.t0;
+      attach(o);
+      // The tail's angle at the root: held by its distance from the shoulder. A sting barely moves
+      // there; a mammal's tail swings but does not fold forward over the back.
+      for (let i = 1; i <= Math.min(2, T.n); i++) {
+        const d = d0(1, o + i);
+        lims.push(B.weapon === 'sting' ? [1, o + i, d * 0.95, d * 1.04] : [1, o + i, d * 0.85, 1e9]);
+      }
+      for (let i = 0; i < T.n; i++) {
+        bones.push([o + i, o + i + 1]);
+        r[o + i + 1] = Math.max(2, (T.w0 + (T.w1 - T.w0) * ((i + 1) / T.n)) * s);
+        if (i + 2 > T.n) continue;
+        // A tail bends but does not fold. A sting is armoured: it keeps its curl, bent the same way.
+        const d = d0(o + i, o + i + 2);
+        if (B.weapon !== 'sting') { lims.push([o + i, o + i + 2, d * 0.85, 1e9]); continue; }
+        lims.push([o + i, o + i + 2, d * 0.95, d]);
+        if (i + 3 <= T.n) { const d3 = d0(o + i, o + i + 3); lims.push([o + i, o + i + 3, d3 * 0.9, d3]); }
+        const a = o + i, b = a + 1, c = a + 2, cr = (x[c] - x[a]) * (y[b] - y[a]) - (y[c] - y[a]) * (x[b] - x[a]);
+        if (Math.abs(cr) > d * d * 0.01) hinges.push([a, b, c, Math.sign(cr)]);
+      }
+    }
+    for (let i = 0; i < B.xn; i++) {
+      const o = this.x0 + i * 3;
+      attach(o);
+      limb(o, o + 1, o + 2, 'leg', (B.xr[i] - 0.5) * 0.4);
+    }
+    this.len = bones.map(([a, b]) => d0(a, b));
+    this.mins = [];
+  }
+
+  // A knock scaled by the plan's weight. Lift only shrinks a little, so juggles still carry.
+  kick(vx, vy, spin = 0, scatter = 90) {
+    const P = this.P;
+    super.kick(vx * P.tx, vy < 0 ? vy * P.ty : vy, spin * P.spin, scatter * P.scat);
+  }
+
+  chop() { return null; }
+
+  // Inverse mass, and a move that a point riding on the spine hands on to the spine, split by where
+  // it sits between hip and shoulder, so nothing pushes the body along without a push back.
+  im(i) { return this.w[i] || (this.host[i] >= 0 ? this.w[1] : 0); }
+  move(i, dx, dy) {
+    const q = this.host[i];
+    if (q < 0) { this.x[i] += dx; this.y[i] += dy; return; }
+    this.x[1] += dx * q; this.y[1] += dy * q; this.x[2] += dx * (1 - q); this.y[2] += dy * (1 - q);
+  }
+
+  // Points riding on the spine follow it exactly.
+  follow() {
+    const { x, y, att } = this;
+    let ux = x[1] - x[2], uy = y[1] - y[2];
+    const d = Math.hypot(ux, uy) || 1; ux /= d; uy /= d;
+    const nx = uy * this.f, ny = -ux * this.f;
+    for (let i = 0; i < att.length; i++) {
+      const A = att[i], p = A[0], a = A[1], b = A[2];
+      x[p] = x[2] + ux * a + nx * b; y[p] = y[2] + uy * a + ny * b;
+    }
+  }
+
+  step(dt, minX, maxX, plats) {
+    if (dt <= 0) return 0;
+    const { x, y, vx, vy, r, w, bones, len, lims, hinges, n, P } = this;
+    const g = GRAVITY * this.gravScale;
+    for (let i = 0; i < n; i++) {
+      vy[i] += g * dt;
+      PX0[i] = x[i]; PY0[i] = y[i]; PVY[i] = vy[i]; PVX[i] = vx[i];
+      x[i] += vx[i] * dt; y[i] += vy[i] * dt;
+    }
+    let ux = x[1] - x[2], uy = y[1] - y[2];
+    const ud = Math.hypot(ux, uy) || 1; ux /= ud; uy /= ud;
+    const nx = uy * this.f, ny = -ux * this.f;
+    if (this.want && this.air) {
+      // In the air it twists toward the side it means to land on: a turn about its centre of mass,
+      // so the twist does not carry it anywhere.
+      const e = wrapPi((this.want * this.f > 0 ? 0 : PI) - Math.atan2(uy, ux)), da = clamp(e, -4.5 * dt, 4.5 * dt);
+      let m = 0, mx = 0, my = 0;
+      for (let i = 0; i < n; i++) if (w[i]) { m += 1 / w[i]; mx += x[i] / w[i]; my += y[i] / w[i]; }
+      mx /= m; my /= m;
+      const c = Math.cos(da), sn = Math.sin(da);
+      for (let i = 0; i < n; i++) {
+        if (!w[i]) continue;
+        const dx = x[i] - mx, dy = y[i] - my;
+        x[i] = mx + dx * c - dy * sn; y[i] = my + dx * sn + dy * c;
+      }
+    }
+    let impact = 0, wall = 0;
+    HIT.fill(0, 0, n);
+    for (let it = 0; it < 5; it++) {
+      this.follow();
+      for (let b = 0; b < bones.length; b++) {
+        const i = bones[b][0], j = bones[b][1], wi = this.im(i), wj = this.im(j);
+        const dx = x[j] - x[i], dy = y[j] - y[i];
+        const d = Math.sqrt(dx * dx + dy * dy) || 0.001;
+        const k = (d - len[b]) / d / (wi + wj);
+        this.move(i, dx * k * wi, dy * k * wi); this.move(j, -dx * k * wj, -dy * k * wj);
+      }
+      for (let m = 0; m < lims.length; m++) {
+        const L = lims[m], i = L[0], j = L[1];
+        const dx = x[j] - x[i], dy = y[j] - y[i];
+        const d = Math.sqrt(dx * dx + dy * dy) || 0.001;
+        const t = d < L[2] ? L[2] : d > L[3] ? L[3] : d;
+        if (t === d) continue;
+        const wi = this.im(i), wj = this.im(j), k = (d - t) / d / (wi + wj) * 0.5;
+        this.move(i, dx * k * wi, dy * k * wi); this.move(j, -dx * k * wj, -dy * k * wj);
+      }
+      for (let h = 0; h < hinges.length; h++) {
+        // A knee or elbow may straighten but not bend the wrong way. The ends take half the push back.
+        const H = hinges[h], a = H[0], b = H[1], c = H[2];
+        const ax = x[c] - x[a], ay = y[c] - y[a], l = Math.sqrt(ax * ax + ay * ay) || 0.001;
+        const side = (ax * (y[b] - y[a]) - ay * (x[b] - x[a])) / l * H[3];
+        if (side >= 1) continue;
+        const wa = this.im(a), wb = this.im(b), wc = this.im(c), t = (1 - side) * H[3] / (wb + (wa + wc) / 4);
+        const ex = -ay / l * t, ey = ax / l * t;
+        this.move(b, ex * wb, ey * wb); this.move(a, -ex * wa / 2, -ey * wa / 2); this.move(c, -ex * wc / 2, -ey * wc / 2);
+      }
+      for (let i = 0; i < n; i++) {
+        if (plats && plats.length && vy[i] >= 0) {
+          for (let q = 0; q < plats.length; q++) {
+            const Pl = plats[q];
+            if (!Pl.solid || x[i] < Pl.x - Pl.w / 2 || x[i] > Pl.x + Pl.w / 2) continue;
+            if (y[i] > Pl.y - r[i] && PY0[i] <= Pl.y - r[i] + 8) { y[i] = Pl.y - r[i]; HIT[i] = 1; if (i === 2) this.floorY = Pl.y; }
+          }
+        }
+        if (y[i] > -r[i]) { y[i] = -r[i]; HIT[i] = 1; if (i === 2) this.floorY = 0; }
+        if (x[i] < minX + r[i]) { x[i] = minX + r[i]; HIT[i] |= 2; }
+        else if (x[i] > maxX - r[i]) { x[i] = maxX - r[i]; HIT[i] |= 2; }
+      }
+    }
+    this.follow();
+    let speed = 0, torsoDown = false, touch = false;
+    const fr = Math.max(0, 1 - P.fric * dt), bounce = this.bounce * P.bounce;
+    for (let i = 0; i < n; i++) {
+      let nvx = (x[i] - PX0[i]) / dt, nvy = (y[i] - PY0[i]) / dt;
+      if (HIT[i] & 1) {
+        if (PVY[i] > 160) { nvy = -PVY[i] * bounce; if (i < 3 && PVY[i] > impact) impact = PVY[i]; }
+        else if (nvy > 0) nvy = 0;
+        nvx *= fr;
+        if (i === 1 || i === 2) torsoDown = true;
+      }
+      if (HIT[i] & 2) {
+        if (Math.abs(PVX[i]) > 200) { nvx = -PVX[i] * 0.45; if (i < 3) wall = Math.max(wall, Math.abs(PVX[i])); }
+      }
+      if (y[i] >= -r[i] - 3) touch = true;
+      vx[i] = nvx * 0.999; vy[i] = nvy;
+      if (i < 3) speed += Math.abs(nvx) + Math.abs(nvy);
+    }
+    if (touch) {
+      // Many legs on the floor push against each other; damp that, or a body standing on its legs
+      // never settles.
+      const k = Math.max(0, 1 - 4 * dt);
+      for (let i = 0; i < n; i++) { vx[i] *= k; vy[i] *= k; }
+    }
+    this.wallImpact = wall;
+    if (y[1] > this.low || y[2] > this.low || (touch && Math.min(y[1], y[2]) > this.stand)) torsoDown = true;
+    this.age += dt;
+    this.air = !torsoDown;
+    this.grounded = torsoDown ? this.grounded + dt : 0;
+    // Settled when the head and spine are still; limbs can twitch.
+    this.rest = (torsoDown || this.age > 3) && speed / 3 < 70 ? this.rest + dt : 0;
+    return impact;
   }
 }
 
@@ -881,7 +1199,10 @@ export function makeBeast(r, id, plan, tier, names) {
       xf.push(hipX + (shX - hipX) * q + (q - 0.5) * lenH * 0.9 + (i < per ? 0 : 3));
       xo.push(((k + (i < per ? 0 : 1)) % 2) * 0.5 + k * 0.17); xo2.push(xo[i]);
     }
-    Object.assign(B, { xr, xf, xo, xo2, xs, xl: [B.hl[0] * 1.05, B.hl[1] * 1.05] });
+    // Each knee bends one way for good: chosen from where the foot stands at rest, so it never flips
+    // as the body leans or blends up from the floor.
+    const xk = xf.map((f, i) => (f > hipX + (shX - hipX) * xr[i] ? 1 : -1));
+    Object.assign(B, { xr, xf, xo, xo2, xs, xk, xl: [B.hl[0] * 1.05, B.hl[1] * 1.05] });
   }
   B.plan = plan; B.cx ??= 0.5;
 
@@ -917,9 +1238,6 @@ export function makeBeast(r, id, plan, tier, names) {
     ai: { range: S.range || [0, 0], cd: S.cd, walk: S.walk, pace: !!S.pace, turnAway: !!S.turnAway, pack: !!S.pack, skitter: !!S.skitter, roar: !!S.roar, turnLag: S.turnLag, moves },
     chainBreak: 0, traits: Object.fromEntries(traits.map((t) => [t, 1])), flying: info.flying, rideable: info.rideable, ranged: info.ranged || undefined,
     body: B, stance: { ...REST, f1x: 0.5, f1y: -0.4, f2x: 0.4, f2y: -0.5 }, depth: tier,
-    // What the generic bone drawing uses for a limp body.
-    prop: { torso: 1, arm: 1, leg: 1, head: (B.headR / 8) * (plan === 'charger' || plan === 'ape' ? 1.1 : 1) }, belly: B.heavy ? Math.round(B.girth * 0.55) : 0,
-    deco: plan === 'charger' && (B.kind === 'bull' || B.kind === 'ram') ? 'horns' : plan === 'charger' && B.kind === 'elk' ? 'antlers' : undefined,
     parryPosture: 50, parryRecoil: S.parryRecoil ?? 0.9, breakDur: S.breakDur ?? 2.5, dmg: +R(r, 0.95, 1.1).toFixed(2),
     hitWall: plan === 'charger' ? chargerWall : undefined,
   };

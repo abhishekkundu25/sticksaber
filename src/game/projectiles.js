@@ -25,9 +25,10 @@ export class Projectiles {
       parryable: !!o.crescent && owner.team !== 0, seen: new Set(), hit });
   }
   // A thrown blade that flies out and homes back to its owner. The player's saber and the Duelist's staff both use it.
+  // Its length is kept in a range, so a whip or a fist still throws a blade of a sensible size.
   saber(owner, range = 480, dmgK = 1, stun = 0) {
     this.list.push({ type: 'saber', team: owner.team, owner, x: owner.cx + owner.facing * 30, y: owner.cy - 4, x0: owner.cx + owner.facing * 30, dir: owner.facing, range, t: 0, phase: 'out', ang: 0, life: 9,
-      color: owner.color, len: owner.double ? owner.bladeLen * 0.9 : owner.bladeLen * 0.5, cd: new Map(), hit: owner.isPlayer ? (dmgK === 1 && !stun ? SABER_HIT : { ...SABER_HIT, dmg: SABER_HIT.dmg * dmgK, stun: stun || SABER_HIT.stun }) : DISC_HIT });
+      color: owner.color, len: owner.double ? owner.bladeLen * 0.9 : clamp(owner.bladeLen * 0.5, 22, 52), cd: new Map(), hit: owner.isPlayer ? (dmgK === 1 && !stun ? SABER_HIT : { ...SABER_HIT, dmg: SABER_HIT.dmg * dmgK, stun: stun || SABER_HIT.stun }) : DISC_HIT });
   }
   // A charge thrown in an arc. It lands, arms with a visible ring, then bursts.
   lob(owner, x, y, tx, o = {}) {

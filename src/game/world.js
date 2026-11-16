@@ -12,6 +12,8 @@ import { POWERS } from './powers.js';
 import { Beast } from './beasts.js';
 import { FORMS } from './forms.js';
 import { tickBonds, bind } from './bonds.js';
+import { makeShade, makeClimber } from './shade.js';
+import { PROPS } from './props.js';
 
 const RANKS = [0, 18, 42, 72, 108, 150];
 export const RANK_NAMES = ['', 'D', 'C', 'B', 'A', 'S'];
@@ -68,7 +70,7 @@ const NEUTRAL = { team: 2, color: '#ff7a2e' }; // owner of the room's own hazard
 const BURST_HIT = { dmg: 18, post: 30, kx: 640, ky: -440, kind: 'knock', stop: 0, shake: 0, stun: 0.4, fromPlayer: true, id: 'BURST', fam: 'power', unblockable: true };
 // The mirror image: the player's body with a brain that only copies.
 const MIRROR = { ...PLAYER, name: 'Mirror', ribbons: [], ctrl: mirrorCtrl };
-export const newStats = () => ({ parries: 0, reads: 0, interrupts: 0, kills: 0, dodges: 0, hitsTaken: 0, cuts: 0, bursts: 0, overdrives: 0, powers: 0, orbs: 0, crits: 0 });
+export const newStats = () => ({ parries: 0, reads: 0, interrupts: 0, kills: 0, dodges: 0, hitsTaken: 0, cuts: 0, bursts: 0, overdrives: 0, powers: 0, orbs: 0, crits: 0, shards: 0, airKills: 0, hazardKills: 0 });
 
 export class World {
   constructor() {
@@ -103,6 +105,10 @@ export class World {
     this.bonds = [];                       // links between enemies: packs, tethers, riders
     this.orbs = []; this.mirror = null; this.stasis = 0;
     this.windUsed = false; this.freeCast = false; this.odShield = 0; this.odMax = OVERDRIVE_TIME; this.hitCount = 0;
+    this.shards = 0;                       // the run's currency, dropped by the fallen and spent at the quartermaster
+    this.dark = 0; this.darkK = 0;         // a blackout: `dark` is where the lights are heading, `darkK` where they are
+    this.zone = null;                      // a ring on the floor the director is watching: { x, r, k, color }
+    this.form2 = null;                     // the second weapon, for a build that carries two
   }
 
   // ───────────── setup ─────────────
@@ -126,10 +132,24 @@ export class World {
   }
   applyForm(p) {
     const F = this.form;
-    p.blade = F.blade; p.double = !!F.blade.double; p.twin = !!F.blade.twin; p.dmgMul = F.dmg ?? 1;
+    p.blade = F.blade; p.double = !!F.blade.double; p.twin = !!F.blade.twin; p.dmgMul = F.dmg ?? 1; p.form = F;
     p.speedMul = this.mods.speed * (F.speed ?? 1);
     if (this.overdrive <= 0) p.bladeLen = this.baseBlade(p);
   }
+  // Second Sheath: trade the weapon in hand for the one on the back. The first hit after it lands harder.
+  swapForm() {
+    const p = this.player;
+    if (!this.mods.sheath || !FORMS[this.form2] || !p || p.dead || p.rag) return false;
+    const old = this.formId;
+    this.setForm(this.form2); this.form2 = old; this.swapT = 2.5;
+    if (p.state === 'attack') p.setState('free');
+    this.fx.ring(p.cx, p.cy, 14, 130, 0.3, this.form.color, 1, 4); this.fx.flash(p.cx, p.cy, 120, this.form.color, 0.18);
+    this.fx.text(p.x, p.j[1] - 44, this.form.name, this.form.color, 16, 0.9); this.fx.ghost(p, this.form.color, 0.3);
+    this.sfx('weaponSwap', p.x);
+    return true;
+  }
+  // A pillar of light that belongs to the room and burns everyone.
+  hazardPillar(x, delay, o) { this.projectiles.pillar(NEUTRAL, x, delay, o); this.sfx('hazardArm', x, 0.6); }
   // A form names its own move for each of the player's slots (L1, H1, LAUNCH and so on).
   moveId(id) { return this.form.moves[id] || id; }
   // Height of the ground under a falling body: the floor, or a platform it is landing on.
@@ -190,11 +210,48 @@ export class World {
   spawnMirror(src, life) {
     const f = new Fighter(MIRROR, src.x - src.facing * 64, 0);
     f.phantom = true; f.fade = 0.6; f.color = '#b9f6ff'; f.dmgMul = 0.5 * src.dmgMul; f.facing = src.facing; f.gravMul = 0;
-    f.blade = src.blade; f.double = src.double; f.twin = src.twin;
+    f.blade = src.blade; f.double = src.double; f.twin = src.twin; f.form = src.form;
     f.bladeLen = src.bladeLen; f.ai.life = life; f.ai.serial = src.atkSerial || 0; f.ai.queue = null;
     f.computeJoints();
     this.fighters.push(f); this.mirror = f;
     return f;
+  }
+  // The Shade is defined at the moment it arrives, from what the player holds then.
+  spawnShade(tier, x) {
+    (this.roster ||= {}).shade = makeShade(this, tier);
+    const f = this.spawnEnemy('shade', x, true);
+    this.fx.beam(f.x, 1.3, '#ff2e6e'); this.sfx('shadeArrive', f.x);
+    return f;
+  }
+  // Another climber: a rival who fights everyone (its own team), or a freed captive on the player's side.
+  spawnClimber(friend, x, drop = true) {
+    const kind = friend ? 'ally' : 'rival';
+    (this.roster ||= {})[kind] = makeClimber(this, friend);
+    const f = this.spawnEnemy(kind, x, drop);
+    f.team = friend ? 0 : 2; f.hunts = friend ? 'enemy' : 'any'; f.tag = friend ? 'ALLY' : 'RIVAL'; f.barT = 6;
+    if (friend) f.hp = f.maxHp = Math.round(f.def.hp * (1 + (this.hpMul - 1) * 0.5));
+    return f;
+  }
+  // A thing in the room that can be broken: a core, a cache, a holding cell.
+  spawnProp(kind, x, y = 0) {
+    const f = new Fighter(PROPS[kind], clamp(x, this.minX + 80, this.maxX - 80), PROPS[kind].team);
+    f.y = y; f.onGround = y >= 0; f.armed = false; f.hp = f.maxHp = Math.round(PROPS[kind].hp * (PROPS[kind].scales ? this.hpMul : 1));
+    this.fighters.push(f);
+    this.fx.ring(f.x, y - 60, 10, 90, 0.4, f.color, 1, 4);
+    return f;
+  }
+  // Who a fighter with a quarrel of its own goes for: the nearest body it is allowed to hit.
+  foeOf(f) {
+    let best = null, bd = 1e9;
+    for (const e of this.fighters) {
+      if (e === f || e.dead || e.phantom || e.remove || e.def.prop) continue;
+      if (f.hunts === 'feud' ? !(e.team === 1 && e.feud && e.feud !== f.feud) : e.team === f.team || (f.hunts === 'enemy' && e.team !== 1)) continue;
+      const d = Math.abs(e.x - f.x);
+      if (d < bd) { bd = d; best = e; }
+    }
+    // A feud is forgotten when the player is much closer than the other side.
+    if (f.hunts === 'feud' && this.player && !this.player.dead && Math.abs(this.player.x - f.x) < bd * 0.5) return null;
+    return best;
   }
   clearEnemies() {
     this.fighters = this.fighters.filter((f) => f.team === 0);
@@ -395,10 +452,14 @@ export class World {
   usePower(f) {
     const P = this.power, cost = this.freeCast ? 0 : P.cost * 100;
     if (P.ready && !P.ready(this, f)) return false;
-    if (this.focus < cost) { this.sfx('uiMove', f.x); this.fx.text(f.x, f.j[1] - 36, this.overdrive > 0 ? 'OVERDRIVE' : 'NO FOCUS', '#8fa3b8', 14, 0.6); return false; }
+    // Blood Tithe: with the meter short, the power is paid for in health instead.
+    const blood = this.focus < cost && this.mods.bloodCast && this.overdrive <= 0 && f.hp > P.cost * this.mods.bloodCast + 1;
+    if (this.focus < cost && !blood) { this.sfx('uiMove', f.x); this.fx.text(f.x, f.j[1] - 36, this.overdrive > 0 ? 'OVERDRIVE' : 'NO FOCUS', '#8fa3b8', 14, 0.6); return false; }
     if (!P.use(this, f)) return false;
     if (this.freeCast) { this.freeCast = false; this.fx.text(f.x, f.j[1] - 70, 'FREE', '#ffd36b', 14, 0.8); }
-    this.focus -= cost; this.stats.powers++;
+    if (blood) { f.hp -= P.cost * this.mods.bloodCast; this.fx.text(f.x, f.j[1] - 70, 'TITHE', '#c084ff', 14, 0.8); this.fx.ember(f.cx, f.cy, 10, '#c084ff'); }
+    else this.focus -= cost;
+    this.stats.powers++;
     return true;
   }
   // A bolt from the player's build (Stormcaller, Live Wire) onto the nearest enemy other than `from`.
@@ -424,6 +485,26 @@ export class World {
     for (let i = 0; i < hp + fo && this.orbs.length < 40; i++) {
       this.orbs.push({ kind: i < hp ? 'hp' : 'focus', x, y, vx: rand(-260, 260), vy: -rand(240, 520), t: 0 });
     }
+    // Everything that falls is worth something to the quartermaster.
+    const d = B.def;
+    this.dropShards(x, y, d.shade ? 60 : d.boss ? (d.champion ? 40 : 80) : (2 + Math.min(6, d.hp / 40)) * (B.elite ? 2 : 1));
+  }
+  dropShards(x, y, total) {
+    total = Math.round(total * this.mods.shardK);
+    if (total <= 0 || this.training) return;
+    const n = clamp(Math.ceil(total / 6), 1, 9);
+    for (let i = 0; i < n && this.orbs.length < 48; i++) {
+      const v = i === n - 1 ? total - Math.floor(total / n) * (n - 1) : Math.floor(total / n);
+      if (v > 0) this.orbs.push({ kind: 'shard', v, x, y, vx: rand(-300, 300), vy: -rand(260, 560), t: 0 });
+    }
+  }
+  // A prop broke. The director decides what that means.
+  onProp(A, B, cx, cy, dir) {
+    const fx = this.fx;
+    fx.spark(cx, cy, 0, 3.14, 34, 820, B.color, { white: 0.5 }); fx.flash(cx, cy, 130, B.color, 0.2); fx.ring(cx, cy, 12, 170, 0.4, B.color, 1, 5);
+    for (let i = 0; i < 6; i++) fx.ember(cx + rand(-30, 30), cy + rand(-40, 30), 2, B.color);
+    this.sfx('propBreak', cx); this.stop(0.09); this.shake(0.4);
+    this.events.push({ type: 'prop', kind: B.def.prop, x: B.x, y: B.y, by: A });
   }
   tickOrbs(dt) {
     const pl = this.player, L = this.orbs, pull = this.countEnemies() === 0;
@@ -438,9 +519,10 @@ export class World {
       o.x = clamp(o.x + o.vx * dt, this.minX + 10, this.maxX - 10); o.y += o.vy * dt;
       if (o.y > -10 && o.vy > 0) { o.y = -10; o.vy *= -0.45; }
       if (d < 30 && o.t > 0.3 && !pl.dead) {
-        if (o.kind === 'hp') { pl.hp = Math.min(pl.maxHp, pl.hp + 4); this.fx.text(pl.x, pl.j[1] - 30, '+4', '#7dffb0', 13, 0.6); this.sfx('pickupHealth', pl.x, 0.7); }
+        if (o.kind === 'hp') { pl.hp = Math.min(pl.maxHp, pl.hp + 4 * this.mods.healK); this.fx.text(pl.x, pl.j[1] - 30, '+4', '#7dffb0', 13, 0.6); this.sfx('pickupHealth', pl.x, 0.7); }
+        else if (o.kind === 'shard') { this.shards += o.v; this.stats.shards += o.v; this.shardT = 1.2; this.sfx('pickupShard', pl.x, 0.5, 1 + Math.min(0.5, (this.shardRun = (this.shardRun || 0) + 1) * 0.04)); }
         else { this.gainFocus(18); this.sfx('pickupFocus', pl.x, 0.6); }
-        this.fx.flash(o.x, o.y, 40, o.kind === 'hp' ? '#7dffb0' : '#56e9ff', 0.12);
+        this.fx.flash(o.x, o.y, 40, o.kind === 'hp' ? '#7dffb0' : o.kind === 'shard' ? '#ffd36b' : '#56e9ff', 0.12);
         this.stats.orbs++;
         L.splice(i, 1);
       } else if (o.t > 14) L.splice(i, 1);
@@ -462,6 +544,8 @@ export class World {
     }
     if (this.mods.focusRegen && this.overdrive <= 0 && this.focus < this.maxFocus) this.focus = Math.min(this.maxFocus, this.focus + this.mods.focusRegen * dt);
     if (this.stasis > 0) this.stasis -= dt;
+    if (this.swapT > 0) this.swapT -= dt;
+    if (this.shardT > 0 && (this.shardT -= dt) <= 0) this.shardRun = 0;
     if (this.powerT > 0) this.powerT -= dt;
   }
   // Second Wind: the killing blow is refused once per floor.
@@ -487,7 +571,7 @@ export class World {
 
   // Root-motion speed for a move's step window: stop short of a target instead of shoving through it.
   stepSpeed(f, v) {
-    if (v > 700) return v;
+    if (v > 700 || v < 0) return v; // a lunge goes through, and a step back is never blocked
     for (const e of this.fighters) {
       if (e.team === f.team || e.dead || e.rag || e.phantom || e.def.flying) continue;
       const d = (e.x - f.x) * f.facing;
@@ -556,6 +640,7 @@ export class World {
   }
 
   chargeFx(f, dt) {
+    if (f.move?.levels) return; // a move with charge levels shows them itself (forms.js)
     if (rng() < dt * 60) {
       const a = rand(0, 6.28), r = rand(40, 80);
       this.fx.spark(f.tx + Math.cos(a) * r, f.ty + Math.sin(a) * r, a + Math.PI, 0.1, 1, 260, f.color, { grav: 0, life: 0.22, drag: 0 });
@@ -603,6 +688,7 @@ export class World {
       this.style.hurt(); this.stats.hitsTaken++;
       this.rally = Math.min(B.maxHp - Math.max(0, B.hp), this.rally + dmg * 0.6); this.rallyT = 3.2;
       this.sfx('hurt', B.x); this.flashScreen('#ff2a3a', 0.25);
+      if (this.mods.hurtFocus && this.overdrive <= 0) this.focus = Math.max(0, this.focus - this.mods.hurtFocus);
       if (this.overdrive > 0) {
         if (this.odShield) { this.odShield = 0; fx.text(B.x, B.j[1] - 40, 'UNBROKEN', OD_COLOR, 16, 0.9); fx.ring(B.cx, B.cy, 20, 140, 0.3, OD_COLOR, 1, 4); }
         else this.endOverdrive(true);
@@ -620,7 +706,7 @@ export class World {
         // Rally: striking back wins a slice of recent damage back.
         if (this.rally > 0) { const r = Math.min(this.rally, dmg * 0.5); this.rally -= r; pl.hp = Math.min(pl.maxHp, pl.hp + r); }
         if (this.overdrive > 0) pl.hp = Math.min(pl.maxHp, pl.hp + 1.5);
-        if (this.mods.leech) pl.hp = Math.min(pl.maxHp, pl.hp + this.mods.leech);
+        if (this.mods.leech) pl.hp = Math.min(pl.maxHp, pl.hp + this.mods.leech * this.mods.healK);
         // Live Wire: every fourth blade hit jumps to someone else.
         if (this.mods.arc && ++this.hitCount % 4 === 0) this.strike(B, WIRE_HIT, this.mods.arc, 320, '#c9a0ff', false);
         if (!pl.onGround && pl.state === 'attack' && pl.move.air && !pl.move.plunge) {
@@ -646,8 +732,9 @@ export class World {
       return;
     }
     this.stats.kills++;
+    if (B.y < -60 || B.rag?.air) this.stats.airKills++;
     // The room did it: a kill by a vent, a wall or the floor pays extra.
-    if (h.hazard) { fx.text(cx, cy - 84, 'ENVIRONMENT', '#ff7a2e', 16, 1); this.gainFocus(20); this.style.bonus(12); }
+    if (h.hazard) { fx.text(cx, cy - 84, 'ENVIRONMENT', '#ff7a2e', 16, 1); this.gainFocus(20); this.style.bonus(12); this.stats.hazardKills++; }
     fx.spark(cx, cy, dir > 0 ? 0 : Math.PI, 1.5, 30, 900, B.color, { white: 0.3 });
     fx.flash(cx, cy, 100, '#ffffff', 0.16);
     this.sfx('kill', cx); this.stop(0.14); this.shake(0.5); this.punch(0.03);
@@ -661,7 +748,7 @@ export class World {
     }
     this.gainFocus(12); this.style.bonus(6);
     const pl = this.player, M = this.mods;
-    if (pl && !pl.dead) pl.hp = Math.min(pl.maxHp, pl.hp + 2 + M.killHeal + Math.min(this.rally, 6));
+    if (pl && !pl.dead) pl.hp = Math.min(pl.maxHp, pl.hp + (2 + M.killHeal) * M.healK + Math.min(this.rally, 6));
     if (M.reap) this.gainFocus(M.reap);
     this.dropOrbs(B, cx, cy);
     // Twins share one life: the other body falls too.
@@ -672,11 +759,11 @@ export class World {
     } else if (M.storm) this.strike(B, STORM_HIT, M.storm, 720, '#bfe6ff', true);
     const left = this.countEnemies();
     if (left === 0 && !this.training) this.slow(0.2, 0.9);
-    this.events.push({ type: 'kill', kind: B.def.kind, left, boss: !!B.def.boss });
+    this.events.push({ type: 'kill', kind: B.def.kind, left, boss: !!B.def.boss, x: cx, beast: B.def.beast, base: B.def.base, elite: B.elite, air: B.y < -60 });
     if (B.def.boss) {
       // The finisher: time crawls, the camera closes in, and the body keeps coming apart.
       this.flashScreen('#ffffff', 0.6); this.slow(0.12, 2.4); fx.ring(cx, cy, 20, 700, 0.9, '#ffffff', 1, 8);
-      this.finisher = { B, t: 0, cuts: 0, name: B.def.champion ? 'CHAMPION FELLED' : 'KEEPER FELLED', who: B.def.name };
+      this.finisher = { B, t: 0, cuts: 0, name: B.def.shade ? 'SHADE BANISHED' : B.def.champion ? 'CHAMPION FELLED' : 'KEEPER FELLED', who: B.def.name };
       this.sfx('finisher', cx);
     }
   }
@@ -708,7 +795,19 @@ export class World {
     this.time += dt;
 
     const fs = this.fighters;
-    for (let i = 0; i < fs.length; i++) fs[i].update(this, fs[i].team === 0 ? dt : dt * ets);
+    for (let i = 0; i < fs.length; i++) {
+      const f = fs[i], d = f.team === 0 ? dt : dt * ets;
+      if (f.hunts && !f.dead) {
+        // A fighter with a quarrel of its own is handed its target in the player's place for its turn,
+        // so every brain written to fight the player can fight anyone.
+        const foe = this.foeOf(f), keep = this.player;
+        f.calm = !foe && f.hunts !== 'feud';
+        if (foe) this.player = foe;
+        f.update(this, d);
+        this.player = keep;
+      } else f.update(this, d);
+    }
+    if (this.dark !== this.darkK) this.darkK = Math.abs(this.dark - this.darkK) < 0.01 ? this.dark : this.darkK + (this.dark - this.darkK) * Math.min(1, dtReal * 2.4);
     this.separate(dt);
     if (this.bonds.length) tickBonds(this, dt);
     resolveCombat(this);
@@ -744,10 +843,10 @@ export class World {
     const fs = this.fighters, k = Math.min(1, dt * 14);
     for (let a = 0; a < fs.length; a++) {
       const A = fs[a];
-      if (A.rag || A.phantom || A.riding || !A.onGround || A.state === 'dash' || A.stepping && Math.abs(A.vx) > 700) continue;
+      if (A.rag || A.phantom || A.riding || A.def.prop || !A.onGround || A.state === 'dash' || A.stepping && Math.abs(A.vx) > 700) continue;
       for (let b = a + 1; b < fs.length; b++) {
         const B = fs[b];
-        if (B.rag || B.phantom || B.riding || !B.onGround || B.state === 'dash' || B.stepping && Math.abs(B.vx) > 700) continue;
+        if (B.rag || B.phantom || B.riding || B.def.prop || !B.onGround || B.state === 'dash' || B.stepping && Math.abs(B.vx) > 700) continue;
         const min = 38 * (A.scale + B.scale) / 2, dx = B.x - A.x;
         if (Math.abs(dx) >= min) continue;
         const push = (min - Math.abs(dx)) * 0.5 * k * (dx >= 0 ? 1 : -1);

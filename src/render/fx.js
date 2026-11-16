@@ -50,7 +50,7 @@ export class Fx {
   text(x, y, str, color = '#ffffff', size = 18, life = 0.9) { this.texts.push({ x, y, str, color, size, life, max: life }); }
   ghost(f, color, life = 0.28) {
     if (this.ghosts.length > 26) return;
-    this.ghosts.push({ j: Float32Array.from(f.j), bx: f.bx, by: f.by, tx: f.tx, ty: f.ty, t2x: f.t2x, t2y: f.t2y, double: f.double, lit: f.armed && f.bladeOn > 0.5, color, life, max: life, w: f.def.lineW * f.scale });
+    this.ghosts.push({ j: Float32Array.from(f.j), bx: f.bx, by: f.by, tx: f.tx, ty: f.ty, t2x: f.t2x, t2y: f.t2y, double: f.double, lit: f.armed && f.bladeOn > 0.5 && !f.blade.whip && !f.sheathed, color, life, max: life, w: f.def.lineW * f.scale });
   }
   beam(x, life, color) { this.beams.push({ x, life, max: life, color }); }
   // A jagged bolt between two points. The kinks are fixed when it is made, so it does not need the sim's random stream to draw.

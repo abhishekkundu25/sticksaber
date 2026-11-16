@@ -17,6 +17,15 @@ import { ENEMIES } from './enemies.js';
 import { BONDS } from './bonds.js';
 
 export const FLOORS = 100, SECTORS = 10, PER = 10;
+// Two lengths of run. The sprint has no school: every base enemy is there from the first floor, the
+// first sector already has its own strains, and the tower gets harder about half again as fast.
+export const MODES = {
+  sprint: { id: 'sprint', name: 'SPRINT', blurb: 'Thirty floors in three sectors. One sitting', floors: 30, sectors: 3 },
+  climb: { id: 'climb', name: 'THE CLIMB', blurb: 'All hundred floors in ten sectors', floors: 100, sectors: 10 },
+};
+export const MODE_IDS = ['sprint', 'climb'];
+// How deep into the tower floor `n` counts for scaling.
+export const depthOf = (mode, n) => (mode === 'sprint' ? 6 + (n - 1) * 1.6 : n);
 export const DIFFS = {
   easy: { id: 'easy', name: 'STUDENT', blurb: 'Softer hits, longer pauses, smaller waves', dmg: 0.7, hp: 0.85, budget: -0.7, cd: 1.25, elite: 0.5, attackers: 0, heal: 0.4, restart: false },
   normal: { id: 'normal', name: 'ADEPT', blurb: 'The climb as it is meant to be', dmg: 1, hp: 1, budget: 0, cd: 1, elite: 1, attackers: 0, heal: 0.3, restart: false },
@@ -50,6 +59,54 @@ export const ANOMALIES = {
   bounty: { name: 'BOUNTY', text: 'The fallen leave far more orbs' },
 };
 const EVENTS = ['horde', 'elites', 'duel', 'gauntlet', 'ambush'];
+// Surprises: one per sector, on a floor nobody can predict. `when` is the moment it breaks in: as the
+// floor's last wave starts, a few seconds into it, or after the floor looks finished.
+export const SURPRISES = {
+  shade: { name: 'YOUR SHADE', text: 'Something followed you up. It has your blade', when: 'end' },
+  blackout: { name: 'BLACKOUT', text: 'The lights are gone. Watch the blades', when: 'start' },
+  feud: { name: 'BAD BLOOD', text: 'They hate each other more than they hate you. Let them', when: 'start' },
+  captive: { name: 'A PRISONER', text: 'Break the cell and they will fight beside you', when: 'start' },
+  stampede: { name: 'STAMPEDE', text: 'Something is coming through. Jump', when: 'mid' },
+  bounty: { name: 'COURIER', text: 'It carries something. Cut it down before it gets out', when: 'mid' },
+  rival: { name: 'A RIVAL', text: 'Another climber, and not here to help', when: 'mid' },
+  quake: { name: 'THE SPIRE SHIFTS', text: 'The room is coming apart', when: 'mid' },
+  storm: { name: 'STORM FRONT', text: 'Lightning walks the floor. Keep moving', when: 'mid' },
+  cache: { name: 'SUPPLY DROP', text: 'Something fell from above. Break it open', when: 'mid' },
+};
+// Objectives: floors that are not won by killing everything in two waves.
+export const OBJECTIVES = {
+  survive: { name: 'HOLD OUT', tag: 'Hold Out', text: (o) => `HOLD OUT  ·  They keep coming for ${o.time} seconds. Stay alive until the floor gives up` },
+  hunt: { name: 'THE MARK', tag: 'The Mark', text: () => 'THE MARK  ·  One of them is marked in gold. Kill it and the rest lose their nerve' },
+  hold: { name: 'HOLD THE RING', tag: 'Hold the Ring', text: () => 'HOLD THE RING  ·  Stand in the ring to charge it. When it is full it clears the room' },
+  cores: { name: 'SIGNAL CORES', tag: 'Signal Cores', text: () => 'SIGNAL CORES  ·  Reinforcements come for as long as a core stands. Break all three' },
+};
+// Challenges: an extra condition on a floor that pays shards if it is met.
+export const CHALLENGES = {
+  untouched: { name: 'UNTOUCHED', text: 'Take no damage', pay: 45 },
+  swift: { name: 'SWIFT', text: (c) => `Clear the floor in ${c.time} seconds`, pay: 30 },
+  pure: { name: 'BLADE ONLY', text: 'Use no Focus powers', pay: 25 },
+  parry: { name: 'DUELLIST', text: 'Parry three times', pay: 25 },
+  aerial: { name: 'SKYBORN', text: 'Kill two enemies in the air', pay: 30 },
+  room: { name: 'USE THE ROOM', text: 'Kill one enemy with the room itself', pay: 35 },
+};
+// Doors: after some floors the way up splits.
+export const DOORS = {
+  stair: { name: 'THE STAIR', color: '#9fb4c8', glyph: 'chev', text: () => 'Straight up. Nothing gained and nothing risked' },
+  elite: { name: 'ELITE GUARD', color: '#ffd36b', glyph: 'star', text: () => 'Every enemy on the next floor is an elite. It pays a better card and 40 shards' },
+  cursed: { name: 'CURSED HALL', color: '#c084ff', glyph: 'skull', text: (d) => `The next floor is cursed: ${CURSES[d.curse].text}. Take two cards after it` },
+  rest: { name: 'SANCTUARY', color: '#7dffb0', glyph: 'plus', text: () => 'Recover 45% of your health before you go on' },
+  shop: { name: 'QUARTERMASTER', color: '#ffb347', glyph: 'orb', text: () => 'Spend shards on cards, a weapon or repairs' },
+  shrine: { name: 'SHRINE', color: '#ff5c8a', glyph: 'flame', text: () => 'A pact: great power at a real price. You may refuse it' },
+  armory: { name: 'ARMOURY', color: '#56e9ff', glyph: 'slash', text: () => 'Trade your weapon for another. Your build comes with you' },
+  unknown: { name: 'UNMARKED', color: '#e6fdff', glyph: 'dice', text: () => 'Nobody knows what is behind this one' },
+};
+export const CURSES = {
+  frail: { name: 'FRAIL', text: 'you take 30% more damage' },
+  haste: { name: 'HASTE', text: 'everything hunting you is faster' },
+  dusk: { name: 'DUSK', text: 'the lights are out' },
+  drought: { name: 'DROUGHT', text: 'nothing heals you between waves' },
+  swarm: { name: 'SWARM', text: 'every wave brings one more' },
+};
 const EVENT_NAME = { horde: 'Horde', elites: 'Elite Squad', duel: 'Duel', gauntlet: 'Gauntlet', ambush: 'Ambush' };
 
 const HINTS = {
@@ -94,6 +151,7 @@ const SCHOOL = [
 ];
 
 const pick = (r, a) => a[(r() * a.length) | 0];
+const shuffle = (r, a) => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = (r() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
 export const sectorOf = (n) => Math.floor((n - 1) / PER);
 // Threat a wave may spend. It climbs steeply through the school, then slowly: from sector II on,
 // most of the rising difficulty comes from tougher strains, health, speed and pace instead.
@@ -101,11 +159,13 @@ export const waveBudget = (n, wave) => (n <= 10 ? 2.2 + 0.85 * n : 10.7 + 0.085 
 export const maxPerWave = (s) => (s < 4 ? 5 : s < 8 ? 6 : 7);
 
 // The enemy kinds a wave on floor `n` may draw from, with weights.
-function poolFor(n, roster) {
-  const s = sectorOf(n), pos = n - s * PER, out = [];
+// `s` is the roster sector whose strains are the newest, `pos` the floor's place in it (1 to 10), and
+// `school` is true on the teaching floors of the long climb, where base enemies unlock one by one.
+function poolFor(s, pos, roster, school = false) {
+  const out = [];
   for (const k in UNLOCK) {
-    if (s === 0 && UNLOCK[k] > n) continue;
-    out.push({ kind: k, cost: COST[k], cap: BASE_CAP[k] ?? 9, ranged: !!RANGED[k], flank: !!FLANKERS[k], w: s === 0 ? 1 + UNLOCK[k] * 0.22 : Math.max(0.35, 1 - 0.07 * s), base: k });
+    if (school && UNLOCK[k] > pos) continue;
+    out.push({ kind: k, cost: COST[k], cap: BASE_CAP[k] ?? 9, ranged: !!RANGED[k], flank: !!FLANKERS[k], w: school ? 1 + UNLOCK[k] * 0.22 : Math.max(0.35, 1 - 0.07 * s), base: k });
   }
   for (let q = 1; q <= s; q++) {
     roster.strains[q].forEach((id, i) => {
@@ -124,7 +184,7 @@ const nameOf = (roster, k) => (roster.defs[k] || ENEMIES[k]).name;
 // The two bonds a sector's enemies form (see bonds.js). Each names the kinds it joins, so the same
 // pairing turns up through the sector and the player can learn it.
 function buildRules(s, roster, r) {
-  const all = poolFor(s * PER + 9, roster), def = (p) => roster.defs[p.kind] || ENEMIES[p.kind];
+  const all = poolFor(s, 9, roster), def = (p) => roster.defs[p.kind] || ENEMIES[p.kind];
   const own = (p) => p.w >= 3; // introduced in this sector
   const from = (list) => { if (!list.length) return null; const mine = list.filter(own); return pick(r, mine.length && r() < 0.75 ? mine : list); };
   const riders = all.filter((p) => !p.beast && ['initiate', 'duelist', 'lancer'].includes(p.base));
@@ -234,10 +294,13 @@ function generateWave(pool, budget, r, o) {
   return wave;
 }
 
-function buildSectors(seed, r) {
-  const forge = 1 + ((r() * 4) | 0); // the Forgemaster keeps one of sectors II to V
-  const twins = 5 + ((r() * 2) | 0), carto = 7 + ((r() * 2) | 0); // the Twins one of VI and VII, the Cartographer one of VIII and IX
-  const sectors = [], used = { causeway: 1, foundry: 1 }, hues = [...HUES];
+function buildSectors(seed, r, M) {
+  const N = M.sectors, sprint = M.id === 'sprint';
+  // The Forgemaster keeps one of sectors II to V, the Twins one of VI and VII, the Cartographer one of
+  // VIII and IX. A sprint has room for one of the three, in its middle sector.
+  let forge = 1 + ((r() * 4) | 0), twins = 5 + ((r() * 2) | 0), carto = 7 + ((r() * 2) | 0);
+  if (sprint) { const k = (forge + twins + carto) % 3; forge = k === 0 ? 1 : -1; twins = k === 1 ? 1 : -1; carto = k === 2 ? 1 : -1; }
+  const sectors = [], used = sprint ? {} : { causeway: 1, foundry: 1 }, hues = [...HUES];
   // Wings are drawn from the families used least so far, so a run visits all of them.
   const draw = (bar) => {
     const ok = FAMILIES.filter((f) => !bar.includes(f));
@@ -246,61 +309,71 @@ function buildSectors(seed, r) {
     used[f] = (used[f] || 0) + 1;
     return f;
   };
-  let last = 'foundry';
-  for (let s = 0; s < SECTORS; s++) {
+  let last = sprint ? null : 'foundry';
+  for (let s = 0; s < N; s++) {
+    const school = s === 0 && !sprint;
     let wings;
-    if (s === 0) wings = ['causeway', 'foundry'];
+    if (school) wings = ['causeway', 'foundry'];
     else {
-      const b = s === forge ? 'foundry' : s === 9 ? 'hall' : null;
+      const b = s === forge ? 'foundry' : s === N - 1 ? 'hall' : null;
       const a = draw([last, b]);
       wings = [a, b || draw([a])];
     }
     last = wings[1];
-    const name = s === 0 ? 'The Threshold' : s === 9 ? 'The Crown' : `The ${pick(r, SECTOR_ADJ)} ${pick(r, SECTOR_NOUN)}`;
-    sectors.push({ i: s, name, wings, hue: s === 0 ? 0 : hues.splice((r() * hues.length) | 0, 1)[0], forge: s === forge, twins: s === twins, carto: s === carto });
+    const name = school ? 'The Threshold' : s === N - 1 ? 'The Crown' : `The ${pick(r, SECTOR_ADJ)} ${pick(r, SECTOR_NOUN)}`;
+    // `q` is the sector's place in the roster: which strains, animal, champion and keeper it uses.
+    sectors.push({ i: s, q: sprint ? s + 1 : s, school, name, wings, hue: school ? 0 : hues.splice((r() * hues.length) | 0, 1)[0], forge: s === forge, twins: s === twins, carto: s === carto });
   }
   // No two sectors share a name.
-  for (let s = 1; s < 9; s++) while (sectors.some((o, i) => i < s && o.name === sectors[s].name)) sectors[s].name = `The ${pick(r, SECTOR_ADJ)} ${pick(r, SECTOR_NOUN)}`;
+  for (let s = 1; s < N - 1; s++) while (sectors.some((o, i) => i < s && o.name === sectors[s].name)) sectors[s].name = `The ${pick(r, SECTOR_ADJ)} ${pick(r, SECTOR_NOUN)}`;
   return sectors;
 }
 
-function buildFloor(n, seed, D, roster, sectors, plan) {
-  const s = sectorOf(n), pos = n - s * PER, S = sectors[s], r = makeRng(hash32(seed, n * 7919));
-  const kind = plan[s][pos - 1], school = s === 0 ? SCHOOL[pos - 1] : null;
-  const pool = poolFor(n, roster);
-  const attackers = Math.min(4, (s < 4 ? 2 : s < 8 ? 3 : 4) + D.attackers);
-  const eliteChance = s === 0 ? 0 : Math.min(0.5, (0.1 + 0.045 * s) * D.elite);
+function buildFloor(n, seed, D, roster, sectors, plan, M) {
+  const si = sectorOf(n), pos = n - si * PER, S = sectors[si], r = makeRng(hash32(seed, n * 7919));
+  // `s` is the roster sector, `d` the depth that sets how hard the floor hits, and `e` the sector that
+  // depth belongs to on the long climb. On the climb all three agree with the floor number.
+  const s = S.q, d = depthOf(M.id, n), e = Math.max(0, Math.floor((d - 1) / PER)), last = n === M.floors;
+  const kind = plan[si][pos - 1], school = S.school ? SCHOOL[pos - 1] : null;
+  const pool = poolFor(s, pos, roster, S.school);
+  const attackers = Math.min(4, (e < 4 ? 2 : e < 8 ? 3 : 4) + D.attackers);
+  const eliteChance = S.school ? 0 : Math.min(0.5, (0.1 + 0.045 * e) * D.elite);
   // Bonds this floor's enemies may form: the sector's own once introduced, and older ones now and then.
   const rules = [];
   for (let q = 1; q <= s; q++) roster.rules[q].forEach((rule, i) => { if (!(q === s && pos < (i ? 6 : 4))) rules.push({ ...rule, w: q === s ? 3 : 1 }); });
-  const opts = { max: maxPerWave(s), eliteChance, attackers, floor: n, rules, bondChance: s === 0 ? 0 : Math.min(0.75, 0.3 + 0.05 * s) };
-  const budget = (w) => Math.max(2, waveBudget(n, w) + D.budget);
+  const opts = { max: maxPerWave(e), eliteChance, attackers, floor: n, rules, bondChance: S.school ? 0 : Math.min(0.75, 0.3 + 0.05 * e) };
+  const budget = (w) => Math.max(2, waveBudget(d, w) + D.budget);
   const family = S.wings[pos <= 5 ? 0 : 1];
-  // By the last three sectors a build is nearly complete, so the tower pushes back harder there.
-  const late = 1 + Math.max(0, n - 70) * 0.015;
-  const fl = { n, sector: s, pos, kind, arena: family, arenaSeed: hash32(seed, n) || 1, hue: S.hue, music: 'combat', boss: null, anomaly: null, terrain: null, reward: 'augment', waves: [],
-    dmg: +(D.dmg * (1 + 0.014 * (n - 1) + 0.0002 * (n - 1) ** 2) * late).toFixed(3), hp: +(D.hp * (1 + 0.028 * (n - 1) + 0.00035 * (n - 1) ** 2) * (1 + (late - 1) * 0.6)).toFixed(3), rate: +(1 + 0.014 * s).toFixed(3), cd: +(D.cd * Math.max(0.68, 1 - 0.035 * s)).toFixed(3),
+  // A build grows faster than the floors do once shops, rooms and bonus cards are counted, so from the
+  // fifth sector the tower pushes back harder, and harder again in the last three.
+  const late = 1 + Math.max(0, d - 40) * 0.004 + Math.max(0, d - 70) * 0.011;
+  const fl = { n, sector: si, pos, kind, depth: +d.toFixed(2), arena: family, arenaSeed: hash32(seed, n) || 1, hue: S.hue, music: 'combat', boss: null, anomaly: null, terrain: null, reward: 'augment', waves: [],
+    dmg: +(D.dmg * (1 + 0.014 * (d - 1) + 0.0002 * (d - 1) ** 2) * late).toFixed(3), hp: +(D.hp * (1 + 0.028 * (d - 1) + 0.00035 * (d - 1) ** 2) * (1 + (late - 1) * 0.6)).toFixed(3), rate: +(1 + 0.014 * e).toFixed(3), cd: +(D.cd * Math.max(0.68, 1 - 0.035 * e)).toFixed(3),
     heal: D.heal, restart: D.restart };
   const places = PLACES[family];
-  fl.title = school ? school.title : places[(hash32(seed, s * 31 + (pos <= 5 ? 0 : 7)) + pos) % places.length];
+  fl.title = school ? school.title : places[(hash32(seed, si * 31 + (pos <= 5 ? 0 : 7)) + pos) % places.length];
   let tag = school ? school.sub : S.name;
 
   if (kind === 'boss') {
-    const boss = n === FLOORS ? 'proctor' : S.forge ? 'forgemaster' : S.twins ? 'twins' : S.carto ? 'cartographer' : roster.wardens[s];
+    const boss = last ? 'proctor' : S.forge ? 'forgemaster' : S.twins ? 'twins' : S.carto ? 'cartographer' : roster.wardens[s];
     const def = roster.defs[boss];
-    fl.boss = boss; fl.music = boss === 'forgemaster' || (def && r() < 0.4) ? 'boss2' : 'boss'; fl.reward = n === FLOORS ? null : 'legend';
-    fl.waves.push({ spawns: [{ kind: boss, dx: 560, t: 0 }], attackers: 1, hint: HINTS[boss] || (s === 0 ? HINTS.warden : null) });
+    fl.boss = boss; fl.music = boss === 'forgemaster' || (def && r() < 0.4) ? 'boss2' : 'boss'; fl.reward = last ? null : 'legend';
+    fl.waves.push({ spawns: [{ kind: boss, dx: 560, t: 0 }], attackers: 1, hint: HINTS[boss] || (si === 0 ? HINTS.warden : null) });
     if (boss === 'forgemaster') { fl.title = 'THE ANVIL'; tag = 'Keeper of the Forge'; fl.arenaSeed = 0; fl.hue = 0; }
     else if (boss === 'proctor') { fl.title = 'EXAMINATION HALL'; tag = 'The Proctor'; fl.arenaSeed = 0; fl.hue = 0; }
     else if (boss === 'twins') {
       // Two bodies, one life: they arrive on either side.
       fl.title = 'THE MIRRORED COURT'; tag = 'The Twins'; fl.boss = 'twinA';
       fl.waves[0] = { spawns: [{ kind: 'twinA', dx: 520, t: 0, g: 0, role: 0 }, { kind: 'twinB', dx: -520, t: 0, g: 0, role: 1 }], groups: [{ type: 'twins', n: 2 }], attackers: 1, hint: HINTS.twins };
-    } else if (boss === 'cartographer') { fl.title = 'THE DRAWING ROOM'; tag = 'The Cartographer'; fl.terrain = { plats: [], vents: [], walls: true }; }
+    } else if (boss === 'cartographer') {
+      fl.title = 'THE DRAWING ROOM'; tag = 'The Cartographer'; fl.terrain = { plats: [], vents: [], walls: true };
+      // It was made for a build of seventy cards. A sprint meets it with twenty, so it comes in lighter.
+      if (M.id === 'sprint') { fl.hp = +(fl.hp * 0.62).toFixed(3); fl.dmg = +(fl.dmg * 0.75).toFixed(3); }
+    }
     else tag = def.title;
   } else if (kind === 'champion') {
     fl.boss = roster.champions[s]; fl.music = 'boss2'; fl.reward = 'power';
-    fl.waves.push({ spawns: [{ kind: fl.boss, dx: 540, t: 0 }], attackers: 2, hint: s === 0 ? HINTS.champion : null });
+    fl.waves.push({ spawns: [{ kind: fl.boss, dx: 540, t: 0 }], attackers: 2, hint: si === 0 ? HINTS.champion : null });
     if (!school) tag = roster.defs[fl.boss].title;
   } else if (school) {
     for (const t of school.teach) fl.waves.push({ spawns: t.spawns.map((sp) => ({ ...sp })), attackers: t.attackers, hint: HINTS[t.hint], lesson: t.lesson });
@@ -334,7 +407,7 @@ function buildFloor(n, seed, D, roster, sectors, plan) {
     tag = `Bond: ${BONDS[rule.type].name[0]}${BONDS[rule.type].name.slice(1).toLowerCase()}`;
   } else if (kind === 'horde') {
     const cheap = pool.filter((p) => p.cost <= 1.7).map((p) => ({ ...p, cap: 9 }));
-    fl.waves.push(generateWave(cheap, budget(1) * 1.5, r, { ...opts, max: Math.min(12, 8 + Math.floor(s / 2)), eliteChance: 0, attackers: Math.min(4, attackers + 1), quick: true }));
+    fl.waves.push(generateWave(cheap, budget(1) * 1.5, r, { ...opts, max: Math.min(12, 8 + Math.floor(e / 2)), eliteChance: 0, attackers: Math.min(4, attackers + 1), quick: true }));
     fl.reward = 'rare';
   } else if (kind === 'elites') {
     fl.waves.push(generateWave(pool.filter((p) => p.base !== 'initiate' && p.base !== 'drone'), budget(1) * 1.2, r, { ...opts, max: Math.min(4, opts.max), allElite: true }));
@@ -342,7 +415,7 @@ function buildFloor(n, seed, D, roster, sectors, plan) {
   } else if (kind === 'duel') {
     // Two of the sector's strongest fighters, and nothing else. Brutes are left out: two at once is a wall, not a duel.
     const top = [...pool].filter((p) => p.base !== 'brute').sort((a, b) => b.cost - a.cost).slice(0, 4).map((p) => ({ ...p, cap: 1 }));
-    fl.waves.push(generateWave(top, 99, r, { ...opts, max: 2, allElite: s >= 4, attackers: 2 }));
+    fl.waves.push(generateWave(top, 99, r, { ...opts, max: 2, allElite: e >= 4, attackers: 2 }));
     fl.reward = 'rare';
   } else if (kind === 'gauntlet') {
     for (let w = 0; w < 3; w++) fl.waves.push({ ...generateWave(pool, budget(w) * 0.72, r, opts), noHeal: true });
@@ -355,20 +428,20 @@ function buildFloor(n, seed, D, roster, sectors, plan) {
     const second = pos === 6 ? roster.rules[s]?.[1] : null;
     for (let w = 0; w < 2; w++) fl.waves.push(generateWave(pool, budget(w), r, w === 0 && second ? { ...opts, force: second } : opts));
     if (second) fl.waves[0].hint = second.hint;
-    if (n === 17 && !fl.waves[0].hint) fl.waves[0].hint = HINTS.elite;
+    if (n === (S.school || si ? 17 : 7) && !fl.waves[0].hint) fl.waves[0].hint = HINTS.elite;
   }
   if (EVENT_NAME[kind]) tag = EVENT_NAME[kind];
 
   // Now and then a floor bends a rule.
   const teaching = kind === 'intro' || kind === 'beast' || kind === 'bond';
-  if (s > 0 && !fl.boss && !teaching && r() < 0.17) {
+  if (!S.school && !fl.boss && !teaching && r() < 0.17) {
     fl.anomaly = pick(r, Object.keys(ANOMALIES));
     const first = fl.waves[0];
     if (!first.hint) first.hint = `ANOMALY: ${ANOMALIES[fl.anomaly].name}. ${ANOMALIES[fl.anomaly].text}`;
   }
   // Terrain: light bridges to stand on, vents that erupt on a timer, walls that shock. Positions are
   // fractions of the arena's half width, because arenas differ in size.
-  if (s > 0 && !fl.terrain && n !== FLOORS && fl.boss !== 'forgemaster' && r() < (fl.boss ? 0.3 : teaching ? 0.2 : 0.5)) {
+  if (!S.school && !fl.terrain && !last && fl.boss !== 'forgemaster' && r() < (fl.boss ? 0.3 : teaching ? 0.2 : 0.5)) {
     const T = { plats: [], vents: [], walls: false };
     const what = fl.boss ? pick(r, ['vents', 'walls']) : pick(r, ['plats', 'vents', 'walls', 'plats+vents', 'vents+walls', 'plats']);
     if (what.includes('plats')) for (const fx of [[-0.45, 0.45], [0], [-0.55, 0, 0.55], [-0.3, 0.4]][(r() * 4) | 0]) T.plats.push({ fx: +(fx + (r() - 0.5) * 0.1).toFixed(3), y: -(132 + Math.round(r() * 36)), w: 230 + Math.round(r() * 80) });
@@ -376,40 +449,103 @@ function buildFloor(n, seed, D, roster, sectors, plan) {
     if (what.includes('walls')) T.walls = true;
     fl.terrain = T;
     const first = fl.waves[0], word = T.plats.length ? 'plats' : T.vents.length ? 'vents' : 'walls';
-    if (!first.hint && s <= 3) first.hint = HINTS[word];
+    if (!first.hint && e <= 3) first.hint = HINTS[word];
   }
-  if (n === 1) { fl.arenaSeed = 0; fl.hue = 0; }
+  if (n === 1 && S.school) { fl.arenaSeed = 0; fl.hue = 0; }
+  // A sprint has no school, so its first floors carry the three lines a new player cannot do without.
+  if (M.id === 'sprint' && n <= 3 && !fl.waves[0].hint) fl.waves[0].hint = HINTS[['basics', 'parry', 'focus'][n - 1]];
   fl.sub = `Floor ${n}  ·  ${tag}`;
   return fl;
 }
 
-// Everything about a run: its sectors, its generated enemies and all hundred floors.
-export function generateRun(seed, diff = 'normal') {
+// Everything about a run: its sectors, its generated enemies and every floor.
+export function generateRun(seed, diff = 'normal', mode = 'climb') {
   seed = (seed >>> 0) || 1;
-  const D = DIFFS[diff] || DIFFS.normal, r = makeRng(hash32(seed, 0x5ec7));
-  const sectors = buildSectors(seed, r);
-  const roster = buildRoster(seed, sectors.map((s) => s.name));
+  const D = DIFFS[diff] || DIFFS.normal, M = MODES[mode] || MODES.climb, r = makeRng(hash32(seed, 0x5ec7));
+  const sectors = buildSectors(seed, r, M);
+  // Titles name the sector a champion or keeper belongs to, by its place in the roster.
+  const places = Array.from({ length: SECTORS }, (_, q) => sectors.find((S) => S.q === q)?.name || 'the Spire');
+  const roster = buildRoster(seed, places);
   roster.rules = [[]];
   for (let s = 1; s < SECTORS; s++) roster.rules.push(buildRules(s, roster, makeRng(hash32(seed, 0xb07d + s))));
   // The plan: which kind of floor sits at each position of each sector.
   const plan = [];
-  for (let s = 0; s < SECTORS; s++) {
-    const p = s === 0 ? ['intro', 'intro', 'intro', 'intro', 'champion', 'intro', 'intro', 'intro', 'intro', 'boss']
+  for (const S of sectors) {
+    const s = S.q;
+    const p = S.school ? ['intro', 'intro', 'intro', 'intro', 'champion', 'intro', 'intro', 'intro', 'intro', 'boss']
       : ['intro', 'intro', roster.beasts[s] ? 'beast' : 'skirmish', roster.rules[s].length ? 'bond' : 'skirmish', 'champion', 'skirmish', 'skirmish', 'skirmish', 'skirmish', 'boss'];
     // One event floor per sector, on the seventh to ninth floor (the sixth introduces the second bond).
-    if (s > 0) p[6 + ((r() * 3) | 0)] = pick(r, EVENTS);
+    if (!S.school) p[6 + ((r() * 3) | 0)] = pick(r, EVENTS);
     plan.push(p);
   }
   // Champions and wardens call on the cheaper fighters of their own sector.
-  for (let s = 0; s < SECTORS; s++) {
-    const cheap = (pos) => poolFor(s * PER + pos, roster).filter((p) => p.cost <= 2).map((p) => p.kind);
-    roster.defs[roster.champions[s]].adds = cheap(5);
-    if (roster.wardens[s]) roster.defs[roster.wardens[s]].adds = cheap(9);
+  for (const S of sectors) {
+    const cheap = (pos) => poolFor(S.q, pos, roster, S.school).filter((p) => p.cost <= 2).map((p) => p.kind);
+    roster.defs[roster.champions[S.q]].adds = cheap(5);
+    if (roster.wardens[S.q]) roster.defs[roster.wardens[S.q]].adds = cheap(9);
   }
   const floors = [];
-  for (let n = 1; n <= FLOORS; n++) floors.push(buildFloor(n, seed, D, roster, sectors, plan));
-  for (const S of sectors) { S.strains = roster.strains[S.i]; S.champion = roster.champions[S.i]; S.boss = floors[S.i * PER + 9].boss; }
-  return { seed, diff: D.id, roster, sectors, floors };
+  for (let n = 1; n <= M.floors; n++) floors.push(buildFloor(n, seed, D, roster, sectors, plan, M));
+  for (const S of sectors) { S.strains = roster.strains[S.q]; S.champion = roster.champions[S.q]; S.boss = floors[S.i * PER + 9].boss; }
+  decorate(seed, M, sectors, floors);
+  return { seed, diff: D.id, mode: M.id, count: M.floors, roster, sectors, floors };
+}
+
+// Surprises, objectives and challenges are laid over the finished floors, each from its own random
+// stream, so adding one kind never moves the others or the waves underneath.
+function decorate(seed, M, sectors, floors) {
+  const rs = makeRng(hash32(seed, 0x5a9e)), ro = makeRng(hash32(seed, 0x0b1e)), rc = makeRng(hash32(seed, 0xc4a1));
+  const live = sectors.filter((S) => !S.school);
+  // The Shade comes once in a sprint and three times on the climb, spread over the run. Every other
+  // surprise turns up once before any repeats.
+  const third = Math.ceil(live.length / 3);
+  const shades = M.id === 'sprint' ? [live[1 + ((rs() * 2) | 0)].i] : [0, 1, 2].map((k) => live[Math.min(live.length - 1, k * third + ((rs() * third) | 0))].i);
+  const rest = shuffle(rs, Object.keys(SURPRISES).filter((k) => k !== 'shade'));
+  let k = 0, tier = 0;
+  for (const S of live) {
+    const at = (pos) => floors[S.i * PER + pos - 1];
+    // Never on a champion's or a keeper's floor.
+    const fl = at(pick(rs, [2, 3, 4, 6, 7, 8, 9]));
+    fl.surprise = shades.includes(S.i) ? { type: 'shade', tier: ++tier } : { type: rest[k++ % rest.length] };
+    // Objectives go on the plain skirmishes of the sector's second half.
+    for (const pos of [7, 8, 9]) {
+      const f = at(pos);
+      if (f.kind !== 'skirmish' || f === fl || ro() > 0.7) continue;
+      const type = pick(ro, ['survive', 'hunt', 'hold', 'cores']);
+      const o = f.objective = { type };
+      if (type === 'survive') o.time = 34 + ((ro() * 3) | 0) * 4;
+      else if (type === 'hold') { o.fx = +((ro() - 0.5) * 0.7).toFixed(2); o.need = 15; }
+      else if (type === 'cores') o.at = [-0.62, 0.05, 0.66].map((v) => +(v + (ro() - 0.5) * 0.12).toFixed(2));
+      f.reward = 'rare'; f.sub = `Floor ${f.n}  ·  ${OBJECTIVES[type].tag}`;
+      f.waves[0].hint = OBJECTIVES[type].text(o);
+    }
+    for (let pos = 1; pos <= 9; pos++) {
+      const f = at(pos);
+      if (pos === 5 || f.objective || rc() > 0.3) continue;
+      const hazard = f.terrain && (f.terrain.vents.length || f.terrain.walls);
+      const type = pick(rc, hazard ? ['untouched', 'swift', 'pure', 'parry', 'aerial', 'room', 'room'] : ['untouched', 'swift', 'pure', 'parry', 'aerial']);
+      f.challenge = { type };
+      if (type === 'swift') f.challenge.time = 16 + 5 * f.waves.reduce((n, w) => n + w.spawns.length, 0);
+    }
+  }
+}
+
+// The doors offered after floor `n`, or null when the way up does not split there. Before a champion
+// or a keeper the choice is how to prepare; elsewhere it is how much to risk.
+export function doorsFor(run, n) {
+  const fl = run.floors[n - 1];
+  if (!fl || n >= run.count || ![2, 4, 6, 8, 9].includes(fl.pos)) return null;
+  if (run.sectors[fl.sector].school && fl.pos < 4) return null;
+  const r = makeRng(hash32(run.seed, 0xd00a + n * 53));
+  let types;
+  if (fl.pos === 4 || fl.pos === 9) types = shuffle(r, ['rest', 'shop', 'shrine', 'armory']).slice(0, 3);
+  else types = ['stair', ...shuffle(r, ['elite', 'cursed', 'unknown', r() < 0.5 ? 'shop' : 'rest']).slice(0, 2)];
+  return types.map((type) => {
+    const d = { type };
+    if (type === 'cursed') d.curse = pick(r, Object.keys(CURSES));
+    if (type === 'unknown') d.hidden = pick(r, ['gift', 'gift', 'rest', 'elite', 'shrine', 'armory']);
+    return d;
+  });
 }
 
 export const roman = (n) => ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][n - 1] || String(n);

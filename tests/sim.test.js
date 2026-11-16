@@ -305,7 +305,8 @@ test('hit-stop is rationed: a crowd fight still runs at close to full speed', ()
 test('augments reduce to one modifier table and respect their caps', () => {
   assert.deepEqual(buildMods({}), baseMods());
   assert.equal(new Set(AUGMENTS.map((a) => a.id)).size, AUGMENTS.length);
-  const all = Object.fromEntries(AUGMENTS.map((a) => [a.id, a.max]));
+  // Pacts are a separate bargain with a price; the cap is on what ordinary cards can add up to.
+  const all = Object.fromEntries(AUGMENTS.filter((a) => a.r < 4).map((a) => [a.id, a.max]));
   const m = buildMods(all);
   for (const [k, v] of Object.entries(m)) assert.ok(Number.isFinite(v), `${k} is ${v}`);
   assert.ok(m.dmg > 1.4 && m.dmg < 2, `full damage stack is ${m.dmg}`);

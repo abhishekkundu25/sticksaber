@@ -5,13 +5,14 @@
 //   node tools/form-strip.js twin lights crowd  some strings of one form
 //
 // Buttons are pressed the way a player would: each one just before the move in progress can be
-// cancelled. Tokens: L light, H heavy, J jump, D dash, a `d` prefix holds down, `!` holds the button
-// long enough to rise with a launcher, `!!` charges it, `wN` waits N frames.
+// cancelled. Tokens: L light, H heavy, J jump, D dash, G guard, a `d` prefix holds down, `!` holds the
+// button long enough to rise with a launcher, `!!` charges it, `@s` holds it for s seconds, `wN` waits
+// N frames, `>N` runs forward for N frames.
 import puppeteer from 'puppeteer-core';
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { FORM_IDS } from '../src/game/forms.js';
-import { STRINGS } from './form-dps.js';
+import { STRINGS, SIGNATURES } from './form-dps.js';
 
 const PORT = 5199, OUT = new URL('./out/', import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
@@ -28,6 +29,10 @@ const SCRIPTS = {
   plunge: { tokens: () => 'J! w16 dH', dist: 70, frames: 84, every: 3, crop: [520, 520], dy: -140 },
   crowd: { tokens: (s) => s.L, dist: 'reach', behind: -76, frames: 96, every: 3, crop: [560, 320] },
   riposte: { riposte: true, dist: 105, frames: 48, every: 2, from: 34, crop: [620, 340], dx: 80 },
+  // Not attacking: standing, running, jumping, dashing, guarding. Where a whip or a sheath goes stiff.
+  idle: { free: true, tokens: () => 'w14 >30 w10 J w40 D w20 G@0.4', dist: 600, frames: 150, every: 5, crop: [460, 400], dy: -40 },
+  // Each form's signature move, against a target placed for it.
+  sig: { tokens: (s, f) => Object.values(SIGNATURES[f])[f === 'lash' ? 1 : f === 'drawblade' ? 2 : 0], dist: (f) => (f === 'lash' ? 200 : 'reach'), frames: 132, every: 3, crop: [620, 380], dx: 60 },
 };
 
 async function main() {
@@ -54,7 +59,9 @@ async function main() {
       const sc = { z: Number(process.env.Z || 0.62), form, ...SCRIPTS[name] };
       if (process.env.EVERY) sc.every = +process.env.EVERY;
       if (process.env.FRAMES) sc.frames = +process.env.FRAMES;
-      if (sc.tokens) sc.tokens = sc.tokens(STRINGS[form]).split(' ');
+      if (!STRINGS[form] && sc.tokens) continue;
+      if (sc.tokens) sc.tokens = sc.tokens(STRINGS[form], form).split(' ');
+      if (typeof sc.dist === 'function') sc.dist = sc.dist(form);
       const url = await page.evaluate(shoot, sc);
       writeFileSync(`${OUT}form-${form}-${name}.png`, Buffer.from(url.split(',')[1], 'base64'));
       console.log('strip', form, name);
@@ -88,11 +95,13 @@ function shoot(sc) {
   const press = () => {
     const tok = tokens[idx++];
     if (tok[0] === 'w') { waitF = +tok.slice(1); return; }
-    const bang = tok.match(/!*$/)[0].length, t = tok.replace(/!+$/, '');
-    const hold = bang === 2 ? 37 : bang === 1 ? 24 : 4;
+    if (tok[0] === '>') { down('right', +tok.slice(1)); waitF = +tok.slice(1); return; }
+    const at = tok.match(/@([\d.]+)$/), bang = tok.match(/!*$/)[0].length, t = tok.replace(/!+$|@[\d.]+$/, '');
+    const hold = at ? Math.round(+at[1] * 60) : bang === 2 ? 37 : bang === 1 ? 24 : 4;
     if (t[0] === 'd') down('down', 12);
     const b = t.slice(-1);
-    down(b === 'L' ? 'light' : b === 'H' ? 'heavy' : b === 'J' ? 'jump' : 'dash', b === 'J' && bang ? 20 : hold);
+    down(b === 'L' ? 'light' : b === 'H' ? 'heavy' : b === 'J' ? 'jump' : b === 'G' ? 'guard' : 'dash', b === 'J' && bang ? 20 : hold);
+    if (at || b === 'G') waitF = hold; // a long hold is not cut short by the next press
     pend = 0; pendSerial = p.atkSerial || 0;
   };
   // Riposte: the Initiate slashes, the guard goes up just before the blade lands, then light.
@@ -113,7 +122,7 @@ function shoot(sc) {
         const m = p.state === 'attack' ? p.move : null;
         if (m) { if (!m.plunge && p.mt >= Math.max(m.cancel * (p.hitLanded ? 0.75 : 1) - 0.06, m.rise ? m.rise + 0.03 : 0)) press(); }
         else if (p.state === 'dash') { if (p.st > 0.07) press(); }
-        else if (p.state === 'free' && (idx === 0 || !p.onGround || tokens[idx][0] === 'w')) press();
+        else if (p.state === 'free' && (idx === 0 || !p.onGround || tokens[idx][0] === 'w' || tokens[idx][0] === '>' || sc.free)) press();
       }
     }
     g.tick(1 / 60);

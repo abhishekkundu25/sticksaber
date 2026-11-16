@@ -82,7 +82,7 @@ export class BotInput {
       if (q.type === 'bolt' && d < 110 && Math.abs(q.y - p.cy) < 90) { this.seen.set(q, 1); if (rng() < this.skill) { p.facing = q.x > p.x ? 1 : -1; this.press('guard', 0.2); this.wait = 0.2; } }
       if ((q.type === 'wave' || q.type === 'crescent') && d < 120 && (q.x - p.x) * q.dir < 0) { this.seen.set(q, 1); if (rng() < this.skill) { this.press('jump', 0.3); this.wait = 0.25; } }
     }
-    if (w.marker?.lock && Math.abs(w.marker.x - p.x) < 150 && !this.seen.get(w.marker)) { this.seen.set(w.marker, 1); if (rng() < this.skill) { this.press('right', 0.3); this.press('dash'); } }
+    if (w.marker?.lock && Math.abs(w.marker.x - p.x) < 150 && !this.seen.get(w.marker)) { this.seen.set(w.marker, 1); if (rng() < this.skill) { const away = p.x > (w.minX + w.maxX) / 2 ? 'left' : 'right'; this.down.left = this.down.right = false; this.press(away, 0.45); this.press('dash'); this.script.length = 0; this.wait = 0.3; } }
     // Step out of marked ground: eruptions about to fire and charges about to burst.
     for (const q of w.projectiles.list) {
       if (q.team === 0 || this.seen.get(q)) continue;
@@ -144,11 +144,12 @@ export class BotInput {
       if (ok.length && this.cast([want[0] === 'mend' && ok[0] === 'mend' ? 'mend' : ok[(rng() * ok.length) | 0]])) { this.wait = 0.35; this.script.length = 0; return; }
     }
     if (tgt.y < -400) { this.down[p.x > 0 ? 'left' : 'right'] = true; return; } // boss is airborne: keep moving
-    const reach = 96 + 34 * (tgt.scale - 1);
+    const FB = p.form?.bot; // a weapon form's own reach and strings (forms.js)
+    const reach = (FB?.reach ?? 96) + 34 * (tgt.scale - 1);
     if (td > reach) { this.down[dir] = true; if (td > (this.show ? 260 : 420) && p.dashCd <= 0 && rng() < dt * (this.show ? 6 : 3)) this.press('dash'); return; }
     if (!this.script.length) {
       // `repeat` forces the same string every time, to check that the game punishes it.
-      const pool = this.show ? SHOW : COMBOS;
+      const pool = FB && rng() < 0.4 ? FB.combos : this.show ? SHOW : COMBOS;
       this.script = [...(this.repeat || pool[(rng() * pool.length) | 0])];
       if (this.show && tgt.def.flying && !tgt.rag) this.script = ['jump', 'light', 'light', 'heavy']; // go up after a drone
       if (Math.abs(dx) > 8) p.facing = dx > 0 ? 1 : -1;
@@ -156,10 +157,10 @@ export class BotInput {
     const step = this.script.shift();
     let longest = 0;
     for (const token of step.split('+')) {
-      const a = token.replace(/!+$/, ''), bangs = token.length - a.length;
-      const hold = bangs === 2 ? 0.56 : bangs === 1 ? 0.34 : a === 'down' ? 0.2 : 0.07;
+      const at = token.match(/@([\d.]+)$/), a = token.replace(/!+$|@[\d.]+$/, ''), bangs = at ? 0 : token.length - a.length;
+      const hold = at ? +at[1] : bangs === 2 ? 0.56 : bangs === 1 ? 0.34 : a === 'down' ? 0.2 : 0.07;
       this.press(a, hold); if (hold > longest) longest = hold;
     }
-    this.wait = longest > 0.5 ? 0.78 : longest > 0.3 ? 0.27 : step.includes('jump') ? 0.28 : this.script.length ? 0.2 : 0.42;
+    this.wait = longest > 0.6 ? longest + 0.5 : longest > 0.5 ? 0.78 : longest > 0.3 ? 0.27 : step.includes('jump') ? 0.28 : this.script.length ? 0.2 : 0.42;
   }
 }

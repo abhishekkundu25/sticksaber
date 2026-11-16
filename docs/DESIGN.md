@@ -142,7 +142,9 @@ The floor that introduces a strain says what it is in one line, for example "EMB
 
 ### Animals
 
-From sector II each sector adds one animal species. Animals are not reskinned humanoids: they have their own rig, gaits and attacks. They do reuse the humanoid's eleven joints with a new meaning (shoulder, hip, two front limbs, two hind limbs, head), which is why the ragdoll, the cutting of bodies and hit detection work on them unchanged.
+From sector II each sector adds one animal species. Animals are not reskinned humanoids: they have their own rig, gaits and attacks. They do reuse the humanoid's eleven joints with a new meaning (shoulder, hip, two front limbs, two hind limbs, head), which is why hit detection works on them unchanged.
+
+A knocked-down or dead animal stays an animal. Its limp body is the same eleven joints plus its snout, tail and extra legs, and it is drawn with the same shapes as the living one, so nothing changes shape when it goes down or gets back up. Knees bend only their own way, and a stiff sting keeps its curl. Each plan has its own weight: a charger or an ape travels less when launched and slides when it lands, a toad bounces, a flyer folds its wings and drops, and a stalker or a scorpion curls its legs. A scorpion twists to land on its back. A dead stalker does the same. Lift changes little from plan to plan, so air combos work on every animal. An animal that ends up on its back rolls over as it gets up. Animals are not cut apart. A blow to a dead animal knocks the body about instead.
 
 | Plan | Silhouette | Behaviour | Answer | Cost |
 | --- | --- | --- | --- | --- |
@@ -367,6 +369,11 @@ A run played by a person opens with a choice of blade, kept for the run and save
 | Twin blades | Two of 50, 10% faster on foot | A six-hit string that alternates hands, a five-hit air string, 5.5 hits a second at about 5 damage. Light on posture, so guards are its weak spot | 5% below on the ground, 6% above in the air |
 | Greatsword | 104, wide, 12% slower on foot | Three sweeping lights, every swing armoured against light hits, posture damage of 28 to 80 a hit, a chargeable overhead that cracks the floor | 3% above |
 | Staff | 62 at each end | Spins that hit in front and behind, long thrusts, a helicopter air move | 17% below, made up in a crowd |
+| Lash | A whip of 150, drawn as a chain that lags and cracks | Only the outer two thirds connect, and a hit scales from 0.6 times at the inner edge to 1.3 times at the tip. Each crack gives a little ground. The heavy wraps a target and drags it in to whip range; a boss, an armoured or mounted enemy drags you to it instead. The launcher yanks upward, the air heavy wraps and slams. A blocked crack recoils the lash | 5% above |
+| Gauntlets | A short blade on each fist, 8% faster on foot | Five-hit strings at 0.22 seconds a punch, each stepping in. Every punch that lands adds an eighth of a charge, shown as brighter fists and an arc round the weapon fist; the charge cools after four idle seconds. The heavy spends it on a shockwave that grows from 70 to 180 units and from 4 to 30 damage; at full charge it launches everything in range and breaks guards | Level |
+| Drawblade | 96, thin, kept in a sheath at the hip | Lights draw, cut and sheathe with a click. Some cuts only mark what they pass, and the marks are cut when the blade goes home. The heavy holds in the sheath through three levels (0.3, 0.7 and 1.1 seconds of charge, each with a flash and a tick), then dashes about 270 units through the line; the cut lands on everything passed as the blade clicks home, 8 to 38 damage by level. Releasing within 0.14 seconds of a tick is a perfect draw, 1.4 times. Hits taken while charging count as punishes | 3% below |
+
+Mechanics a form adds live on the fighter, not the world, so any fighter can use a form: `equipForm(f, id)` in forms.js gives one, and charging is driven by `f.holdCharge`, which the player's controller sets from the heavy button.
 
 ### Techniques
 

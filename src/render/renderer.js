@@ -10,6 +10,7 @@ import { glowSprite } from './fx.js';
 import { TRAIL_STRIDE } from '../game/fighter.js';
 import { BONES } from '../game/ragdoll.js';
 import { drawBeastBody, drawBeastGlow } from './beastdraw.js';
+import { glowProp, bodyProp, drawRoom } from './props.js';
 
 const BODY = '#06080c';
 const AURA = { swift: '#ffe45c', armored: '#6fb6ff', volatile: '#ff7a2e' };
@@ -134,7 +135,7 @@ export class Renderer {
     wt();
     ctx.globalCompositeOperation = 'lighter';
     for (const f of fs) {
-      if (!f.armed || f.bladeOn < 0.05 || f.blade.gun) continue;
+      if (!f.armed || f.bladeOn < 0.05 || f.blade.gun || f.sheathed) continue;
       const mx = (f.bx + f.tx) / 2, hgt = Math.max(0, -(f.by + f.ty) / 2);
       const Rr = 190 * f.scale, a = 0.34 * f.bladeOn * f.fade / (1 + hgt / 160);
       ctx.globalAlpha = a;
@@ -173,11 +174,14 @@ export class Renderer {
     }
     ctx.globalAlpha = 1;
     this.terrain(ctx, world);
+    if (world.zone || world.herd) drawRoom(ctx, world, cam, view);
     world.fx.drawSolid(ctx, arena ? arena.palette.fog : '#8a93a8');
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const f of fs) if (f.dead) this.bodyFighter(ctx, f, world);
     for (const f of fs) if (!f.dead && f !== world.player) this.bodyFighter(ctx, f, world);
     if (world.player && !world.player.dead) this.bodyFighter(ctx, world.player, world);
+    // A blackout: the room and the bodies go dark, and everything that glows is drawn over the dark.
+    if (world.darkK > 0.01) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = world.darkK; ctx.fillStyle = '#020308'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
 
     // ── 5. bloom composite, restricted to where there is light ──
     if (R.w > 0) {
@@ -194,7 +198,7 @@ export class Renderer {
     for (const f of fs) this.coreFighter(ctx, f);
     for (const p of world.projectiles.list) if (p.type === 'saber') this.saberCore(ctx, p);
     ctx.globalAlpha = 1;
-    for (const f of fs) if (f.team === 1 && !f.dead && !f.def.boss && !f.phantom && (f.barT > 0 || f.tag)) this.enemyBar(ctx, f);
+    for (const f of fs) if ((f.team === 1 || f.tag) && !f.isPlayer && !f.dead && !f.def.boss && !f.phantom && (f.barT > 0 || f.tag)) this.enemyBar(ctx, f);
     world.fx.drawText(ctx);
 
     // ── 7. foreground ──
@@ -232,6 +236,7 @@ export class Renderer {
     }
     if (world.marker) { add(world.marker.x, 0, 150); add(world.marker.x, -900, 20); }
     if (world.flood) { add(world.minX, 0, 30); add(world.maxX, 0, 30); }
+    if (world.zone) { add(world.zone.x, 0, world.zone.r + 20); add(world.zone.x, -480, 40); }
     const fx = world.fx;
     for (const s of fx.sparks) add(s.x, s.y, 14);
     for (const s of fx.embers) add(s.x, s.y, 6);
@@ -254,11 +259,13 @@ export class Renderer {
 
   // ───────────── glow pass ─────────────
   glowFighter(g, f, world) {
+    if (f.def.prop) return glowProp(g, f, world.time);
     if (f.def.deco === 'drone') return this.glowDrone(g, f, world);
     if (f.def.beast) drawBeastGlow(g, f, world);
     const s = f.scale, j = f.j, t = world.time, bd = f.blade;
     const lit = f.armed && f.bladeOn > 0.02 && !bd.gun;
-    if (lit) {
+    if (lit && bd.whip && f.lash) this.glowWhip(g, f, t);
+    else if (lit && !f.sheathed) {
       const on = f.bladeOn * f.fade, wide = bd.wide ? 1.7 : bd.thin ? 0.72 : 1;
       let x0 = f.double ? f.t2x : f.bx, y0 = f.double ? f.t2y : f.by;
       if (bd.hammer) { x0 = f.bx + (f.tx - f.bx) * 0.74; y0 = f.by + (f.ty - f.by) * 0.74; } // only the head glows
@@ -277,11 +284,14 @@ export class Renderer {
       }
       const mx = (x0 + f.tx) / 2, my = (y0 + f.ty) / 2, R = 78 * s * (bd.wide ? 1.7 : 1) * (1 + f.heat * 0.18);
       g.globalAlpha = 0.2 * on; g.drawImage(glowSprite(f.color), mx - R, my - R, R * 2, R * 2);
-      if (f.charging || f.charged && f.state === 'attack') {
+      if ((f.charging || f.charged && f.state === 'attack') && !bd.sheath) {
         const cr = 30 + f.chargeT * 60;
         g.globalAlpha = 0.5; g.drawImage(glowSprite('#ffffff'), f.tx - cr, f.ty - cr, cr * 2, cr * 2);
       }
     }
+    if (lit && bd.fist && !f.rag) this.glowFists(g, f, t);
+    if (bd.sheath && f.sheathed && !f.dead) this.glowSheath(g, f, t);
+    if (f.cuts?.length || f.marks?.length) this.glowMarks(g, f, t);
     g.globalAlpha = f.fade;
     // Eye slit: gives every head a facing and a place for tells to flare.
     const ex = j[0] + f.facing * 2.5 * s, ey = j[1] - 1 * s;
@@ -429,6 +439,13 @@ export class Renderer {
     const t = world.time;
     // Orbs left by the fallen: green for health, cyan for focus.
     for (const o of world.orbs) {
+      if (o.kind === 'shard') {
+        // A shard is a small gold diamond that turns as it flies.
+        const r = 11, w = 3.5 * Math.abs(Math.cos(t * 7 + o.x * 0.1)) + 1;
+        g.globalAlpha = 0.7; g.drawImage(glowSprite('#ffd36b'), o.x - r, o.y - r, r * 2, r * 2);
+        g.globalAlpha = 1; g.fillStyle = '#fff0c0'; g.beginPath(); g.moveTo(o.x, o.y - 5); g.lineTo(o.x + w, o.y); g.lineTo(o.x, o.y + 5); g.lineTo(o.x - w, o.y); g.fill();
+        continue;
+      }
       const col = o.kind === 'hp' ? '#7dffb0' : '#56e9ff', r = 15 + Math.sin(t * 9 + o.x) * 3;
       g.globalAlpha = 0.85; g.drawImage(glowSprite(col), o.x - r, o.y - r, r * 2, r * 2);
       g.globalAlpha = 1; g.fillStyle = '#ffffff'; g.fillRect(o.x - 1.6, o.y - 1.6, 3.2, 3.2);
@@ -566,6 +583,7 @@ export class Renderer {
   // ───────────── solid pass ─────────────
   bodyFighter(ctx, f, world) {
     if (f.fade <= 0.01) return;
+    if (f.def.prop) return bodyProp(ctx, f, world);
     if (f.def.deco === 'drone') return this.bodyDrone(ctx, f, world);
     const j = f.j, s = f.scale, lw = f.def.lineW * s, d = f.def;
     let ox = 0, oy = 0;
@@ -576,7 +594,7 @@ export class Renderer {
     if (ox || oy) ctx.translate(ox, oy);
     ctx.globalAlpha = alpha;
     const body = f.flash > 0 ? '#ffffff' : BODY;
-    const rim = f.tele > 0.2 ? (f.teleRed ? '#ff5060' : '#ffffff') : f.broken ? '#ffd36b' : f.enraged ? '#ff8a30' : f.elite ? AURA[f.elite] : f.phantom ? f.color : d.outline;
+    const rim = f.tele > 0.2 ? (f.teleRed ? '#ff5060' : '#ffffff') : f.broken || f.mark ? '#ffd36b' : f.enraged ? '#ff8a30' : f.elite ? AURA[f.elite] : f.phantom ? f.color : d.outline;
 
     if (f.ribbons.length) this.ribbon(ctx, f, 1, false);
 
@@ -590,8 +608,8 @@ export class Renderer {
       ctx.globalAlpha = alpha * rimA; ctx.strokeStyle = rim; ctx.lineWidth = lw + 2.6; ctx.stroke();
       ctx.globalAlpha = alpha; ctx.strokeStyle = body; ctx.lineWidth = lw; ctx.stroke();
     };
-    // Animal bodies draw themselves from the same joints; a limp one falls through to the bone loop below.
-    if (d.beast && !rg) { drawBeastBody(ctx, f, world, rim, body, alpha); ctx.restore(); return; }
+    // Animal bodies draw themselves from the same joints, limp or not, so they never turn into sticks.
+    if (d.beast) { drawBeastBody(ctx, f, world, rim, body, alpha); ctx.restore(); return; }
     group(FAR, 0.5);                     // far arm and leg, dimmer rim for depth
     const belly = d.belly ?? (d.deco === 'bulwark' ? 10 : d.deco === 'forge' ? 15 : d.deco === 'horns' ? 13 : 0);
     if (belly) {
@@ -600,18 +618,11 @@ export class Renderer {
       ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = rim; ctx.lineWidth = 1.4; ctx.stroke();
     }
     group(TORSO, 1);                     // spine and near leg (or the whole ragdoll)
-    if (d.beast && rg) {
-      // A limp animal keeps the bulk of its body: the spine is drawn thick for as long as it is in one piece.
-      for (const [a, b] of rg.bones) {
-        if (a !== 1 || b !== 2) continue;
-        ctx.beginPath(); ctx.moveTo(rg.x[1], rg.y[1]); ctx.lineTo(rg.x[2], rg.y[2]);
-        ctx.strokeStyle = rim; ctx.lineWidth = lw * 2.3 + 2.6; ctx.stroke(); ctx.strokeStyle = body; ctx.lineWidth = lw * 2.3; ctx.stroke();
-      }
-    }
     const hr = 9 * s * (d.deco === 'horns' || d.deco === 'forge' ? 0.8 : 1) * (d.prop?.head ?? 1);
     ctx.beginPath(); ctx.arc(j[0], j[1], hr, 0, TAU);
     ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = rim; ctx.lineWidth = 1.5; ctx.stroke();
     this.deco(ctx, f, hr, rim, body);
+    if (f.blade.sheath) this.sheath(ctx, f, rim, body);
     // Hilt, shaft or rifle, then the weapon arm on top.
     if (f.armed && !d.beast) {
       const dx = f.tx - f.bx, dy = f.ty - f.by, dl = Math.hypot(dx, dy) || 1, ux = dx / dl, uy = dy / dl;
@@ -621,7 +632,17 @@ export class Renderer {
       } else if (f.blade.hammer) {
         ctx.beginPath(); ctx.moveTo(f.bx - ux * 16, f.by - uy * 16); ctx.lineTo(f.bx + dx * 0.76, f.by + dy * 0.76);
         ctx.strokeStyle = rim; ctx.lineWidth = 8; ctx.stroke(); ctx.strokeStyle = body; ctx.lineWidth = 5.4; ctx.stroke();
-      } else {
+      } else if (f.blade.whip && f.lash) {
+        // A short handle, aimed along the first link of the whip.
+        const wx = f.lash[4] - f.bx, wy = f.lash[5] - f.by, wl = Math.hypot(wx, wy) || 1;
+        ctx.beginPath(); ctx.moveTo(f.bx - (wx / wl) * 12, f.by - (wy / wl) * 12); ctx.lineTo(f.bx + (wx / wl) * 4, f.by + (wy / wl) * 4);
+        ctx.strokeStyle = '#aeb9c8'; ctx.lineWidth = 4.6; ctx.stroke();
+      } else if (f.blade.fist) {
+        // Fists you can see: a knuckle guard on each hand.
+        const r = 4.6 * f.scale, j = f.j;
+        ctx.beginPath(); ctx.arc(j[8], j[9], r, 0, TAU); ctx.moveTo(j[12] + r, j[13]); ctx.arc(j[12], j[13], r, 0, TAU);
+        ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = '#aeb9c8'; ctx.lineWidth = 2; ctx.stroke();
+      } else if (!f.sheathed) {
         const hl = f.double ? 9 : f.blade.thin ? 16 : 7;
         ctx.beginPath(); ctx.moveTo(f.bx - ux * hl, f.by - uy * hl); ctx.lineTo(f.bx + ux * hl * (f.blade.thin ? 0.4 : 1), f.by + uy * hl * (f.blade.thin ? 0.4 : 1));
         ctx.strokeStyle = '#aeb9c8'; ctx.lineWidth = 4.2 * (f.blade.wide ? 1.5 : 1); ctx.stroke();
@@ -719,9 +740,78 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
+  // ───────────── weapon forms ─────────────
+  // The lash: one path through the whip's points, stroked wide and faint, then narrow and bright.
+  glowWhip(g, f, t) {
+    const q = f.lash, n = q.length, on = f.bladeOn * f.fade, fl = 1 + Math.sin(t * 47 + f.t) * 0.06;
+    whipPath(g, q);
+    g.strokeStyle = f.color;
+    g.globalAlpha = 0.16 * on; g.lineWidth = 13 * fl; g.stroke();
+    g.globalAlpha = 0.45 * on; g.lineWidth = 6 * fl; g.stroke();
+    g.globalAlpha = 0.95 * on; g.lineWidth = 3; g.stroke();
+    const R = 24 * f.scale;
+    g.globalAlpha = 0.55 * on; g.drawImage(glowSprite(f.color), q[n - 2] - R, q[n - 1] - R, R * 2, R * 2);
+  }
+  // Gauntlets: both fists glow, brighter and wider with the charge, and an arc round the weapon fist
+  // fills as the charge builds. At full charge the glow throbs.
+  glowFists(g, f, t) {
+    const c = f.fistCharge, on = f.bladeOn * f.fade, s = f.scale, j = f.j, spr = glowSprite(f.color);
+    const R = (15 + 22 * c) * s * (c >= 1 ? 0.85 + 0.15 * Math.sin(t * 28) : 1);
+    g.globalAlpha = (0.3 + 0.6 * c) * on;
+    g.drawImage(spr, j[8] - R, j[9] - R, R * 2, R * 2); g.drawImage(spr, j[12] - R, j[13] - R, R * 2, R * 2);
+    if (c > 0) {
+      g.strokeStyle = c >= 1 ? '#ffffff' : f.color; g.globalAlpha = 0.9 * on; g.lineWidth = 2.4;
+      g.beginPath(); g.arc(j[8], j[9], 12 * s, -Math.PI / 2, -Math.PI / 2 + TAU * c); g.stroke();
+    }
+  }
+  // Drawblade, sheathed: a glint at the mouth that swells while a draw is held, and three pips along
+  // the sheath that light one by one as the charge reaches each level.
+  glowSheath(g, f, t) {
+    const s = f.scale, on = f.fade, ch = f.charging, lv = f.drawLevel, spr = glowSprite(f.color);
+    const mx = f.j[4] + f.facing * 10 * s, my = f.j[5] - 4 * s, dx = -f.facing * SH_COS, dy = SH_SIN, L = f.bladeLen * 0.82;
+    const R = (10 + (ch ? 8 + f.chargeT * 26 : 0)) * s;
+    g.globalAlpha = (ch ? 0.65 : 0.3) * on; g.drawImage(spr, mx - R, my - R, R * 2, R * 2);
+    if (!ch && !lv) return;
+    for (let k = 0; k < 3; k++) {
+      const u = 0.25 + 0.25 * k, x = mx + dx * L * u, y = my + dy * L * u, r = (lv > k ? 13 : 6) * s;
+      g.globalAlpha = (lv > k ? 0.95 : 0.3) * on; g.drawImage(spr, x - r, y - r, r * 2, r * 2);
+    }
+  }
+  // A cut still to land: a flickering line across each marked body.
+  glowMarks(g, f, t) {
+    const a = f.facing > 0 ? -0.35 : Math.PI + 0.35, cs = Math.cos(a) * 30, sn = Math.sin(a) * 30, C = f.cuts, M = f.markSerial === f.atkSerial ? f.marks : null;
+    g.strokeStyle = '#ffffff'; g.lineWidth = 2.2; g.globalAlpha = 0.55 + 0.35 * Math.sin(t * 40);
+    g.beginPath();
+    if (C) for (let i = 0; i < C.length; i++) { const B = C[i].B; g.moveTo(B.cx - cs, B.cy - sn); g.lineTo(B.cx + cs, B.cy + sn); }
+    if (M) for (let i = 0; i < M.length; i++) { const B = M[i].B; g.moveTo(B.cx - cs, B.cy - sn); g.lineTo(B.cx + cs, B.cy + sn); }
+    g.stroke();
+  }
+  // The drawblade's sheath hangs from the front of the belt, down and back; the hilt shows while the
+  // blade is in it.
+  sheath(ctx, f, rim, body) {
+    const s = f.scale, mx = f.j[4] + f.facing * 10 * s, my = f.j[5] - 4 * s, dx = -f.facing * SH_COS, dy = SH_SIN, L = f.bladeLen * 0.82;
+    ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx + dx * L, my + dy * L);
+    ctx.strokeStyle = rim; ctx.lineWidth = 6.6; ctx.stroke(); ctx.strokeStyle = body; ctx.lineWidth = 4.2; ctx.stroke();
+    if (f.sheathed && f.armed) {
+      ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx - dx * 16, my - dy * 16);
+      ctx.strokeStyle = '#aeb9c8'; ctx.lineWidth = 4.2; ctx.stroke();
+    }
+  }
+
   coreFighter(ctx, f) {
     const bd = f.blade;
     if (!f.armed || f.bladeOn < 0.05 || bd.gun) return;
+    if (bd.whip && f.lash) {
+      ctx.globalAlpha = Math.min(1, f.bladeOn * 1.2) * f.fade; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.4;
+      whipPath(ctx, f.lash); ctx.stroke();
+      return;
+    }
+    if (f.sheathed) return;
+    if (bd.fist && !f.rag) {
+      const r = (2.2 + 2 * f.fistCharge) * f.scale, j = f.j;
+      ctx.globalAlpha = f.fade; ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(j[8], j[9], r, 0, TAU); ctx.moveTo(j[12] + r, j[13]); ctx.arc(j[12], j[13], r, 0, TAU); ctx.fill();
+    }
     let x0 = f.double ? f.t2x : f.bx, y0 = f.double ? f.t2y : f.by;
     if (bd.hammer) { x0 = f.bx + (f.tx - f.bx) * 0.8; y0 = f.by + (f.ty - f.by) * 0.8; ctx.lineCap = 'butt'; }
     ctx.globalAlpha = Math.min(1, f.bladeOn * 1.2) * f.fade * (bd.hammer ? 0.35 + f.heat * 0.2 : 1);
@@ -751,7 +841,7 @@ export class Renderer {
     if (f.posture > 1) { ctx.fillStyle = '#ffd36b'; ctx.fillRect(x, y + 6, w * clamp(f.posture / f.maxPosture, 0, 1), 2); }
     if (f.tag) { ctx.fillStyle = f.enraged ? '#ff8a30' : '#ffd36b'; ctx.font = '700 10px ui-sans-serif, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(f.tag, f.x, y - 20); }
     // A strain carries its name, so the player learns which body does what.
-    const name = f.def.strain || f.def.beast ? f.def.name.toUpperCase() : null;
+    const name = f.def.strain || f.def.beast || f.def.climber ? f.def.name.toUpperCase() : null;
     const tag = f.reads ? 'READS ' + f.reads.toUpperCase() : f.elite ? (name ? `${f.elite.toUpperCase()}  ${name}` : f.elite.toUpperCase()) : name;
     if (tag) { ctx.fillStyle = f.reads ? f.color : f.elite ? AURA[f.elite] : f.def.outline; ctx.font = '700 10px ui-sans-serif, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(tag, f.x, y - 8); }
     ctx.globalAlpha = 1;
@@ -759,3 +849,11 @@ export class Renderer {
 }
 
 function line(c, x0, y0, x1, y1) { c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); }
+// A smooth path through a whip's points (x, y pairs), curving through the midpoints between them.
+function whipPath(c, q) {
+  const n = q.length >> 1;
+  c.beginPath(); c.moveTo(q[0], q[1]);
+  for (let i = 1; i < n - 1; i++) { const o = i * 2; c.quadraticCurveTo(q[o], q[o + 1], (q[o] + q[o + 2]) / 2, (q[o + 1] + q[o + 3]) / 2); }
+  c.lineTo(q[n * 2 - 2], q[n * 2 - 1]);
+}
+const SH_COS = Math.cos(0.42), SH_SIN = Math.sin(0.42); // the sheath's slope, down and back from the belt

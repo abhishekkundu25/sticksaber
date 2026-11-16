@@ -16,6 +16,7 @@ export function playerCtrl(f, world, dt) {
   if (!inp || world.lockInput) return;
   const ax = inp.axisX();
   f.riposteT = (f.riposteT || 0) - dt;
+  f.holdCharge = inp.held('heavy');
   f.sinceDash = (f.sinceDash ?? 9) + dt;
   if (f.onGround) { f.airJumps = 1 + world.mods.airJumps; f.airDash = 1 + world.mods.airJumps; f.coyote = 0.09; f.refunded = false; } else f.coyote -= dt;
 
@@ -40,11 +41,7 @@ export function playerCtrl(f, world, dt) {
       break;
 
     case 'attack': {
-      const m = f.move, mt = f.mt;
-      if (m.charge && !f.chargeDone && mt >= m.charge) {
-        if (inp.held('heavy') && f.chargeT < 0.6) { f.charging = true; f.chargeT += dt; world.chargeFx(f, dt); }
-        else { f.charging = false; f.chargeDone = true; f.charged = f.chargeT >= 0.3; }
-      }
+      const m = f.move, mt = f.mt; // holding a charge is done in Fighter.tickMove from f.holdCharge
       if (m.rise && !f.rose && mt >= m.rise && f.hitLanded && (inp.held('heavy') || inp.held('jump'))) {
         f.rose = true; f.vy = -840; f.onGround = false; f.y -= 1; f.jumping = false;
       }
@@ -155,7 +152,7 @@ function tryAttack(f, world, inp, ax, cur) {
     world.slow(0.45, 0.22);
   } else autoFace(f, world, ax);
   if (id === 'LAUNCH' && world.mods.undertow) world.undertow(f);
-  const mid = world.moveId(id); // the weapon form's own move for this slot
+  const mid = f.form?.moves[id] || id; // the weapon form's own move for this slot
   f.startMove(mid);
   if (air && MOVES[mid].air && !MOVES[mid].plunge && f.vy > 0) f.vy *= 0.3;
   return true;

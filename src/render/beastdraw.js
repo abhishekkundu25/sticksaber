@@ -17,9 +17,10 @@ const Q = new Float32Array(64); // scratch points for smooth outlines
 
 // ───────────── frames ─────────────
 // Head frame: a along the head in head lengths, b up in head radii; origin at the eye (joint 0).
+// `roll` below 0 turns the up side over, for a body getting up from its back.
 function headFrame(f) {
   const B = f.B;
-  S = f.scale; FX = f.facing * f.xm; HC = Math.cos(f.hdA); HS = Math.sin(f.hdA); HX = f.j[0]; HY = f.j[1]; HLen = B.head * S; HRad = B.headR * S;
+  S = f.scale; FX = f.facing * f.xm; HC = Math.cos(f.hdA); HS = Math.sin(f.hdA); HX = f.j[0]; HY = f.j[1]; HLen = B.head * S; HRad = B.headR * S * f.roll;
 }
 const hx = (a, b) => HX + (HC * a * HLen - HS * b * HRad) * FX;
 const hy = (a, b) => HY - (HS * a * HLen + HC * b * HRad);
@@ -29,7 +30,7 @@ function spineFrame(f) {
   OX = j[4]; OY = j[5];
   const dx = j[2] - j[4], dy = j[3] - j[5];
   SL = Math.hypot(dx, dy) || 1; UX = dx / SL; UY = dy / SL;
-  NX = UY * f.facing; NY = -UX * f.facing;
+  NX = UY * f.facing * f.roll; NY = -UX * f.facing * f.roll;
   G = f.B.girth * f.scale;
 }
 const sx = (a, b) => OX + UX * a * SL + NX * b * G;
@@ -271,7 +272,7 @@ function stalker(ctx, f, rim, body, a) {
   ctx.beginPath(); bone(ctx, j, 1, 3, 4); bone(ctx, j, 2, 7, 8); extraLegs(ctx, f, 0); ctx.globalAlpha = a; ctx.strokeStyle = rim; ctx.lineWidth = lw + RIM; ctx.stroke();
   ctx.beginPath();
   torso(ctx, f);
-  const ar = B.abdomen * s, ax = j[4] - UX * ar * 0.85, ay = j[5] - UY * ar * 0.85 - ar * 0.15, ang = Math.atan2(UY, UX) + (f.facing > 0 ? 0.25 : -0.25);
+  const ar = B.abdomen * s, ax = j[4] - UX * ar * 0.85, ay = j[5] - UY * ar * 0.85 - ar * 0.15, ang = Math.atan2(UY, UX) + (f.facing > 0 ? 0.25 : -0.25) * f.roll;
   ellipse(ctx, ax, ay, ar * B.abdK, ar * 0.82, ang);
   if (B.spikes) for (let i = 0; i < 4; i++) {
     const k = -0.6 + i * 0.4, px = ax + UX * ar * B.abdK * k + NX * ar * 0.75 * Math.sqrt(1 - k * k), py = ay + UY * ar * B.abdK * k + NY * ar * 0.75 * Math.sqrt(1 - k * k);
@@ -321,7 +322,7 @@ function scorpion(ctx, f, rim, body, a) {
 function claw(ctx, f, hi, ei, open, k) {
   const j = f.j, s = f.scale, B = f.B, x = j[hi], y = j[hi + 1];
   const dx = x - j[ei], dy = y - j[ei + 1], d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
-  const nx = uy * f.facing, ny = -ux * f.facing, L = B.claw * s * k, W = L * 0.42;
+  const nx = uy * f.facing * f.roll, ny = -ux * f.facing * f.roll, L = B.claw * s * k, W = L * 0.42;
   ellipse(ctx, x + ux * L * 0.15, y + uy * L * 0.15, L * 0.5, W, Math.atan2(uy, ux));
   const o = 0.25 + open * 0.55, c = Math.cos(o), sn = Math.sin(o);
   const ax = ux * c + nx * sn, ay = uy * c + ny * sn, bx = ux * c - nx * sn, by = uy * c - ny * sn;
@@ -449,7 +450,7 @@ export function drawBeastBody(ctx, f, world, rim, body, alpha) {
 // has a cluster of small eyes.
 export function drawBeastGlow(g, f, world) {
   const B = f.B;
-  if (!B || f.dead || f.rag) return;
+  if (!B || (f.dead && f.deadT > 0.6)) return;
   if (B.plan === 'spitter') {
     const sw = f.p[2];
     if (sw > 0.15) {
