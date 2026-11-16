@@ -32,9 +32,19 @@ const GROUPS = {
   Surprises: ['surprise', 'shadeArrive', 'lightsOut', 'stampedeWarn', 'stampede', 'quake', 'thunder', 'cacheDrop', 'propBreak'],
   'Shop & doors': ['pickupShard', 'buy', 'uiDeny', 'uiBack', 'doorsOpen', 'doorPick', 'weaponSwap'],
   'Objectives & pacts': ['pactTake', 'rest', 'challengeMet', 'objectiveDone', 'beaconFire', 'markSet', 'allyFreed', 'courierGone', 'bountyWon'],
+  Whip: ['swingLash', 'lashCrack', 'lashTip', 'lashWrap', 'lashPull', 'lashSlam', 'lashDeflect', 'lashWind'],
+  Gauntlets: ['swingFist', 'gaCharge', 'gaFull', 'gaWind', 'gaBlast', 'gaBlastFull'],
+  'Drawn blade & edges': ['swingDraw', 'dbSheathe', 'dbStance', 'dbLevel', 'dbDash', 'dbCut', 'dbPerfect', 'ringOut'],
 };
 // The floor-event sounds the checks below hold to the spec; a later batch adds its own group.
 const EVENT_SOUNDS = [...GROUPS.Surprises, ...GROUPS['Shop & doors'], ...GROUPS['Objectives & pacts']];
+// The weapon and edge sounds, and the loudest volume and pitch the game plays each at (src/game/forms.js,
+// world.js; enemies play at 0.8 of these).
+const WEAPON_SOUNDS = [...GROUPS.Whip, ...GROUPS.Gauntlets, ...GROUPS['Drawn blade & edges']];
+const LOUDEST = {
+  lashCrack: { vol: 0.9 }, lashTip: { vol: 0.8 }, gaCharge: { vol: 0.45, pitch: 1.325 }, gaBlast: { vol: 0.95, pitch: 0.85 }, gaBlastFull: { vol: 1, pitch: 0.8 },
+  dbLevel: { vol: 1.1, pitch: 1.5 }, dbDash: { vol: 1.1, pitch: 1.24 }, dbCut: { pitch: 1.24 },
+};
 // The spec's "about N s" lengths, as [min, max] dry length to -60 dBFS.
 const ABOUT = {
   surprise: [0.55, 0.85], shadeArrive: [0.85, 1.2], lightsOut: [0.45, 0.75], stampedeWarn: [1.2, 1.6], stampede: [1.0, 1.4],
@@ -69,6 +79,9 @@ const LIMIT = {
   surprise: 0.85, shadeArrive: 1.2, lightsOut: 0.75, stampedeWarn: 1.6, stampede: 1.4, quake: 1.7, thunder: 1.7, cacheDrop: 0.8, propBreak: 0.5,
   pickupShard: 0.1, buy: 0.6, uiDeny: 0.25, uiBack: 0.15, doorsOpen: 0.75, doorPick: 0.7, weaponSwap: 0.32,
   pactTake: 1.2, rest: 1.2, challengeMet: 0.7, objectiveDone: 1.0, beaconFire: 1.6, markSet: 0.5, allyFreed: 1.0, courierGone: 0.4, bountyWon: 0.9,
+  swingLash: 0.3, lashCrack: 0.12, lashTip: 0.3, lashWrap: 0.4, lashPull: 0.4, lashSlam: 0.7, lashDeflect: 0.25, lashWind: 0.35,
+  swingFist: 0.1, gaCharge: 0.15, gaFull: 0.8, gaWind: 0.3, gaBlast: 0.7, gaBlastFull: 1.4,
+  swingDraw: 0.4, dbSheathe: 0.1, dbStance: 0.7, dbLevel: 0.5, dbDash: 0.3, dbCut: 0.3, dbPerfect: 1.2, ringOut: 1.2,
 };
 // Sequences the game plays; the soundboard has a button for each.
 const SEQUENCES = {
@@ -92,6 +105,14 @@ const SEQUENCES = {
   'shop: deny, buy, back': [[0, 'uiDeny'], [0.5, 'buy'], [1.2, 'uiBack']],
   'doors: open + pick': [[0, 'doorsOpen'], [1, 'doorPick']],
   'challenge + objective': [[0, 'challengeMet'], [0.9, 'objectiveDone']],
+  'lash string': [[0, 'swingLash'], [0.05, 'lashCrack', { vol: 0.9 }], [0.06, 'lashTip', { vol: 0.8 }], [0.42, 'swingLash'], [0.47, 'lashCrack', { vol: 0.9 }], [0.8, 'swingLash'], [0.95, 'swingLash'], [1.0, 'lashCrack', { vol: 0.9 }]],
+  'lash heavy: wind, pull': [[0, 'lashWind'], [0.16, 'swingLash'], [0.2, 'lashCrack', { vol: 0.9 }], [0.21, 'lashWrap'], [0.21, 'lashPull']],
+  'lash slam, deflect': [[0, 'swingLash'], [0.15, 'lashWrap'], [0.15, 'lashSlam'], [0.9, 'swingLash'], [1.0, 'lashDeflect']],
+  'fist string to full': [...Array.from({ length: 8 }, (_, i) => [i * 0.09, 'swingFist']), ...Array.from({ length: 7 }, (_, i) => [i * 0.09 + 0.02, 'gaCharge', { vol: 0.45, pitch: 0.8 + (i + 1) * 0.075 }]), [0.65, 'gaFull']],
+  'gaBlast half / full': [[0, 'gaWind'], [0.18, 'swingFist'], [0.24, 'gaBlast', { vol: 0.8, pitch: 1 }], [1.2, 'gaWind'], [1.38, 'swingFist'], [1.44, 'gaBlastFull', { pitch: 0.8 }]],
+  'draw, sheathe, cuts': [[0, 'swingDraw'], [0.24, 'dbSheathe'], [0.3, 'dbCut'], [0.37, 'dbCut', { pitch: 1.08 }], [0.44, 'dbCut', { pitch: 1.16 }]],
+  'charged draw, perfect': [[0, 'dbStance'], [0.3, 'dbLevel', { vol: 0.9, pitch: 1.1 }], [0.7, 'dbLevel', { vol: 1, pitch: 1.3 }], [1.1, 'dbLevel', { vol: 1.1, pitch: 1.5 }], [1.15, 'dbDash', { vol: 1.1, pitch: 1.24 }], [1.15, 'dbPerfect'], [1.6, 'dbSheathe'], [1.66, 'dbCut'], [1.73, 'dbCut', { pitch: 1.08 }]],
+  'ring out': [[0, 'hitHeavy'], [0.15, 'ringOut']],
 };
 const SILENCE = 0.001; // -60 dBFS
 const WARM = 0.5;
@@ -650,6 +671,165 @@ async function runPage() {
         left = e.voices.length;
       } });
       check('floor events: every voice is released after it ends', left === 0, `voices left after 3 s: ${left}`);
+    }
+
+    // Weapons and edges: held to the levels and timing the game plays them at.
+    {
+      const by = Object.fromEntries(R.sounds.map((s) => [s.name, s]));
+      const fin = by.finisher, SETTLE = 3;
+      const dryOf = async (name, opts, seconds = 2.5) => analyze((await audioDev.render({ seconds, dry: true, script: (a) => a.play(name, opts) })).buffer);
+      const fullOf = async (name, opts) => {
+        const r = await audioDev.render({ seconds: WARM + 3, fps: 20, script: (a, t, i) => i === WARM * 20 && a.play(name, opts) });
+        return analyze(r.buffer, WARM).peak;
+      };
+      // Each sound at its loudest play in the game, then checked against finisher.
+      const loudest = {};
+      for (const n of WEAPON_SOUNDS) loudest[n] = { ...(await dryOf(n, LOUDEST[n])), fullPeak: await fullOf(n, LOUDEST[n]) };
+      const over = WEAPON_SOUNDS.filter((n) => loudest[n].peak > fin.dryPeak || loudest[n].loud > fin.loud || loudest[n].fullPeak > fin.fullPeak);
+      check(`weapons: none of the ${WEAPON_SOUNDS.length} is louder than finisher at its loudest game play (dry peak, loudest 50 ms, master peak)`, !over.length,
+        (over.length ? `louder: ${over.map((n) => `${n} ${fmtDb(loudest[n].peak)}/${fmtDb(loudest[n].loud)}/${fmtDb(loudest[n].fullPeak)}`).join(', ')}; ` : '') + `finisher ${fmtDb(fin.dryPeak)} dBFS / ${fmtDb(fin.loud)} dB / ${fmtDb(fin.fullPeak)} dBFS`);
+      const worst = async (name, pick, opts) => {
+        let x = pick === Math.max ? 0 : Infinity, l = x;
+        for (let i = 0; i < 6; i++) {
+          const a = await dryOf(name, opts);
+          x = pick(x, a.peak);
+          l = pick(l, a.loud);
+        }
+        return { peak: x, loud: l };
+      };
+      const finMin = await worst('finisher', Math.min), margin = 10 ** (-1.5 / 20);
+      const wf = await worst('gaBlastFull', Math.max, LOUDEST.gaBlastFull);
+      check('gaBlastFull: 1.5 dB under finisher on its worst of six plays (as played, pitch 0.8)', wf.peak < finMin.peak * margin && wf.loud < finMin.loud * margin,
+        `gaBlastFull at most ${fmtDb(wf.peak)} dBFS / ${fmtDb(wf.loud)} dB, finisher at least ${fmtDb(finMin.peak)} dBFS / ${fmtDb(finMin.loud)} dB`);
+      // The sharp ones peak on a few ms of attack, so they too are held to their worst of six.
+      const hotSet = ['lashCrack', 'lashSlam', 'gaBlast', 'dbDash', 'dbLevel', 'dbCut', 'ringOut'], ws = {};
+      for (const n of hotSet) ws[n] = await worst(n, Math.max, LOUDEST[n]);
+      const hot = hotSet.filter((n) => ws[n].peak > finMin.peak * margin || ws[n].loud > finMin.loud * margin);
+      check('weapons: the sharpest stay 1.5 dB under finisher on their worst of six loudest plays', !hot.length,
+        hotSet.map((n) => `${n} ${fmtDb(ws[n].peak)}/${fmtDb(ws[n].loud)}${hot.includes(n) ? ' (hot)' : ''}`).join(', '));
+      // "Biggest" by weight: the loudest 50 ms, against every other weapon sound and the swings.
+      const rivals = [...WEAPON_SOUNDS.filter((n) => n !== 'gaBlastFull' && n !== 'ringOut'), 'swingHeavy', 'swingGreat', 'swingStaff', 'swingSpin'];
+      for (const n of rivals) loudest[n] ||= await dryOf(n, LOUDEST[n]);
+      const big = rivals.filter((n) => loudest[n].loud >= loudest.gaBlastFull.loud);
+      check('gaBlastFull: the heaviest weapon sound (loudest 50 ms above every other weapon sound and swing)', !big.length,
+        `gaBlastFull ${fmtDb(loudest.gaBlastFull.loud)} dB; next ${rivals.map((n) => [n, loudest[n].loud]).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n, l]) => `${n} ${fmtDb(l)}`).join(', ')}` + (big.length ? `; not under: ${big}` : ''));
+      check('gaBlastFull: longer than gaBlast', by.gaBlastFull.dryDur > by.gaBlast.dryDur + 0.2, `${by.gaBlastFull.dryDur.toFixed(2)} vs ${by.gaBlast.dryDur.toFixed(2)} s`);
+      const crackMin = await worst('lashCrack', Math.min);
+      check('lashCrack: a sharp snap, at most 60 ms dry, peaking with the light hits on every play', by.lashCrack.dryDur <= 0.06 && crackMin.peak > by.hitLight.dryPeak * 10 ** (-2 / 20)
+        && ws.lashCrack.peak < crackMin.peak * 10 ** (2 / 20) * 0.9 ** -1,
+        `${(by.lashCrack.dryDur * 1000).toFixed(0)} ms, peak ${fmtDb(crackMin.peak)} to ${fmtDb(ws.lashCrack.peak)} dBFS over six plays (vol 1, then 0.9) vs hitLight ${fmtDb(by.hitLight.dryPeak)}`);
+      check('swingFist: shorter than the 80 ms between punches in a string', by.swingFist.dryDur < 0.08, `${(by.swingFist.dryDur * 1000).toFixed(0)} ms`);
+      check('dbSheathe: a tiny click, under 80 ms', by.dbSheathe.dryDur < 0.08, `${(by.dbSheathe.dryDur * 1000).toFixed(0)} ms`);
+
+      // A seeded Math.random gives two renders the same noise, so a comparison sees only what changed.
+      const seeded = async (fn) => {
+        const orig = Math.random;
+        let x = 0x1f2e3d4c;
+        Math.random = () => ((x = (Math.imul(x, 1664525) + 1013904223) >>> 0) / 4294967296);
+        try { return await fn(); } finally { Math.random = orig; }
+      };
+      // Pitch the game passes in moves the sound, and leaves its length alone. Pitch is read as the
+      // spectral centroid of the band that carries it (Goertzel scan), after the onset click.
+      const centroid = (buf, from, to, flo, fhi, step) => {
+        const sr = buf.sampleRate, d = buf.getChannelData(0).subarray(Math.floor(from * sr), Math.floor(to * sr));
+        let sum = 0, wsum = 0;
+        for (let f = flo; f <= fhi; f += step) {
+          const k = 2 * Math.cos((2 * Math.PI * f) / sr);
+          let s1 = 0, s2 = 0;
+          for (let i = 0; i < d.length; i++) { const s0 = d[i] + k * s1 - s2; s2 = s1; s1 = s0; }
+          const m = s1 * s1 + s2 * s2 - k * s1 * s2;
+          sum += m;
+          wsum += m * f;
+        }
+        return wsum / sum;
+      };
+      const pitched = [];
+      for (const [n, lo, hi, vlo, vhi, band] of [['gaCharge', 0.875, 1.325, 0.45, 0.45, [0, 0.06, 400, 3000, 10]], ['gaBlast', 0.85, 1.15, 0.94, 0.66, [0.01, 0.2, 20, 200, 2]],
+        ['dbLevel', 1.1, 1.5, 0.9, 1.1, [0.01, 0.25, 800, 4000, 10]], ['dbCut', 1, 1.24, 1, 1, [0.03, 0.18, 1200, 3200, 10]]]) {
+        const a = await seeded(() => audioDev.render({ seconds: 1.5, dry: true, script: (x) => x.play(n, { pitch: lo, vol: vlo }) }));
+        const b = await seeded(() => audioDev.render({ seconds: 1.5, dry: true, script: (x) => x.play(n, { pitch: hi, vol: vhi }) }));
+        const ha = centroid(a.buffer, ...band), hb = centroid(b.buffer, ...band), da = analyze(a.buffer).dur, dbb = analyze(b.buffer).dur;
+        pitched.push({ n, ok: hb > ha * (1 + (hi / lo - 1) * 0.5) && Math.abs(da - dbb) < 0.06, d: `${n} ~${ha.toFixed(0)} -> ~${hb.toFixed(0)} Hz, ${da.toFixed(2)} / ${dbb.toFixed(2)} s` });
+      }
+      check('pitched: gaCharge, gaBlast, dbLevel, dbCut follow the pitch passed in and keep their length', pitched.every((x) => x.ok), pitched.map((x) => x.d + (x.ok ? '' : ' (off)')).join(' | '));
+
+      // Fast repeats at the game's own cadence: every play sounds, none is limited, the run peaks
+      // near the same plays spread 0.6 s apart, and the master compressor, settled first, barely
+      // moves. Both renders use the same seed, so their noise matches and only the overlap differs.
+      const runs = {
+        'swingFist string': ['swingFist', Array.from({ length: 12 }, (_, i) => [i * 0.08 + (i % 3 === 2 ? 0.04 : 0), {}])],
+        'gaCharge x7': ['gaCharge', Array.from({ length: 7 }, (_, i) => [i * 0.09, { vol: 0.45, pitch: 0.8 + (i + 1) * 0.075 }])],
+        'lashCrack x8': ['lashCrack', Array.from({ length: 8 }, (_, i) => [i * 0.14, { vol: 0.9 }])],
+        'dbCut x4': ['dbCut', Array.from({ length: 4 }, (_, i) => [0.06 + i * 0.07, { pitch: 1 + i * 0.08 }])],
+      };
+      for (const fps of [60, 120]) {
+        const det = [];
+        let ok = true;
+        for (const [label, [n, seq]] of Object.entries(runs)) {
+          const play = (a, t, k, s = seq) => { while (k.j < s.length && t >= s[k.j][0]) a.play(n, s[k.j++][1]); };
+          const apart = seq.map(([, o], i) => [i * 0.6, o]), ka = { j: 0 };
+          const one = analyze((await seeded(() => audioDev.render({ seconds: apart.length * 0.6 + 0.5, dry: true, fps, script: (a, t) => play(a, t, ka, apart) }))).buffer);
+          const kd = { j: 0 }, run = await seeded(() => audioDev.render({ seconds: seq[seq.length - 1][0] + 0.8, dry: true, fps, script: (a, t) => play(a, t, kd) }));
+          let red = 0;
+          const kf = { j: 0 }, full = await audioDev.render({ seconds: SETTLE + seq[seq.length - 1][0] + 0.8, fps, script: (a, t, i, e) => {
+            if (t < SETTLE) return;
+            play(a, t - SETTLE, kf);
+            red = Math.min(red, e.comp.reduction, e.lim.reduction);
+          } });
+          const pk = analyze(run.buffer).peak, s = run.engine.stats;
+          const good = s.played === seq.length && !s.limited && !s.dropped && pk < one.peak * 10 ** (1 / 20) && red > -1.5 && full.engine.stats.played === seq.length;
+          ok &&= good;
+          det.push(`${label}: played ${s.played}/${seq.length}, run peak ${fmtDb(pk)} vs one ${fmtDb(one.peak)} dBFS, comp ${red.toFixed(1)} dB${good ? '' : ' (off)'}`);
+        }
+        check(`fast repeats at ${fps} fps: all play, none limited, no build-up`, ok, det.join(' | '));
+      }
+
+      // dbCut: cuts landing in one instant all sound, spread apart so they cannot sum into a clip.
+      const starts = [];
+      const same = await audioDev.render({ seconds: 0.8, dry: true, script: (a, t, i, e) => {
+        for (let k = 0; k < 6; k++) a.play('dbCut', { pitch: 1 + k * 0.08 });
+        for (const v of e.voices) starts.push(v.t);
+      } });
+      const sp = analyze(same.buffer).peak, gapMs = (starts[1] - starts[0]) * 1000;
+      check('dbCut: four in one instant play staggered, extra ones merge, the stack stays under finisher', same.engine.stats.played === 4 && same.engine.stats.limited === 2 && gapMs > 15 && sp < fin.dryPeak,
+        `${JSON.stringify(same.engine.stats)}, starts ${gapMs.toFixed(0)} ms apart, stack peak ${fmtDb(sp)} vs finisher ${fmtDb(fin.dryPeak)} dBFS`);
+      const sameFull = await audioDev.render({ seconds: WARM + 1, fps: 20, script: (a, t, i) => { if (i === WARM * 20) for (let k = 0; k < 4; k++) a.play('dbCut', { pitch: 1 + k * 0.08 }); } });
+      check('dbCut: four in one instant through the master chain stay unclipped', analyze(sameFull.buffer, WARM).peak < fin.fullPeak, `peak ${fmtDb(analyze(sameFull.buffer, WARM).peak)} vs finisher ${fmtDb(fin.fullPeak)} dBFS`);
+      // Cuts a few ms apart (one per 128-sample render block) are spread the same way.
+      const near = [];
+      const nr = await audioDev.render({ seconds: 0.6, dry: true, fps: 44100 / 128, script: (a, t, i, e) => {
+        if (i < 6) a.play('dbCut', { pitch: 1 + i * 0.08 });
+        if (i === 6) for (const v of e.voices) near.push(v.t);
+      } });
+      const nearGaps = near.slice(1).map((x, k) => (x - near[k]) * 1000);
+      check('dbCut: cuts landing a few ms apart also start 22 ms apart, four at most', nr.engine.stats.played === 4 && nr.engine.stats.limited === 2 && nearGaps.every((g) => g > 21),
+        `${JSON.stringify(nr.engine.stats)}, gaps ${nearGaps.map((g) => g.toFixed(0)).join('/')} ms`);
+      const other = await audioDev.render({ seconds: 0.3, dry: true, script: (a, t, i, e) => { for (let k = 0; k < 3; k++) a.play('swingFist'); } });
+      check('rate limit: a name without stagger still merges same-instant plays', other.engine.stats.played === 1 && other.engine.stats.limited === 2, JSON.stringify(other.engine.stats));
+
+      // Priorities: the big moments steal under a full voice cap; the charge blip yields.
+      const filler = ['swingLight', 'swingHeavy', 'hitLight', 'hitHeavy', 'block', 'clash', 'jump', 'dash', 'land', 'thud', 'bounce', 'bolt',
+        'lob', 'beep', 'hurt', 'parry', 'uiSelect', 'crit', 'catch', 'throw', 'kill', 'swingGreat', 'swingStaff', 'pin'];
+      const important = ['gaBlastFull', 'lashCrack', 'dbPerfect', 'gaFull', 'ringOut'];
+      let res = null;
+      await audioDev.render({ seconds: 0.5, dry: true, script: (a, t, i, e) => {
+        filler.forEach((n) => a.play(n));
+        const s0 = { ...e.stats };
+        important.forEach((n) => a.play(n));
+        const s1 = { ...e.stats };
+        a.play('gaCharge');
+        res = { filled: s0.played, important: s1.played - s0.played, frequent: e.stats.played - s1.played };
+      } });
+      check(`priorities: under a full voice cap, ${important.join('/')} steal; gaCharge yields`, res.filled === 24 && res.important === important.length && res.frequent === 0, JSON.stringify(res));
+
+      // Clean-up: once every weapon sound has finished, no voice or node is left behind.
+      let left = -1;
+      await audioDev.render({ seconds: 3.5, fps: 20, script: (a, t, i, e) => {
+        if (i === 0) WEAPON_SOUNDS.forEach((n) => a.play(n, LOUDEST[n]));
+        if (i === 1) for (let k = 0; k < 2; k++) a.play('dbCut', { pitch: 1 + k * 0.08 }); // 24 voices: no steals
+        left = e.voices.length;
+      } });
+      check('weapons: every voice is released after it ends', left === 0, `voices left after 3 s: ${left}`);
     }
 
     // Rate limit and polyphony.

@@ -96,7 +96,9 @@ const director = new Director(world, {
 
 // Controller rumble: the heavier the event, the harder the shake.
 const RUMBLE = { hitLight: [0.15, 0.3, 50], hitHeavy: [0.5, 0.5, 90], hitSpike: [0.6, 0.5, 110], hitLaunch: [0.4, 0.5, 90], parry: [0.3, 0.9, 110], hurt: [0.9, 0.6, 160], kill: [0.5, 0.7, 120],
-  slam: [0.8, 0.4, 140], explode: [0.8, 0.5, 160], guardBreak: [0.9, 0.7, 200], stagger: [0.6, 0.8, 160], finisher: [1, 1, 600], bossPhase: [0.9, 0.7, 400], powerNova: [0.9, 0.7, 220], pillar: [0.6, 0.4, 140] };
+  slam: [0.8, 0.4, 140], explode: [0.8, 0.5, 160], guardBreak: [0.9, 0.7, 200], stagger: [0.6, 0.8, 160], finisher: [1, 1, 600], bossPhase: [0.9, 0.7, 400], powerNova: [0.9, 0.7, 220], pillar: [0.6, 0.4, 140],
+  gaBlast: [0.7, 0.5, 160], gaBlastFull: [1, 0.8, 320], lashCrack: [0.1, 0.5, 40], lashSlam: [0.8, 0.5, 160], dbCut: [0.3, 0.7, 70], dbPerfect: [0.2, 0.9, 120], surprise: [0.8, 0.8, 300], shadeArrive: [0.9, 0.6, 400],
+  stampede: [1, 0.5, 500], quake: [1, 0.6, 700], beaconFire: [1, 1, 450], propBreak: [0.5, 0.7, 120], ringOut: [0.6, 0.4, 200], weaponSwap: [0.2, 0.6, 60] };
 function rumble(name) {
   const r = RUMBLE[name];
   if (!r || !input.usedPad || !navigator.getGamepads) return;

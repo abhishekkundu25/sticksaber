@@ -12,6 +12,7 @@
 
 const RATE_LIMIT = 0.03; // s between triggers of the same one-shot name
 const VOICE_CAP = 24; // simultaneous one-shot voices
+const STACK_MAX = 4; // plays of one staggered name that may wait their turn at once
 const HUM_CAP = 6;
 const HUM_TIMEOUT = 0.2; // s without an update before a hum fades by itself
 const HUM_REAP = 0.6; // s without an update before a hum's nodes are torn down
@@ -388,7 +389,10 @@ class Voice {
 // ---------------------------------------------------------------------------------------------
 // One-shot definitions. vary: random pitch spread per play. rev: reverb send. Gains live in MIX.
 // pri: 0 may be dropped under load, 2 may steal any voice. gap: seconds between triggers of
-// the same name, for sounds the game repeats faster than RATE_LIMIT allows.
+// the same name, for sounds the game repeats faster than RATE_LIMIT allows. stagger: with gap 0,
+// each play starts at least this many seconds after the last one of the same name, so plays that
+// land together do not line up and sum into a clip. A play that would start more than STACK_MAX - 1
+// steps ahead is dropped.
 
 const SFX = {
   // ----- Blades -----
@@ -1541,7 +1545,185 @@ const SFX = {
     v.tone({ at: 0.11, type: 'sawtooth', unison: [-10, 10], fp: [[0, 60], [0.05, 120], [0.13, 105]], gp: [[0, 0], [0.02, 1], [0.13, 0]], g: 0.16, lp: { pts: [[0, 300], [0.05, 2400], [0.13, 600]], q: 2 } });
     v.crackle({ at: 0.11, d: 0.08, g: 0.2 });
   } },
-  // A later batch for the whip, gauntlets and drawn blade goes after this point.
+
+  // ----- Whip -----
+  // Lash swing: thin air whose band keeps climbing to the end, with a faint whistle under it, so it
+  // reads as the whip uncoiling forward rather than a blade's rise and fall.
+  swingLash: { vary: 0.06, fn(v) {
+    const d = v.r(0.19, 0.23), gp = [[0, 0], [d * 0.65, 1], [d, 0]];
+    v.noise({ gp, g: 0.5, bp: { pts: [[0, 700], [d, 5500]], q: 1.6 } });
+    v.noise({ gp, g: 0.12, hp: { f: 3500, to: 7000 } });
+    v.tone({ fp: [[0, 380], [d, 1500]], gp, g: 0.04 });
+  } },
+  // The crack: the tip outrunning sound gives a near-instant pressure spike, so this is a hard square
+  // edge and a click a few ms after it, over a 35 ms burst of bright noise. The square edge sets the
+  // peak, so every crack lands at the same level; noise alone would swing it by 5 dB a play. Nothing
+  // in it lasts, so a run of cracks never smears; the reverb send gives the room's slap back.
+  lashCrack: { vary: 0.05, pri: 2, rev: 0.18, fn(v) {
+    v.tone({ type: 'square', f: 1100, a: 0.0002, h: 0.0006, d: 0.004, g: 0.9, hp: 700 });
+    v.click({ at: 0.0035, g: 0.35, hp: 2500, d: 0.004 });
+    v.noise({ a: 0.0003, d: 0.035, g: 0.3, hp: 2200 });
+    v.noise({ a: 0.0005, d: 0.05, g: 0.25, bp: { f: 4000, q: 1.2 } });
+    v.tone({ fp: [[0, 900], [0.02, 260]], a: 0.0005, d: 0.03, g: 0.18 });
+  } },
+  // Tip strike: a tick and a small high FM bell left ringing.
+  lashTip: { vary: 0.04, rev: 0.15, fn(v) {
+    v.click({ g: 0.4, hp: 3500, d: 0.004 });
+    v.fm({ f: 2700, ratio: 1.5, index: 1.2, index1: 0.05, a: 0.0008, d: 0.2, g: 0.13 });
+    v.tone({ f: 2700 * 2.76, a: 0.0005, d: 0.06, g: 0.03 });
+  } },
+  // Wrap: the rope whirring round the target, then pulled taut: a thunk and a low plucked twang.
+  lashWrap: { vary: 0.05, fn(v) {
+    const W = 0.11;
+    v.noise({ gp: [[0, 0], [0.02, 0.6], [W, 1], [W + 0.01, 0]], g: 0.35, bp: { pts: [[0, 900], [W, 2200]], q: 2 }, am: { rate: 38, depth: 0.7 } });
+    v.click({ at: W, g: 0.45, hp: 1500, d: 0.008 });
+    v.thump(170, 75, 0.12, 0.7, { at: W, drive: 0.4 });
+    v.fm({ at: W, f: 150, ratio: 1, index: 2.5, index1: 0.2, a: 0.001, d: 0.2, g: 0.12, lp: 1800 });
+  } },
+  // Heavy pull: the rope creaking under load (a stick-slip saw), and a heavy rush of air that grows
+  // as it comes toward the listener, stopped by a low knock.
+  lashPull: { vary: 0.04, fn(v) {
+    const D = 0.3, gp = [[0, 0], [D * 0.5, 0.45], [D * 0.92, 1], [D, 0]];
+    v.tone({ type: 'sawtooth', fp: [[0, 70], [D, 105]], gp: [[0, 0], [0.02, 1], [D * 0.8, 0.6], [D, 0]], g: 0.3, drive: 0.6, bp: { f: 700, q: 4 }, am: { rate: 31, depth: 0.7 } });
+    v.noise({ color: 'pink', gp, g: 0.55, bp: { pts: [[0, 300], [D, 1300]], q: 1.2 } });
+    v.noise({ gp, g: 0.2, bp: { pts: [[0, 1200], [D, 3500]], q: 1.4 } });
+    v.thump(120, 55, 0.09, 0.55, { at: D - 0.02 });
+  } },
+  // Slam: a deep driven thud under the rope snapping tight.
+  lashSlam: { vary: 0.04, pri: 2, rev: 0.2, fn(v) {
+    v.click({ g: 0.6, hp: 2500, d: 0.006 });
+    v.noise({ a: 0.0004, d: 0.03, g: 0.3, bp: { f: 3000, q: 1.2 } });
+    v.thump(85, 30, 0.42, 1, { drive: 0.7, h: 0.02 });
+    v.noise({ color: 'brown', a: 0.001, d: 0.28, g: 0.7, lp: { f: 1800, to: 180 } });
+    v.tone({ f: 40, a: 0.005, d: 0.4, g: 0.3 });
+  } },
+  // Bounced off a guard: a dull padded slap and a quick boing as the rope rebounds.
+  lashDeflect: { vary: 0.05, fn(v) {
+    v.noise({ color: 'pink', a: 0.001, d: 0.06, g: 0.6, bp: { f: 900, q: 1.3 } });
+    v.thump(260, 140, 0.06, 0.4);
+    v.tone({ type: 'triangle', fp: [[0, 260], [0.05, 150], [0.13, 210]], gp: [[0, 0], [0.005, 1], [0.08, 0.5], [0.16, 0]], g: 0.25, lp: 1200 });
+  } },
+  // Wind-up: three whirls overhead, each faster and higher, over a low hum that pulses with them.
+  lashWind: { vary: 0.04, fn(v) {
+    [[0, 0.11, 1], [0.09, 0.09, 1.25], [0.16, 0.08, 1.55]].forEach(([at, d, k], i) => {
+      v.noise({ at, gp: [[0, 0], [d * 0.5, 0.6 + 0.2 * i], [d, 0]], g: 0.35, bp: { pts: [[0, 500 * k], [d * 0.5, 1400 * k], [d, 700 * k]], q: 1.5 } });
+    });
+    v.tone({ fp: [[0, 65], [0.24, 105]], gp: [[0, 0], [0.04, 0.7], [0.2, 1], [0.26, 0]], g: 0.3, am: { rate: 12, depth: 0.5 } });
+  } },
+
+  // ----- Gauntlets -----
+  // Jab: a tight, short push of air with a little low body; done well inside the 80 ms between
+  // punches in a string, so a run stays a run of distinct hits.
+  swingFist: { vary: 0.08, fn(v) {
+    v.noise({ gp: [[0, 0], [0.018, 1], [0.06, 0]], g: 0.5, bp: { pts: [[0, 700], [0.018, 2200], [0.06, 1000]], q: 1.8 } });
+    v.noise({ color: 'pink', gp: [[0, 0], [0.012, 1], [0.05, 0]], g: 0.3, bp: { f: 450, q: 1 } });
+    v.tone({ fp: [[0, 170], [0.05, 95]], gp: [[0, 0], [0.01, 1], [0.055, 0]], g: 0.12 });
+  } },
+  // A punch adds to the charge: a soft rising blip. The game passes the pitch, so it is not varied.
+  gaCharge: { vary: 0, pri: 0, fn(v) {
+    v.tone({ type: 'triangle', fp: [[0, 700], [0.05, 1050]], a: 0.002, d: 0.08, g: 0.3 });
+    v.tone({ fp: [[0, 1400], [0.05, 2100]], a: 0.002, d: 0.05, g: 0.06 });
+  } },
+  // Full charge: an electric crackle and zap, then a two-bell chime a fifth apart.
+  gaFull: { vary: 0, pri: 2, rev: 0.25, fn(v) {
+    v.click({ g: 0.35, hp: 3000, d: 0.006 });
+    v.crackle({ d: 0.3, g: 0.55, bp: { f: 3500, q: 0.7 } });
+    v.tone({ type: 'sawtooth', unison: [-12, 12], fp: [[0, 300], [0.08, 1600]], gp: [[0, 0], [0.01, 1], [0.08, 0.5], [0.1, 0]], g: 0.08, bp: { pts: [[0, 800], [0.08, 4000]], q: 2 } });
+    v.bell(88, { at: 0.03, d: 0.4, g: 0.1 });
+    v.bell(95, { at: 0.07, d: 0.5, g: 0.1 });
+  } },
+  // Wind-up for the charged punch: a hum that climbs and brightens as the fist draws back, cut off
+  // where the punch takes over.
+  gaWind: { vary: 0.03, fn(v) {
+    const D = 0.24, gp = [[0, 0], [0.05, 0.4], [D * 0.9, 1], [D, 0]];
+    v.tone({ type: 'sawtooth', unison: [-9, 9], fp: [[0, 80], [D, 200]], gp, g: 0.12, lp: { pts: [[0, 300], [D, 1800]], q: 3 } });
+    v.tone({ fp: [[0, 110], [D, 300]], gp, g: 0.15, vib: { rate: 16, depth: 20 } });
+    v.noise({ gp, g: 0.12, bp: { pts: [[0, 600], [D, 2500]], q: 1.5 } });
+  } },
+  // Charged punch: a deep boom. The game lowers the pitch as the charge grows, so it is not varied.
+  gaBlast: { vary: 0, rev: 0.2, fn(v) {
+    v.click({ g: 0.5, hp: 1500, d: 0.01 });
+    v.thump(110, 38, 0.38, 1, { drive: 0.6, h: 0.015 });
+    v.noise({ color: 'brown', a: 0.001, d: 0.3, g: 0.75, lp: { f: 2500, to: 150 } });
+    v.noise({ color: 'pink', a: 0.001, d: 0.12, g: 0.35, bp: { f: 900, to: 300, q: 0.8 } });
+  } },
+  // Full-charge blast: the weapon's biggest sound. A huge driven boom and sub, a jagged crack of
+  // bright noise, and an inharmonic ring left over it. Kept 1.5 dB or more under finisher.
+  gaBlastFull: { vary: 0, pri: 2, rev: 0.35, fn(v) {
+    v.click({ g: 0.3, hp: 1200, d: 0.014 });
+    v.thump(95, 26, 0.85, 1, { drive: 0.9, h: 0.05 });
+    v.tone({ f: 36, a: 0.008, h: 0.1, d: 0.8, g: 0.45 });
+    v.noise({ color: 'brown', a: 0.001, d: 0.6, g: 0.9, lp: { f: 3500, to: 120 } });
+    v.noise({ at: 0.004, gp: [[0, 0], [0.002, 1], [0.025, 0.3], [0.04, 0.85], [0.07, 0.25], [0.1, 0.5], [0.28, 0]], g: 0.22, hp: 1800 });
+    v.crackle({ d: 0.45, g: 0.28, bp: { f: 2800, q: 0.6 } });
+    v.fm({ f: 1320, ratio: 2.414, index: 3, index1: 0.2, a: 0.002, d: 0.8, g: 0.08, am: { rate: 11, depth: 0.35 } });
+    v.tone({ f: 2640, unison: [0, 9], a: 0.02, d: 0.6, g: 0.025 });
+  } },
+
+  // ----- Drawn blade -----
+  // Draw: the steel "shing" of the blade leaving the mouth of the sheath, a fast-rising scrape that
+  // leaves a metallic ring behind it, over a short whoosh.
+  swingDraw: { vary: 0.05, fn(v) {
+    v.noise({ gp: [[0, 0], [0.01, 1], [0.07, 0.6], [0.1, 0]], g: 0.35, bp: { pts: [[0, 3000], [0.08, 7500]], q: 3 }, am: { rate: 70, depth: 0.35 } });
+    v.fm({ f: v.r(2300, 2500), ratio: 1.41, index: 2, index1: 0.15, a: 0.003, d: 0.25, g: 0.06 });
+    v.tone({ f: 4900, a: 0.003, d: 0.12, g: 0.015 });
+    v.whoosh({ at: 0.02, d: 0.16, g: 0.35, lo: 500, hi: 2600, end: 900 });
+  } },
+  // Sheathe: the guard meeting the sheath. Two tiny metal clicks, then a small high tick.
+  dbSheathe: { vary: 0.03, fn(v) {
+    v.click({ g: 0.45, hp: 3500, d: 0.004 });
+    v.click({ at: 0.012, g: 0.6, hp: 2500, d: 0.005 });
+    v.fm({ at: 0.012, f: 3400, ratio: 2.76, index: 1, index1: 0.05, a: 0.0005, d: 0.05, g: 0.1 });
+  } },
+  // Charge stance: a low intake of breath and a soft hum settling in under it.
+  dbStance: { vary: 0.02, fn(v) {
+    const gp = [[0, 0], [0.18, 1], [0.5, 0]];
+    v.noise({ color: 'pink', gp, g: 0.35, bp: { pts: [[0, 500], [0.18, 900], [0.5, 600]], q: 0.8 } });
+    v.noise({ gp, g: 0.04, hp: 3500 });
+    v.tone({ f: 110, gp: [[0, 0], [0.12, 0.7], [0.3, 1], [0.6, 0]], g: 0.2, vib: { rate: 5, depth: 8 } });
+    v.tone({ type: 'triangle', f: 220.5, gp: [[0, 0], [0.12, 0.7], [0.3, 1], [0.6, 0]], g: 0.05 });
+  } },
+  // Charge level reached: a bright chime. The game raises the pitch a step per level.
+  dbLevel: { vary: 0, pri: 2, rev: 0.25, fn(v) {
+    v.click({ g: 0.15, hp: 4000, d: 0.004 });
+    v.fm({ f: mtof(84), ratio: 3, index: 1.5, index1: 0.05, a: 0.001, d: 0.38, g: 0.12 });
+    v.tone({ f: mtof(84) * 4.02, a: 0.001, d: 0.12, g: 0.025 });
+  } },
+  // Released dash: air torn open. A fast, bright, rough band shooting upward, over a short low push.
+  dbDash: { vary: 0.03, pri: 2, fn(v) {
+    v.click({ g: 0.3, hp: 2500, d: 0.006 });
+    v.noise({ gp: [[0, 0], [0.008, 1], [0.1, 0.35], [0.2, 0]], g: 0.55, bp: { pts: [[0, 2000], [0.06, 7000], [0.2, 4000]], q: 1.8 }, am: { rate: 90, depth: 0.5 } });
+    v.noise({ color: 'pink', gp: [[0, 0], [0.01, 1], [0.16, 0]], g: 0.35, bp: { pts: [[0, 500], [0.16, 1500]], q: 1 } });
+    v.tone({ type: 'sawtooth', fp: [[0, 300], [0.12, 1400]], gp: [[0, 0], [0.01, 1], [0.15, 0]], g: 0.05, bp: { pts: [[0, 800], [0.12, 4000]], q: 3 } });
+  } },
+  // Delayed cut landing: a crisp slice and a short ringing bloom. The game raises the pitch a step for
+  // each cut in a row. Cuts that land together are spread 22 ms apart by `stagger`, so they sound as
+  // a flurry rather than one cut summed into a clip.
+  dbCut: { vary: 0, gap: 0, stagger: 0.022, rev: 0.15, fn(v) {
+    v.click({ g: 0.3, hp: 4000, d: 0.005 });
+    v.noise({ a: 0.0004, d: 0.045, g: 0.4, hp: { f: 6000, to: 2500 } });
+    v.thump(230, 100, 0.07, 0.4);
+    v.fm({ f: 1900, ratio: 2.76, index: 2, index1: 0.1, a: 0.001, d: 0.18, g: 0.11 });
+    v.noise({ gp: [[0, 0], [0.015, 1], [0.15, 0]], g: 0.08, bp: { f: 2500, q: 2 } });
+  } },
+  // Perfect draw: a clear, long bell ping with a soft shimmer, made to carry through the slow motion
+  // the game starts with it.
+  dbPerfect: { vary: 0, pri: 2, rev: 0.4, fn(v) {
+    v.fm({ f: mtof(93), ratio: 2, index: 1, index1: 0.03, a: 0.001, d: 0.9, g: 0.14 });
+    v.tone({ f: mtof(93) * 3.01, a: 0.001, d: 0.35, g: 0.03 });
+    v.tone({ f: mtof(105), unison: [0, 7], a: 0.04, d: 0.6, g: 0.015, am: { rate: 9, depth: 0.3 } });
+  } },
+
+  // ----- The room -----
+  // Over the edge: a falling whistle, then a soft boom far below (low-passed and sent to the reverb so
+  // it reads as distant).
+  ringOut: { vary: 0.03, pri: 2, rev: 0.5, fn(v) {
+    const D = 0.45;
+    v.tone({ fp: [[0, 1700], [D, 280]], gp: [[0, 0], [0.02, 1], [D * 0.8, 0.7], [D, 0]], g: 0.16, vib: { rate: 7, depth: 15 } });
+    v.noise({ gp: [[0, 0], [0.03, 1], [D, 0]], g: 0.15, bp: { pts: [[0, 3000], [D, 600]], q: 2 } });
+    v.thump(65, 28, 0.5, 0.7, { at: D, lp: 400 });
+    v.noise({ color: 'brown', at: D, a: 0.01, d: 0.45, g: 0.5, lp: 350 });
+  } },
 };
 
 // Mix: per-sound voice gain, set from measured dry peaks (node tools/audio-test.js) toward
@@ -1571,6 +1753,12 @@ const MIX = {
   surprise: .33, shadeArrive: .42, lightsOut: .4, stampedeWarn: .57, stampede: .25, quake: .36, thunder: .34, cacheDrop: .3, propBreak: .43,
   pickupShard: .51, buy: 2.04, uiDeny: .22, uiBack: .6, doorsOpen: .78, doorPick: .46,
   pactTake: .49, rest: 1.07, challengeMet: 1.76, objectiveDone: .72, beaconFire: .26, markSet: 2.21, allyFreed: 1.17, courierGone: 1.64, bountyWon: 2.04, weaponSwap: .78,
+  // Weapons, at the volume and pitch the game plays them: swings -8 to -11 dBFS, the lash crack, cuts,
+  // dash and impacts -5 to -8, ticks, chimes and wind-ups -8 to -15. gaBlastFull carries the most weight
+  // (loudest 50 ms), and it and the sharp ones stay 1.5 dB or more under finisher on their worst play.
+  swingLash: .86, lashCrack: .33, lashTip: .83, lashWrap: .4, lashPull: .72, lashSlam: .3, lashDeflect: .79, lashWind: .61,
+  swingFist: 1, gaCharge: 1.4, gaFull: 1.35, gaWind: 1, gaBlast: .3, gaBlastFull: .3,
+  swingDraw: 1.88, dbSheathe: .52, dbStance: .65, dbLevel: 1.77, dbDash: 1.1, dbCut: .62, dbPerfect: 2.8, ringOut: .56,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -2463,6 +2651,7 @@ class Engine {
     this.offline = offline;
     this.voices = [];
     this.lastPlay = new Map();
+    this.stacks = new Map();
     this.hums = new Map();
     this.loops = new Map();
     this.dyingLoops = [];
@@ -2531,6 +2720,16 @@ class Engine {
     }
     const vol = clamp(num(o?.vol, 1), 0, 4);
     if (vol <= 0) return;
+    let at = now;
+    if (def.stagger) {
+      const prev = this.stacks.get(name);
+      if (prev !== undefined) at = Math.max(now, prev + def.stagger);
+      if (at - now > (STACK_MAX - 1) * def.stagger + 1e-6) {
+        this.stats.limited++;
+        return;
+      }
+      this.stacks.set(name, at);
+    }
     this.sweep(now);
     const pri = def.pri ?? 1;
     if (this.activeVoices() >= VOICE_CAP && !this.steal(pri, now)) {
@@ -2541,7 +2740,7 @@ class Engine {
     const vary = def.vary ?? 0.04;
     const p = clamp(num(o?.pitch, 1), 0.25, 4) * this.sag * (1 + (Math.random() * 2 - 1) * vary);
     const c = this.ctx, out = gainNode(c, vol * (MIX[name] ?? 1));
-    const v = new Voice(this, now, p, out);
+    const v = new Voice(this, at, p, out);
     v.name = name;
     v.pri = pri;
     v.nodes = [out];
