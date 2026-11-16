@@ -545,12 +545,18 @@ The half-resolution backdrop tier cuts the pixels drawn per frame by 41% (3.83 t
 
 These are the only balance data there is. The owner has played the hundred floors as they were before this layer; nobody has played it since.
 
-| Run, on Adept | Skilled script (reacts to 85% of threats) | Average (50 to 60%) |
-| --- | --- | --- |
-| Sprint | Wins in 23 to 39 minutes with 0 to 9 falls | Wins in 28 to 42 minutes with 3 to 17 falls |
-| Climb | Wins in about 70 minutes with about 4 falls | Wins in about 90 minutes with about 6 falls |
+| Run | Skilled script (reacts to 85 to 90% of threats) | Average (55%) | Weak (30%) |
+| --- | --- | --- | --- |
+| Sprint, Adept | Wins in 23 to 40 minutes with 0 to 5 falls | Wins with 6 to 15 falls | Wins with 18 to 28 falls |
+| Climb, Student | Wins without falling | Wins with 0 or 1 falls | Wins with 2 falls |
+| Climb, Adept | Wins in 70 to 90 minutes with 2 to 7 falls | Wins with 8 to 29 falls | Wins with about 65 falls |
+| Climb, Master | Wins with 19 to 48 falls, or stops at the keeper of floor 90 | Wins with 45 to 62 falls, or stops at floor 90 | Stops at floor 90 |
 
-On Master a skilled script wins a sprint with 6 to 9 falls, most of them in the first sector, where a fall restarts the floor and the build is still small. Falls gather at the first champion and at the keeper on floor 20. The three new weapons win sprints in scripted hands, the drawblade with the most falls. A script reacts better than a person and plans worse, so expect a person to fall more often and to make more of the doors.
+The climb is too flat and then too steep. On Adept even the weak script falls fewer than five times in the first eight sectors, and then nearly all of its falls come in sectors IX and X. The keeper of floor 90 is the wall on Master. The mid-climb wants to be harder and the last two sectors gentler; that has not been done.
+
+On Master a skilled script wins a sprint with 6 to 9 falls, most of them in the first sector, where a fall restarts the floor and the build is still small. In a sprint, falls gather at the first champion and at the keeper on floor 20.
+
+The weapons, climbing on Adept in skilled scripted hands: twin blades and staff 2 falls, gauntlets 7, greatsword 12, drawblade 16, and the lash 71, nearly all in the last two sectors. The script uses the lash badly at the top of the tower, where it cannot keep enemies at the whip's length, and a person may too. A script that only uses the light string stops at floor 15. A script reacts better than a person and plans worse, so expect a person to fall more often and to make more of the doors.
 
 ## Sound
 
