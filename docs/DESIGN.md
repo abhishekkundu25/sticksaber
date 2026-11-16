@@ -519,24 +519,37 @@ The half-resolution backdrop tier cuts the pixels drawn per frame by 41% (3.83 t
 
 ## Tests
 
-`npm test` runs in about ten seconds: 38 simulation tests in about two, then the benchmark.
+`npm test` runs the simulation tests in about forty seconds, then the benchmark.
 
-- Simulation tests (Node, about three seconds): the same seed replays a fight exactly; a run is a pure function of seed and difficulty; sixty generated runs obey the rules (sector shape, unlock order, strains never before their introduction, caps, one Forgemaster, every arena family used, no enemy in the player's colour); health, damage and budget rise with the floor and the difficulties are ordered; every move, generated ones included, is well formed and telegraphs in time; the whole roster of two seeds fights without errors; floor 1 can be cleared; a champion, three sector bosses, the Forgemaster and the Proctor can be beaten; augments, each of the nine powers, the draft, saved runs and strain traits behave; each bond does what it says and breaks the way it says; bridges hold and overload, vents burn and walls shock; techniques change their moves; the parry lesson holds the wave; every weapon form is complete, reachable and within its damage band, and clears floor 1; every animal plan generates for fifty seeds, fights, falls, dies and can be cut.
+- Simulation tests (Node):
+  - The same seed replays a fight exactly, and a run is a pure function of seed, difficulty and length.
+  - Generated runs of both lengths obey the rules: sector shape, unlock order, strains never before their introduction, caps, one Forgemaster, every arena family used, no enemy in the player's colour.
+  - Health, damage and budget rise with the floor, and the difficulties are ordered.
+  - Every move, generated ones included, is well formed and telegraphs in time.
+  - A champion, three sector bosses, the Forgemaster and the Proctor can be beaten.
+  - Augments, each of the nine powers, the cards, saved runs, strain traits, bonds, bridges, vents, walls and techniques behave.
+  - Every weapon is complete, reachable and within its damage band, and a fighter that is not the player can use each one's signature.
+  - Every animal plan generates for fifty seeds, fights, falls limp as itself, gets up and dies.
+  - Every sector has one surprise, the Shade returns stronger, and each surprise breaks in, does what it says and leaves the floor finishable.
+  - The Shade is built from the weapon and powers in hand, and none of its copied cuts lands unannounced.
+  - Each objective is won by doing the thing. A challenge pays when met and not otherwise.
+  - Doors, the quartermaster, pacts, the armoury, the second sheath and boons do what their cards say.
+  - Open edges, ledges and the sliding bridge behave: nothing is dropped over an edge, nothing walks off one, a knocked enemy falls and the room gets the kill, the player is hauled back.
+  - What carries over between runs is filed where the codex reads it, and survives missing or corrupt storage.
 - Benchmark: simulation cost per step on a late floor with a full build and in a crowd of 120, then rendering in headless Chrome with the GPU off. It asserts milliseconds per frame against a loose budget, and draw calls and megapixels per frame against tight ones, because those two do not depend on the machine.
 
-`npm run fuzz` is the slow soak. It drives random input through sample floors, champions and bosses, then sends scripted players of three skill levels up all hundred floors on each difficulty and prints where they fell.
+`npm run fuzz` is the slow soak. It drives random input through sample floors, champions, bosses, every surprise and every objective, then sends scripted players of three skill levels through sprints and up all hundred floors on each difficulty, and prints where they fell. `npm run smoke` plays the real page in headless Chrome, a boss fight to the end included, and fails on any runtime error.
 
 ### What the scripted players say
 
-These are the only balance data there is. Nobody has played the hundred floors by hand.
+These are the only balance data there is. The owner has played the hundred floors as they were before this layer; nobody has played it since.
 
-| Difficulty | Skilled script (reacts to 85 to 90% of threats) | Average (55%) | Weak (30%) |
-| --- | --- | --- | --- |
-| Student | Wins without falling | Wins with a few falls | Wins with 3 to 6 falls |
-| Adept | Wins with 3 to 8 falls | Wins with 10 to 50 falls, most of them in the last sector | Often stops at a sector boss |
-| Master | Reaches the last sector after 60 falls | Stops in sectors III to V | Stops in sector II or III |
+| Run, on Adept | Skilled script (reacts to 85% of threats) | Average (50 to 60%) |
+| --- | --- | --- |
+| Sprint | Wins in 23 to 39 minutes with 0 to 9 falls | Wins in 28 to 42 minutes with 3 to 17 falls |
+| Climb | Wins in about 70 minutes with about 4 falls | Wins in about 90 minutes with about 6 falls |
 
-A run takes a scripted player 80 to 130 minutes of game time. A script that only uses the light string stops at the second champion.
+On Master a skilled script wins a sprint with 6 to 9 falls, most of them in the first sector, where a fall restarts the floor and the build is still small. Falls gather at the first champion and at the keeper on floor 20. The three new weapons win sprints in scripted hands, the drawblade with the most falls. A script reacts better than a person and plans worse, so expect a person to fall more often and to make more of the doors.
 
 ## Sound
 

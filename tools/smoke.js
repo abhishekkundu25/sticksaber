@@ -54,21 +54,32 @@ try {
   if (scenario === 'all' || scenario === 'run') {
     // One screenshot a few seconds into a floor of each sector: skirmishes, a champion, two keepers.
     for (const f of [1, 12, 23, 34, 45, 56, 60, 67, 78, 89, 100]) {
-      await ev((n) => { const g = window.__game; g.startRun(n, 4242); g.world.player.invuln = 99; }, f);
+      await ev((n) => { const g = window.__game, d = g.director; g.startRun(n, 4242, 'normal', null, 'climb'); if (d.state === 'draft') d.choose(0); g.world.player.invuln = 99; }, f);
       await sleep(f % 5 ? 5200 : 4600);
       await shot(`floor-${String(f).padStart(3, '0')}`);
     }
     // The draft that follows a cleared floor.
-    await ev(() => { const g = window.__game, d = g.director; g.startRun(34, 4242); d.draft = d.offer(34); d.state = 'draft'; d.t = 0; });
+    await ev(() => { const g = window.__game, d = g.director; g.startRun(34, 4242, 'normal', null, 'climb'); d.draft = d.offer(34); d.state = 'draft'; d.t = 0; });
     await sleep(900);
     await shot('draft');
+    // A sprint: its floors, then the screens between them (doors, the quartermaster, a shrine, an armoury).
+    for (const f of [1, 8, 16, 24, 30]) {
+      await ev((n) => { const g = window.__game, d = g.director; g.startRun(n, 4242, 'normal', null, 'sprint'); if (d.state === 'draft') d.choose(0); g.world.player.invuln = 99; }, f);
+      await sleep(4800);
+      await shot(`sprint-${String(f).padStart(2, '0')}`);
+    }
+    for (const room of ['doors', 'shop', 'shrine', 'armory']) {
+      await ev((room) => { const g = window.__game, d = g.director; g.world.shards = 160; d.draft = d[room](9); d.state = 'draft'; d.t = 0; }, room);
+      await sleep(900);
+      await shot(`room-${room}`);
+    }
   }
   if (scenario === 'all' || scenario === 'boss') {
     // Let the scripted player fight the boss at a fixed timestep and grab each signature moment once.
     const shots = await ev(async () => {
       const { BotInput } = await import('/src/game/bot.js');
       const g = window.__game, w = g.world;
-      g.app.manual = true; g.startRun(100, 99);
+      g.app.manual = true; g.startRun(100, 99, 'normal', null, 'climb'); if (g.director.state === 'draft') g.director.choose(0);
       const real = w.input; w.input = new BotInput(w, 0.85);
       const cv = document.getElementById('game'), out = {}, pending = {};
       const want = {
