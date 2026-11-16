@@ -389,7 +389,7 @@ function lashWrap(world, A, B, r) {
   world.sfx('lashWrap', B.x);
 }
 // Bodies too big to move: the lash pulls its owner to them instead.
-const anchored = (B) => !!(B.def.boss || B.def.armor >= 2 || B.def.noRagdoll || B.def.prop || B.riding || B.scale > 1.3 || (B.def.beast && B.scale > 1.1));
+const anchored = (B) => !!(B.def.boss || B.def.armor >= 2 || B.def.noRagdoll || B.def.thing || B.riding || B.scale > 1.3 || (B.def.beast && B.scale > 1.1));
 // The heavy: wrap the target and bring it to where the whip bites hardest (dragged in from afar,
 // shoved out from too close), or, if it will not move, drag yourself to it.
 function lashPull(world, A, B, r) {

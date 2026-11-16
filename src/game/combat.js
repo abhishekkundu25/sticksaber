@@ -237,7 +237,7 @@ function react(world, A, B, h, dir) {
 
 function kill(world, A, B, h, cx, cy, dir) {
   // A prop has no body to throw: it breaks where it stands.
-  if (B.def.prop) { B.dead = true; B.hp = 0; B.remove = true; B.activeHit = null; world.onProp(A, B, cx, cy, dir); return 'kill'; }
+  if (B.def.thing) { B.dead = true; B.hp = 0; B.remove = true; B.activeHit = null; world.onProp(A, B, cx, cy, dir); return 'kill'; }
   const spike = h.kind === 'spike';
   const kvx = dir * Math.max(Math.abs(h.kx), 280) * 1.2;
   const kvy = spike ? Math.abs(h.ky) * 0.8 : Math.min(h.ky, -260) - 140;

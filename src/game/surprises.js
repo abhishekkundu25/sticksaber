@@ -18,7 +18,7 @@ function herdCtrl(f, world) {
   f.facing = dir; f.moveX = 1 * dir; f.invuln = 0.3; f.barT = 0;
   if (rng() < 0.3) world.fx.dust(f.x - dir * 30, 0, 1, -dir, 200);
   for (const e of world.fighters) {
-    if (e === f || e.herd || e.dead || e.phantom || e.def.prop || ai.seen.has(e) || e.invuln > 0) continue;
+    if (e === f || e.herd || e.dead || e.phantom || e.def.thing || ai.seen.has(e) || e.invuln > 0) continue;
     const low = e.rag ? e.rag.y[2] > -70 : e.y > -70 * f.scale;
     if (!low || Math.abs(e.x - f.x) > 50 * f.scale) continue;
     ai.seen.add(e);
@@ -73,7 +73,7 @@ const RUN = {
     },
     join(S, d, w, f) {
       const side = S.side[f.def.kind];
-      if (!side || f.riding || f.def.prop) return;
+      if (!side || f.riding || f.def.thing) return;
       f.feud = side; f.hunts = 'feud'; if (!f.tag) f.tag = 'FEUD';
     },
   },
@@ -142,7 +142,7 @@ const RUN = {
       for (const k of [-0.6, -0.05, 0.55]) w.hazards.push({ x: (k + rand(-0.08, 0.08)) * half, w: 56, period: rand(4, 5.5), t: rand(1.4, 2.6), armed: false });
       w.walls = true;
       for (let i = 0; i < 26; i++) w.fx.dust(rand(w.minX, w.maxX), 0, 2, 0, 260);
-      for (const f of w.fighters) if (f.onGround && !f.rag && !f.def.prop && !f.def.noRagdoll && f.state === 'free') { f.vy = -340; f.onGround = false; f.y -= 1; }
+      for (const f of w.fighters) if (f.onGround && !f.rag && !f.def.thing && !f.def.noRagdoll && f.state === 'free') { f.vy = -340; f.onGround = false; f.y -= 1; }
       S.t = 0;
     },
     tick(S, d, w, dt) { if ((S.t += dt) < 6 && rng() < dt * 5) { w.shake(0.25); w.fx.dust(rand(w.minX, w.maxX), 0, 2, 0, 200); } },

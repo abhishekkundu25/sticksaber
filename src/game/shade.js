@@ -34,7 +34,8 @@ export function foeCopy(sid, o = {}) {
     }),
     step: s.step.map(([a, b, v]) => [T(a), T(b), v / k]),
     ev: [[R4(Math.max(0.02, T(s.hits[0].t0) - 0.26)), 'tele', red ? 1 : 0],
-      ...s.ev.filter((e) => e[1] === 'sfx' || (e[1] === 'fx' && e[2] !== 'riposteLine')).map(([t, type, arg]) => [T(t), type, arg])],
+      // A weapon's own mechanic rides on `form` events (the gauntlets' blast), so those are kept too.
+      ...s.ev.filter((e) => e[1] === 'sfx' || e[1] === 'form' || (e[1] === 'fx' && e[2] !== 'riposteLine')).map(([t, type, arg]) => [T(t), type, arg])],
     punish: [T(last.t1), end],
   };
   for (let i = 1; i < m.hits.length; i++) if (m.hits[i].t0 - m.hits[i - 1].t1 > 0.16) m.ev.push([R4(m.hits[i].t0 - 0.15), 'tele', red ? 1 : 0]);
@@ -68,7 +69,8 @@ export function climberKit(form, powers, tier) {
   const L = [slot('L1')];
   while (L.length < (tier >= 2 ? 4 : 3)) { const nx = MOVES[L[L.length - 1]]?.next?.light; if (!nx || L.includes(nx)) break; L.push(nx); }
   const first = foeCopy(L[0]), tail = L.slice(1).map((id) => foeCopy(id, { lead: 0.12, first: 0.24 }));
-  const reach = Math.round(clamp(form.blade.len * (form.blade.double ? 2.6 : 2.3), 150, 330));
+  // How far away it starts a string: the weapon's own working distance where it names one.
+  const reach = Math.round(clamp(form.bot?.reach ? form.bot.reach + 70 : form.blade.len * (form.blade.double ? 2.6 : 2.3), 130, 330));
   const K = { school: 'shade', moves: [], specials: [], heals: [], echo: 0, doubleAt: 0, hold: [Math.round(reach * 0.55), Math.round(reach * 1.1)], guard: 0.2 + 0.06 * tier,
     phases: tier >= 2 ? [0.6, 0.3] : [0.5], phaseText: ['It stops copying you and starts thinking', 'Only one of you leaves'] };
   K.add = (id, min, max, w, o) => { if (id && !K.moves.some((m) => m.id === id)) K.moves.push({ id, min, max, w, ...o }); };

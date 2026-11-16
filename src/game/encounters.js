@@ -259,7 +259,7 @@ export class Director {
     const w = this.world;
     for (const f of w.fighters) {
       if (f.team !== 1 || f.dead || f.phantom || f.def.boss) continue;
-      if (kill && !f.def.prop) { f.die((f.x >= w.player.x ? 1 : -1) * 420, -480, rand(-6, 6)); w.fx.zap(f.cx, -700, f.cx, f.cy, '#56e9ff', 0.3); w.fx.spark(f.cx, f.cy, 0, 3.14, 14, 600, f.color); }
+      if (kill && !f.def.thing) { f.die((f.x >= w.player.x ? 1 : -1) * 420, -480, rand(-6, 6)); w.fx.zap(f.cx, -700, f.cx, f.cy, '#56e9ff', 0.3); w.fx.spark(f.cx, f.cy, 0, 3.14, 14, 600, f.color); }
       else { f.remove = true; w.fx.beam(f.x, 0.6, f.color); }
     }
     this.pending.length = 0;
@@ -272,7 +272,7 @@ export class Director {
       if (!o.mark && !this.pending.length) {
         // The toughest thing in the room carries the mark.
         let best = null;
-        for (const f of w.fighters) if (f.team === 1 && !f.dead && !f.phantom && !f.def.boss && !f.def.prop && !f.riding && (!best || f.maxHp > best.maxHp)) best = f;
+        for (const f of w.fighters) if (f.team === 1 && !f.dead && !f.phantom && !f.def.boss && !f.def.thing && !f.riding && (!best || f.maxHp > best.maxHp)) best = f;
         if (!best) return;
         o.mark = best; best.mark = true; best.tag = 'MARK'; best.barT = 1e9; best.hp = best.maxHp = Math.round(best.maxHp * 1.6);
         w.fx.ring(best.cx, best.cy, 160, 20, 0.5, '#ffd36b', 1, 5); w.sfx('markSet', best.x);
@@ -284,7 +284,7 @@ export class Director {
     }
     // Reinforcements: the floor's own waves, over and over, each time the room thins out.
     let foes = 0;
-    for (const f of w.fighters) if (f.team === 1 && !f.dead && !f.phantom && !f.def.prop) foes++;
+    for (const f of w.fighters) if (f.team === 1 && !f.dead && !f.phantom && !f.def.thing) foes++;
     if ((o.gap -= dt) <= 0 && !this.pending.length && foes <= 1) {
       o.cycle++; o.gap = 5;
       this.pending = def.waves[o.cycle % def.waves.length].spawns.map((s) => ({ ...s, t: s.t + 0.6 }));

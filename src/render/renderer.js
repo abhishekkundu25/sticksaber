@@ -259,7 +259,7 @@ export class Renderer {
 
   // ───────────── glow pass ─────────────
   glowFighter(g, f, world) {
-    if (f.def.prop) return glowProp(g, f, world.time);
+    if (f.def.thing) return glowProp(g, f, world.time);
     if (f.def.deco === 'drone') return this.glowDrone(g, f, world);
     if (f.def.beast) drawBeastGlow(g, f, world);
     const s = f.scale, j = f.j, t = world.time, bd = f.blade;
@@ -628,7 +628,7 @@ export class Renderer {
 
   bodyFighter(ctx, f, world) {
     if (f.fade <= 0.01) return;
-    if (f.def.prop) return bodyProp(ctx, f, world);
+    if (f.def.thing) return bodyProp(ctx, f, world);
     if (f.def.deco === 'drone') return this.bodyDrone(ctx, f, world);
     const j = f.j, s = f.scale, lw = f.def.lineW * s, d = f.def;
     let ox = 0, oy = 0;

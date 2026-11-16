@@ -7,7 +7,7 @@ const TAU = Math.PI * 2, DARK = '#0a0d14';
 const poly = (c, pts) => { c.beginPath(); c.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) c.lineTo(pts[i], pts[i + 1]); c.closePath(); };
 
 export function glowProp(g, f, t) {
-  const x = f.x, y = f.y, k = f.def.prop, col = f.flash > 0 ? '#ffffff' : f.color;
+  const x = f.x, y = f.y, k = f.def.thing, col = f.flash > 0 ? '#ffffff' : f.color;
   g.strokeStyle = col; g.fillStyle = col;
   if (k === 'core') {
     const cy = y - 78 + Math.sin(t * 2.2 + x) * 5;
@@ -32,7 +32,7 @@ export function glowProp(g, f, t) {
 }
 
 export function bodyProp(ctx, f, world) {
-  const x = f.x, y = f.y, k = f.def.prop, t = world.time, hot = f.flash > 0, rim = hot ? '#ffffff' : f.def.outline;
+  const x = f.x, y = f.y, k = f.def.thing, t = world.time, hot = f.flash > 0, rim = hot ? '#ffffff' : f.def.outline;
   let ox = 0;
   if (f.vib > 0 && world.hitstop > 0) ox = (Math.random() - 0.5) * 6;
   ctx.save(); ctx.translate(ox, 0); ctx.globalAlpha = f.fade; ctx.lineJoin = 'round';

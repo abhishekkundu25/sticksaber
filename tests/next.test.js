@@ -212,12 +212,14 @@ test('each surprise breaks in, does what it says, and leaves the floor finishabl
       run(g, 9, { god: false, until: sides });
       assert.ok(sides(), 'a feud needs two sides');
       // They hurt each other: blades of one side cut the other.
-      const total = () => world.enemies.reduce((s, f) => s + f.hp, 0), before = total();
-      run(g, 16, { god: false, until: () => total() < before });
-      assert.ok(total() < before, 'the two sides never hurt each other');
+      let hits = 0;
+      const onDamage = world.onDamage.bind(world);
+      world.onDamage = (A, B, ...rest) => { if (A && A.team === 1 && B.team === 1) hits++; return onDamage(A, B, ...rest); };
+      run(g, 25, { god: false, until: () => hits > 0 });
+      assert.ok(hits > 0, 'the two sides never hurt each other');
     }
     if (real === 'captive') {
-      const cell = world.fighters.find((f) => f.def.prop === 'cell');
+      const cell = world.fighters.find((f) => f.def.thing === 'cell');
       assert.ok(cell && cell.team === 2);
       applyHit(world, null, cell, { ...HIT, dir: 1 }, cell.cx, cell.cy);
       run(g, 0.3, { god: false });
@@ -244,7 +246,7 @@ test('each surprise breaks in, does what it says, and leaves the floor finishabl
     if (real === 'quake') assert.ok(world.walls && world.hazards.length >= 3);
     if (real === 'storm') { run(g, 3, { god: false }); assert.ok(world.projectiles.list.some((p) => p.type === 'pillar' && p.team === 2) || world.stats.hitsTaken >= 0); }
     if (real === 'cache') {
-      const c = world.fighters.find((f) => f.def.prop === 'cache');
+      const c = world.fighters.find((f) => f.def.thing === 'cache');
       assert.ok(c);
       run(g, 2, { god: false });
       applyHit(world, null, c, { ...HIT, dir: 1 }, c.cx, c.cy);
@@ -282,13 +284,13 @@ test('objectives are won by doing the thing, not by killing everything', () => {
   g = stage(33, { objective: { type: 'cores', at: [-0.6, 0, 0.6] } });
   g.world.player.invuln = 1e9;
   run(g, 4, { until: () => !!g.dir.obj?.cores });
-  const cores = g.world.fighters.filter((f) => f.def.prop === 'core');
+  const cores = g.world.fighters.filter((f) => f.def.thing === 'core');
   assert.equal(cores.length, 3);
   run(g, 3);
-  for (const f of g.world.enemies) if (!f.def.prop) applyHit(g.world, null, f, { ...HIT, dir: 1 }, f.cx, f.cy);
+  for (const f of g.world.enemies) if (!f.def.thing) applyHit(g.world, null, f, { ...HIT, dir: 1 }, f.cx, f.cy);
   run(g, 9);
   assert.equal(g.dir.state, 'fight', 'the floor ended with cores standing');
-  assert.ok(g.world.enemies.some((f) => !f.def.prop), 'no reinforcements came');
+  assert.ok(g.world.enemies.some((f) => !f.def.thing), 'no reinforcements came');
   const x0 = cores[0].x;
   for (const c of cores) if (!c.dead) applyHit(g.world, null, c, { ...HIT, dir: 1 }, c.cx, c.cy);
   assert.ok(cores.every((c) => c.dead) && cores[0].x === x0);

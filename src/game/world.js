@@ -11,7 +11,7 @@ import { ENEMIES, echoDef } from './enemies.js';
 import { baseMods, buildMods } from './augments.js';
 import { POWERS } from './powers.js';
 import { Beast } from './beasts.js';
-import { FORMS, resetFormState } from './forms.js';
+import { FORMS, resetFormState, equipForm } from './forms.js';
 import { tickBonds, bind } from './bonds.js';
 import { makeShade, makeClimber } from './shade.js';
 import { PROPS } from './props.js';
@@ -179,7 +179,7 @@ export class World {
   // player and anything too big to throw are hauled back up, poorer for it.
   fell(f) {
     const at = f.rag ? f.rag.x[2] : f.x, q = this.inPit(at), x = this.solidX(at, 90), fx = this.fx;
-    if (f.dead || f.def.prop || f.herd) { f.remove = true; return; }
+    if (f.dead || f.def.thing || f.herd) { f.remove = true; return; }
     fx.beam(q ? clamp((q.x0 + q.x1) / 2, this.minX + 40, this.maxX - 40) : x, 0.5, f.isPlayer ? '#ff5060' : '#ffd36b'); this.sfx('ringOut', x);
     if (!f.isPlayer && !f.def.boss && f.team !== 0) {
       f.hp = 0; if (!f.rag) f.toRagdoll(0, 200, 0);
@@ -256,6 +256,7 @@ export class World {
   spawnShade(tier, x) {
     (this.roster ||= {}).shade = makeShade(this, tier);
     const f = this.spawnEnemy('shade', x, true);
+    equipForm(f, this.formId);
     this.fx.beam(f.x, 1.3, '#ff2e6e'); this.sfx('shadeArrive', f.x);
     return f;
   }
@@ -264,6 +265,7 @@ export class World {
     const kind = friend ? 'ally' : 'rival';
     (this.roster ||= {})[kind] = makeClimber(this, friend);
     const f = this.spawnEnemy(kind, x, drop);
+    equipForm(f, f.def.form);
     f.team = friend ? 0 : 2; f.hunts = friend ? 'enemy' : 'any'; f.tag = friend ? 'ALLY' : 'RIVAL'; f.barT = 6;
     if (friend) f.hp = f.maxHp = Math.round(f.def.hp * (1 + (this.hpMul - 1) * 0.5));
     return f;
@@ -280,7 +282,7 @@ export class World {
   foeOf(f) {
     let best = null, bd = 1e9;
     for (const e of this.fighters) {
-      if (e === f || e.dead || e.phantom || e.remove || e.def.prop) continue;
+      if (e === f || e.dead || e.phantom || e.remove || e.def.thing) continue;
       if (f.hunts === 'feud' ? !(e.team === 1 && e.feud && e.feud !== f.feud) : e.team === f.team || (f.hunts === 'enemy' && e.team !== 1)) continue;
       const d = Math.abs(e.x - f.x);
       if (d < bd) { bd = d; best = e; }
@@ -551,7 +553,7 @@ export class World {
     fx.spark(cx, cy, 0, 3.14, 34, 820, B.color, { white: 0.5 }); fx.flash(cx, cy, 130, B.color, 0.2); fx.ring(cx, cy, 12, 170, 0.4, B.color, 1, 5);
     for (let i = 0; i < 6; i++) fx.ember(cx + rand(-30, 30), cy + rand(-40, 30), 2, B.color);
     this.sfx('propBreak', cx); this.stop(0.09); this.shake(0.4);
-    this.events.push({ type: 'prop', kind: B.def.prop, x: B.x, y: B.y, by: A });
+    this.events.push({ type: 'prop', kind: B.def.thing, x: B.x, y: B.y, by: A });
   }
   tickOrbs(dt) {
     const pl = this.player, L = this.orbs, pull = this.countEnemies() === 0;
@@ -748,7 +750,7 @@ export class World {
     } else {
       if (info.punished) fx.text(cx, cy - 62, 'PUNISH', '#ffd36b', 16, 0.8);
       if (info.glance) fx.text(cx, cy - 46, 'GLANCED', '#8fa3b8', 13, 0.6);
-      const pl = this.player;
+      const pl = this.hero || this.player;
       if (A === pl) {
         // Rally: striking back wins a slice of recent damage back.
         if (this.rally > 0) { const r = Math.min(this.rally, dmg * 0.5); this.rally -= r; pl.hp = Math.min(pl.maxHp, pl.hp + r); }
@@ -794,7 +796,7 @@ export class World {
       }
     }
     this.gainFocus(12); this.style.bonus(6);
-    const pl = this.player, M = this.mods;
+    const pl = this.hero || this.player, M = this.mods;
     if (pl && !pl.dead) pl.hp = Math.min(pl.maxHp, pl.hp + (2 + M.killHeal) * M.healK + Math.min(this.rally, 6));
     if (M.reap) this.gainFocus(M.reap);
     this.dropOrbs(B, this.pits.length ? this.solidX(cx, 30) : cx, cy);
@@ -850,9 +852,11 @@ export class World {
         // so every brain written to fight the player can fight anyone.
         const foe = this.foeOf(f), keep = this.player;
         f.calm = !foe && f.hunts !== 'feud';
+        // `hero` stays the real player throughout, for the bookkeeping a hit or a kill does.
+        this.hero = keep;
         if (foe) this.player = foe;
         f.update(this, d);
-        this.player = keep;
+        this.player = keep; this.hero = null;
       } else f.update(this, d);
     }
     if (this.pits.length) for (let i = 0; i < fs.length; i++) { const f = fs[i]; if (!f.remove && (f.rag ? f.rag.y[2] : f.y) > 230) this.fell(f); }
@@ -892,10 +896,10 @@ export class World {
     const fs = this.fighters, k = Math.min(1, dt * 14);
     for (let a = 0; a < fs.length; a++) {
       const A = fs[a];
-      if (A.rag || A.phantom || A.riding || A.def.prop || !A.onGround || A.state === 'dash' || A.stepping && Math.abs(A.vx) > 700) continue;
+      if (A.rag || A.phantom || A.riding || A.def.thing || !A.onGround || A.state === 'dash' || A.stepping && Math.abs(A.vx) > 700) continue;
       for (let b = a + 1; b < fs.length; b++) {
         const B = fs[b];
-        if (B.rag || B.phantom || B.riding || B.def.prop || !B.onGround || B.state === 'dash' || B.stepping && Math.abs(B.vx) > 700) continue;
+        if (B.rag || B.phantom || B.riding || B.def.thing || !B.onGround || B.state === 'dash' || B.stepping && Math.abs(B.vx) > 700) continue;
         const min = 38 * (A.scale + B.scale) / 2, dx = B.x - A.x;
         if (Math.abs(dx) >= min) continue;
         const push = (min - Math.abs(dx)) * 0.5 * k * (dx >= 0 ? 1 : -1);
