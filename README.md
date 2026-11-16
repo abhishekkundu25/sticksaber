@@ -1,8 +1,8 @@
 # STICKSABER
 
-A side-view action game for the browser. You are a stick figure with an energy sword, climbing a hundred-floor tower one arena at a time.
+A side-view action game for the browser. You are a stick figure with an energy sword, climbing a tower one arena at a time: thirty floors in a sprint, or all hundred in the long climb.
 
-Every run is generated from a seed: the enemy strains, the animals, the bonds between them, the champions and sector bosses, the waves, the terrain, the arenas and their colours. You choose a weapon form before the first floor, draft augments into a build between floors, and win Focus powers from champions. The game has three difficulties, six arena families, a training room, and keyboard, mouse, gamepad and touch controls. The design notes are in [docs/DESIGN.md](docs/DESIGN.md).
+Every run is generated from a seed: the enemy strains, the animals, the bonds between them, the champions and sector bosses, the waves, the rooms, the arenas and their colours, and one surprise in every sector that you cannot plan for. You choose a weapon before the first floor, draft augments into a build between floors, win Focus powers from champions, and choose your way up through doors: an elite guard, a cursed hall, a sanctuary, a quartermaster, a shrine, an armoury. The game has three difficulties, a daily run on one seed for everyone, six arena families, a training room, a codex, and keyboard, mouse, gamepad and touch controls. The design notes are in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Play it
 
@@ -18,13 +18,18 @@ Then open http://localhost:5173. The game uses ES modules, so it needs a local s
 
 Start in the training room if you want to judge the movement before fighting anything that hits back. Every power is unlocked there, the number keys spawn each enemy type, `[` spawns a generated strain, `B` an animal, `]` a champion and `\` a sector boss. `Y` switches weapon form. The room has one light bridge to practise on.
 
-A run is saved at the start of every floor: seed, difficulty, floor and build. The menu offers CONTINUE from there. A hundred floors take a scripted player about an hour and a half, so expect several sittings.
+The menu has two lengths of run. A sprint is thirty floors in three sectors and takes a scripted player about half an hour. The climb is a hundred floors in ten sectors and takes about an hour and a quarter. The DAILY CLIMB is a sprint on one seed that is the same for everyone that day, on the middle difficulty, with a score at the end. On the results screen `C` copies the score and a link that replays the same tower.
+
+A run is saved at the start of every floor: seed, length, difficulty, floor, build, weapons, shards and the door you took. The menu offers CONTINUE from there.
 
 | Address parameter | Effect |
 | --- | --- |
 | `?seed=ABC123` | Replay or share a specific run. The seed is shown on the pause and results screens. |
+| `?mode=sprint` or `climb` | Set the length of the run. |
 | `?diff=easy`, `normal` or `hard` | Set the difficulty. |
 | `?floor=40` | Start a new run on that floor, with the picks the run would have made on the way up. |
+| `?daily` or `?daily=2026-11-16` | Go straight into the daily run for today, or for that date. |
+| `?boons=all` | Offer every boon before the first floor, earned or not. |
 
 ## Controls
 
@@ -38,6 +43,7 @@ A run is saved at the start of every floor: seed, difficulty, floor and build. T
 | Guard, tap on impact to parry | L | RB |
 | Use the selected Focus power | I, or middle mouse button | LB |
 | Switch power | U, 1 to 9, the mouse wheel, or click a power in the HUD | LT |
+| Switch weapon (with a Second Sheath) | T | |
 | Drop through a light bridge | S + Space | Down + A |
 | Burst (costs 1 focus, while being hit or knocked down) | I | LB |
 | Overdrive (needs a full focus meter) | O | Click either stick |
@@ -45,7 +51,7 @@ A run is saved at the start of every floor: seed, difficulty, floor and build. T
 
 Fullscreen is F. Mute is M. G cycles graphics quality between auto, high and low.
 
-Everything outside a fight works with the mouse: menu items, draft cards and the pause buttons highlight under the pointer and take a click. A gamepad rumbles on hits, parries and boss kills where the browser supports it.
+Everything outside a fight works with the mouse: menu items, cards, doors, the quartermaster's stock and the pause buttons highlight under the pointer and take a click. Esc leaves a room that can be left. A gamepad rumbles on hits, parries and boss kills where the browser supports it.
 
 ### Phones and tablets
 
@@ -54,7 +60,7 @@ Hold the device in landscape. The first touch switches on the touch controls; a 
 - Tap a menu item or a draft card to choose it.
 - The left thumb gets a stick that appears wherever it lands. Left and right move. Pulling down is the same as S: stick down plus HEAVY launches on the ground and plunges in the air.
 - The right thumb gets LIGHT, HEAVY, JUMP, DASH, GUARD, OVERDRIVE and the power button. The power button carries the name of the selected power. SWAP, which appears once you own a second power, changes it. While you are being hit the power button grows, glows and reads BURST. OVERDRIVE lights up when the meter is full.
-- The pause button is at the top centre. In the training room a SPAWN button adds an enemy.
+- The pause button is at the top centre. In the training room a SPAWN button adds an enemy. BLADE appears beside it once you carry two weapons, and switches between them.
 - Phones render at 720p internally.
 
 ## Moves
@@ -115,9 +121,19 @@ Techniques are a fourth kind, one copy each, offered after event floors and now 
 
 Every card has its own colour and picture. The pause screen lists the build. Killed enemies sometimes leave orbs: green restores health, cyan restores focus.
 
-## The hundred floors
+Everything that falls also leaves shards, the gold diamonds. They are the run's money. A floor's challenge, an objective, a courier and a supply cache pay more of them.
 
-The tower has ten sectors of ten floors. Every sector has the same shape, so a run has a rhythm you can learn. What fills the shape is generated.
+| Where shards and choices go | What it is |
+| --- | --- |
+| Quartermaster | Sells four cards (a technique, rares and a legendary), a weapon and field repairs. Buy as many as you can pay for. |
+| Shrine | Offers three pacts. A pact gives a great deal and takes something back for the rest of the run: Glass Heart is 40% more damage for 30 less health, Hunger heals on every kill and never between waves, Debt is 150 shards now and a tougher tower. You may refuse. |
+| Armoury | Trades the weapon in your hand for one of three others. Your build comes with you. A weapon also turns up among the cards now and then. |
+| Second Sheath | A legendary. With it the next weapon you take joins the one you hold, T switches between them, and the first hit after a switch lands half again as hard. |
+| Boons | A head start chosen before the first floor, earned by feats in earlier runs. The codex on the title screen lists the feats. |
+
+## The run
+
+The tower is built in sectors of ten floors: three in a sprint, ten in the climb. Every sector has the same shape, so a run has a rhythm you can learn. What fills the shape is generated.
 
 | Floor of the sector | What happens |
 | --- | --- |
@@ -126,12 +142,57 @@ The tower has ten sectors of ten floors. Every sector has the same shape, so a r
 | 4 | Introduces the sector's first bond: a group of enemies that work together. |
 | 5 | A champion. Beating it wins a Focus power. |
 | 6 | Introduces the sector's second bond. |
-| 7 to 9 | Skirmishes. One is an event floor: a horde, an elite squad, a duel, a gauntlet or an ambush. |
+| 7 to 9 | Skirmishes. One is an event floor (a horde, an elite squad, a duel, a gauntlet or an ambush), and one or two have an objective. |
 | 10 | The sector boss. Beating it wins a legendary augment. |
 
-Sector I is the school. Its floors teach the eight base enemies with fixed waves and hints: Initiate, Marksman, Bulwark, Duelist, Brute, Lancer, Wraith and Drone.
+In the climb, sector I is the school. Its floors teach the eight base enemies with fixed waves and hints: Initiate, Marksman, Bulwark, Duelist, Brute, Lancer, Wraith and Drone. A sprint has no school: every base enemy is there from the first floor, and the tower gets harder about half again as fast.
 
-Five things are hand-made: those teaching waves, the Proctor on floor 100, and three bosses that keep a different sector each run: the Forgemaster (one of II to V), the Twins (VI or VII) and the Cartographer (VIII or IX).
+Five things are hand-made: those teaching waves, the Proctor on the last floor, and three bosses. In the climb the Forgemaster keeps one of sectors II to V, the Twins VI or VII and the Cartographer VIII or IX. A sprint meets one of the three, on floor 20.
+
+### Surprises
+
+Each sector hides one surprise, on a floor you cannot predict and never on a champion's or a keeper's. It breaks in during the floor's last wave.
+
+| Surprise | What happens |
+| --- | --- |
+| Your Shade | The floor clears, the lights dim, and a dark copy of you drops in with the weapon you hold and the powers you have taken. Every cut it makes is announced and can be parried. It comes once in a sprint and three times in the climb, each time with more of your powers and a longer string. It leaves a legendary. |
+| Blackout | The lights go out. Blades, eyes and tells still glow. |
+| Bad blood | Two kinds of enemy in the room turn on each other, and their blades cut their own side. |
+| A prisoner | A holding cell stands in the room. Break it and another climber fights beside you for the floor. |
+| Stampede | A herd runs through from wall to wall, three times, and hits everyone in its way. Jump. |
+| Courier | A gold runner carries a card. Cut it down before it gets out. |
+| A rival | Another climber, with a weapon of their own, who fights you and the enemies alike. |
+| The Spire shifts | Bridges fall, vents open and the walls go live. |
+| Storm front | Lightning walks the floor. Every third bolt is aimed at you. |
+| Supply drop | A cache lands. Break it open for shards and orbs. |
+
+### Objectives and challenges
+
+Some skirmishes are not won by killing two waves.
+
+| Objective | How to win |
+| --- | --- |
+| Hold out | They keep coming for about forty seconds. Be alive at the end. |
+| The mark | One enemy is marked in gold. Kill it and the rest leave. |
+| Hold the ring | Stand in the ring to charge it. When it is full it clears the room. |
+| Signal cores | Reinforcements come for as long as a core stands. Break all three. |
+
+About a quarter of the other floors carry a challenge, shown under the floor number: take no damage, clear the floor in time, use no powers, parry three times, kill two enemies in the air, or kill one with the room itself. Meeting it pays shards. A fall forfeits it.
+
+### Doors
+
+After the second, fourth, sixth, eighth and ninth floor of a sector the way up splits into three doors.
+
+| Door | What is behind it |
+| --- | --- |
+| The Stair | The next floor as it is. |
+| Elite Guard | Every enemy on the next floor is an elite. It pays a better card and 40 shards. |
+| Cursed Hall | The next floor carries a curse: you take more damage, they are faster, the lights are out, nothing heals between waves, or every wave brings one more. You take two cards after it. |
+| Sanctuary | Recover 45% of your health. |
+| Quartermaster, Shrine, Armoury | See the build. |
+| Unmarked | One of the others, or a gift of shards. |
+
+Before a champion or a keeper the three doors are always rooms, never risks.
 
 ### Animals
 
@@ -170,6 +231,13 @@ About half the floors from sector II have terrain.
 - Vents: marked strips of floor that erupt on a timer and burn anyone standing there, enemies included.
 - Charged walls: a body knocked or thrown into the wall takes a shock.
 
+About one floor in five has a shape of its own.
+
+- Open edges: the floor ends before the wall. An enemy knocked over the edge is gone. Enemies do not walk off, but one that leaps at you while you stand on the lip can carry itself over. A fall costs you a sixth of your health.
+- High ground: fixed ledges that do not overload, with the floor's shooters posted on them.
+- Sliding bridge: a platform that crosses the room and carries whoever stands on it, with one side of the floor open.
+- The lift: both sides open all the way up, and a small bridge sliding over the middle.
+
 A kill made by the room shows ENVIRONMENT and pays extra focus.
 
 ### Difficulty
@@ -194,7 +262,8 @@ A kill made by the room shows ENVIRONMENT and pays extra focus.
 - Sector bosses are generated from five fighting schools, with borrowed attacks, two or three phases and set pieces: a leap that lands on a marker, a blink to your back, reinforcements, afterimages, a kneeling heal you can interrupt.
 - The Twins share one life, and only the lit one can be hurt. The other still cuts, at reduced damage. They take turns until half health, then stop.
 - The Cartographer redraws the floor. First strips that erupt, then a wall of fire that walks across the room with two gaps in it, and in its last phase the whole floor, with three light bridges to stand on.
-- A boss kill ends with a finisher: time slows, the camera closes in and the body keeps coming apart.
+- A champion or a keeper is announced by name as it lands. A boss kill ends with a finisher: time slows, the camera closes in and the body keeps coming apart.
+- The Shade uses copies of your own moves, played slower behind a held wind-up. Change weapon or take different powers and the next Shade fights differently.
 - A first-time player gets a parry lesson on floor 1: the instructor cannot be hurt until you parry it once.
 - The Forgemaster's hammer heats through each string. You can parry it until it glows white. When it vents steam, hit it.
 - The Proctor kneels to heal at 45% and 20% health. Any hit interrupts it and breaks its posture. The saber throw reaches it from across the room.
@@ -204,9 +273,9 @@ A kill made by the room shows ENVIRONMENT and pays extra focus.
 | Command | What it does | Time |
 | --- | --- | --- |
 | `npm test` | Runs the simulation tests, then the benchmark. Fails on a broken rule or a missed performance budget. | about 10 s |
-| `node --test tests/` | Simulation tests only (38): seeded replays are identical, sixty generated runs obey the rules, generated moves keep their telegraphs, bosses can be beaten, and the build, the powers, the draft, saved runs, bonds, terrain, techniques, the weapon forms and the animals behave. | about 2 s |
+| `node --test tests/` | Simulation tests only: seeded replays are identical, generated runs of both lengths obey the rules, generated moves keep their telegraphs, bosses can be beaten, and the build, the powers, the cards, saved runs, bonds, terrain, techniques, the weapons, the animals, every surprise, every objective, the doors and rooms, pacts, the Shade and the shaped rooms behave. | about 40 s |
 | `npm run bench` | The benchmark alone, in report mode (prints, never fails). | about 7 s |
-| `npm run fuzz` | Long soak: random input on sample floors and bosses, then scripted players of three skill levels climb all hundred floors on each difficulty. Prints falls per sector. | several minutes |
+| `npm run fuzz` | Long soak: random input on sample floors, bosses, every surprise and every objective, then scripted players of three skill levels play sprints and climb all hundred floors on each difficulty. Prints falls per sector. `node tools/fuzz.js quick` stops after the sprints. | an hour, or a few minutes for `quick` |
 | `npm run smoke` | Drives the real game in headless Chrome, reports runtime errors and frame times, and writes screenshots to `tools/out/`. | about 2 min |
 | `node tools/strip.js [name]` | Writes frame-by-frame contact sheets of moves to `tools/out/`. | seconds each |
 | `node tools/form-strip.js [form]`, `node tools/form-dps.js` | Contact sheets of each weapon form's strings, and its damage measured against the saber. | |
@@ -220,7 +289,8 @@ The benchmark renders in headless Chrome with GPU acceleration turned off, which
 
 | Path | Contents |
 | --- | --- |
-| `src/game/` | Simulation. It has no DOM access, so it runs in Node. `fighter.js` is the shared body, `moves.js` holds every attack as data and builds the generated variants, `combat.js` resolves hits, `enemies.js` holds the base roster and all the brains, `strains.js` generates a run's strains, champions and bosses, `beasts.js` is the animal rig and its generator, `bonds.js` links enemies, `gen.js` generates the hundred floors, `forms.js` holds the weapon forms, `augments.js` and `powers.js` are the build. |
+| `src/game/` | Simulation. It has no DOM access, so it runs in Node. `fighter.js` is the shared body, `moves.js` holds every attack as data and builds the generated variants, `combat.js` resolves hits, `enemies.js` holds the base roster and all the brains, `strains.js` generates a run's strains, champions and bosses, `beasts.js` is the animal rig and its generator, `bonds.js` links enemies, `gen.js` generates the floors of a run and lays surprises, objectives, challenges, shaped rooms and doors over them, `encounters.js` is the director that runs a floor and everything between floors, `surprises.js` is what each surprise does, `shade.js` builds the Shade and the other climbers from the player's own moves, `props.js` holds the breakable things, `forms.js` holds the weapons, `augments.js`, `powers.js` and `boons.js` are the build. |
+| `src/core/` | Input, maths, and `meta.js`: what carries over between runs. |
 | `src/render/` | Canvas 2D renderer, effects, and the baked arenas. |
 | `src/audio/` | Web Audio synthesis. The game ships no audio files. |
 | `src/ui/` | HUD, menus, the draft screen and touch controls. |

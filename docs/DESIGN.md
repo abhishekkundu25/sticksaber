@@ -251,7 +251,23 @@ The Twins and the Cartographer used to be on this list and are now built. A boss
 
 ## Structure and generation
 
-A run is a hundred floors generated from one 32-bit seed and a difficulty. The same pair always produces the same run, and the simulation's random numbers come from the same seed, so a headless replay is exact. Generating a run takes under ten milliseconds.
+A run is generated from one 32-bit seed, a difficulty and a length. The same three always produce the same run, and the simulation's random numbers come from the same seed, so a headless replay is exact. Generating a run takes under ten milliseconds.
+
+### Two lengths
+
+The owner played the hundred floors and found they became repetitive. Three things were the same on every floor: the goal (kill everything), the path (no choice of where to go) and the room (a flat floor). Everything in this section after the sector's shape answers one of those three. The first answer is length.
+
+| | Sprint | Climb |
+| --- | --- | --- |
+| Floors, sectors | 30, 3 | 100, 10 |
+| First sector | Generated like every other: its own strains, animal and bonds | The school: the eight base enemies, one at a time |
+| Depth of floor `n`, which sets health, damage and wave size | `6 + 1.6 (n-1)`, so floor 30 hits like floor 52 of the climb | `n` |
+| Hand-made keepers | One of the three on floor 20, the Proctor on floor 30 | All three, and the Proctor on floor 100 |
+| Time for a scripted player | 25 to 40 minutes | 70 to 80 minutes |
+
+The sprint is the default. The Cartographer was made for a build of seventy cards, so in a sprint, where it meets about twenty, it has 62% of its health and deals 75% of its damage. The daily run is a sprint whose seed is a hash of the date.
+
+A sector's place in the roster (`q`: which strains, animal, champion and keeper it uses) is kept apart from its place in the run and from the depth that scales it. On the climb all three are the floor number, so the climb generated before this change is unchanged floor for floor.
 
 ### The shape of a sector
 
@@ -289,12 +305,12 @@ Sector I is the school. Its eight ordinary floors each open with a hand-made wav
 
 | Per floor `n` | Formula | Floor 50 | Floor 100 |
 | --- | --- | --- | --- |
-| Enemy health | `1 + 0.028 (n-1) + 0.00035 (n-1)²`, then up to 27% more over floors 70 to 100 | 3.2 times | 9.1 times |
-| Enemy damage | `1 + 0.014 (n-1) + 0.0002 (n-1)²`, then up to 45% more over floors 70 to 100 | 2.2 times | 6.3 times |
+| Enemy health | `1 + 0.028 (n-1) + 0.00035 (n-1)²`, then up to 34% more over floors 40 to 100 | 3.3 times | 9.7 times |
+| Enemy damage | `1 + 0.014 (n-1) + 0.0002 (n-1)²`, then up to 57% more over floors 40 to 100 | 2.3 times | 6.8 times |
 | Enemy animation speed | 1.4% faster per sector | 5.6% | 12.6% |
 | Gap between enemy attacks | 3.5% shorter per sector, to a floor of 68% | 86% | 68.5% |
 
-The curves bend upward because the player's build compounds. The extra push over the last three sectors is there because a build is nearly complete by then.
+The curves bend upward because the player's build compounds. The extra push (`1 + 0.004 (n-40) + 0.011 (n-70)`, each term from zero) starts at floor 40 because shops, rooms and bonus cards make a build grow faster than the floors do, and steepens over the last three sectors because a build is nearly complete by then. `n` here is the floor's depth, which in a sprint runs ahead of the floor number.
 
 ### Anomalies
 
@@ -320,6 +336,84 @@ About half the ordinary floors from sector II have terrain, a fifth of the teach
 | Charged walls | A body knocked into the wall at speed takes 16 damage (before the floor's scaling) and a stagger, once every 0.8 seconds. A corpse is cut again | Rewards launches and knockbacks toward the edges |
 
 A kill by a vent, a wall or the Cartographer's floor pays 20 focus and a style bonus. Terrain positions are stored as fractions of the arena's width, because arenas differ in size. Terrain is drawn straight onto the frame instead of through the bloom layer, so it does not widen the area the bloom has to cover.
+
+### Surprises
+
+One per sector, on a random floor that is never a champion's or a keeper's, from a random stream of its own. A surprise waits for the floor's last wave, so the first wave can still be read in peace. It is announced by a banner that tears in two colours, a sting and a red flash.
+
+| Surprise | When | Rule |
+| --- | --- | --- |
+| Your Shade | After the last wave | See below |
+| Blackout | As the last wave starts | A dark layer is drawn over the room and the bodies, and under the glow, the blade cores and the tells |
+| Bad blood | As the last wave starts | The kinds in the room are split into two sides. Their attacks hit the other side, and each fighter goes for the nearest of the other side unless the player is much closer. With one kind in the room it becomes a supply drop |
+| A prisoner | As the last wave starts | A cell with 60 health. Broken, it frees a climber on the player's side for the rest of the floor |
+| Stampede | 3 to 5.5 s in | Three passes of three to five of the sector's animal, each announced for 1.5 s with chevrons at the edge it will come from. 15 damage and a knockdown to anything on the ground, enemies included |
+| Courier | 3 to 5.5 s in | A runner that flees, vaults over the player when cornered and leaves after 15 s. Killing it pays 50 shards and a rare card |
+| A rival | 3 to 5.5 s in | A climber on a side of its own that attacks whoever is nearest. It leaves when the floor ends. Killing it pays 45 shards |
+| The Spire shifts | 3 to 5.5 s in | Bridges drop out, three vents open, the walls go live |
+| Storm front | 3 to 5.5 s in | Twenty seconds of pillars at random places, every third one aimed at where the player is heading |
+| Supply drop | 3 to 5.5 s in | A cache with 70 health that pays shards and three orbs |
+
+The Shade appears once in a sprint and three times in the climb, spread over the run. The others turn up once each before any repeats.
+
+Three of these need fighters that fight someone other than the player. Every enemy brain was written against `world.player`, so a fighter with a quarrel of its own is handed its target in the player's place for the length of its own update (`World.foeOf`). That one substitution makes an ally, a rival and a feud out of brains that already existed.
+
+### The Shade
+
+The owner's idea: a dark version of the player with all their powers, different every time.
+
+- It is built at the moment it arrives, from the weapon in the player's hand and the powers they own (`shade.js`).
+- It runs on the sector bosses' brain with a kit made on the spot: the weapon's light string, heavy, dash attack and launcher, then one entry for each of the player's powers.
+- The player's own moves are far too quick to read from the other side (the first light lands in 0.05 s). The Shade uses copies: the same poses played 22% slower behind a held wind-up, so the first cut never lands before 0.34 s, each one is announced with a flash, and all of it can be parried.
+- Powers map to things bosses already do: the throw to a thrown blade, Crescent to a wave, Arc to a line of pillars, Nova to a spin, Flash Step to a blink, Judgment to a leap that lands on a marker, Mirror to an afterimage, Mend to a kneeling heal that can be interrupted. Stasis maps to nothing. Freezing the player is never fair.
+- Each appearance is a tier. Tier 1 uses two powers and has one phase. Tier 2 adds a fourth hit to the string, a heavy that cannot be blocked, a third power and a second phase. Tier 3 takes four powers.
+- It pays a legendary card.
+
+### Objectives and challenges
+
+An objective replaces the two waves of a skirmish on floors 7 to 9, on about seven in ten of the plain ones. The floor's own waves become reinforcements that return each time the room thins out.
+
+| Objective | Rule |
+| --- | --- |
+| Hold out | A timer of 34 to 42 s. When it ends, whatever is left leaves |
+| The mark | The toughest enemy of the last wave gets 60% more health and a gold rim. When it dies the rest leave |
+| Hold the ring | A ring 400 wide charges in 15 s of standing in it and drains at a third of that speed outside. Full, it kills everything in the room |
+| Signal cores | Three cores with 90 health each. When the last breaks, everything in the room dies |
+
+A challenge is an extra condition on about three in ten of the other floors, and pays 25 to 45 shards: take no damage, clear the floor in time, use no powers, parry three times, kill two enemies in the air, or kill one with the room. A fall forfeits it.
+
+### Doors, rooms and shards
+
+After floors 2, 4, 6, 8 and 9 of a sector the player picks one of three doors. Before a champion (after 4) and a keeper (after 9) the three are rooms: sanctuary, quartermaster, shrine or armoury. Elsewhere the first is always the stair and the other two are drawn from an elite guard, a cursed hall, an unmarked door, and a quartermaster or sanctuary.
+
+| Door | Rule |
+| --- | --- |
+| Elite guard | Every eligible spawn on the next floor is an elite and enemies have 10% more health. The card after it is one tier better and it pays 40 shards |
+| Cursed hall | One curse for the next floor: 30% more damage taken, enemies 14% faster, the lights out, no healing between waves, or one more enemy in each wave. Two cards after it |
+| Sanctuary | 45% of maximum health |
+| Quartermaster | Four cards at 45, 80, 110 or 150 shards by rarity, a weapon at 60 and repairs (40% health) at 35 |
+| Shrine | Three pacts, or refuse |
+| Armoury | Three other weapons, or keep the one in hand |
+| Unmarked | A gift of 60 shards (one in three), a sanctuary, an elite guard, a shrine or an armoury |
+
+Shards drop from everything that falls: 2 to 8 by the enemy's health, double for an elite, 40 for a champion, 60 for the Shade and 80 for a keeper. A scripted player earns about 1,000 in a sprint and spends most of them.
+
+Between floors the player keeps their health, with a floor of 40% of the maximum. It was 60% before sanctuaries existed, when it made a rest worth nothing.
+
+The pacts: Glass Heart (40% more damage, 30 less health), Hunger (6 health per kill, none between waves), Debt (150 shards, enemies 15% tougher), Hubris (60% more focus, half a pip lost per hit taken), Last Stand (double damage under 40% health, all healing halved), Overclock (faster and longer-bladed, enemies 10% faster), Blood Tithe (a power costs health when the meter is empty) and Greed (double shards, 15% more damage taken).
+
+### Shaped rooms
+
+About one floor in five, never a champion's or a keeper's.
+
+| Room | Rule |
+| --- | --- |
+| Open edges | 250 to 340 units of floor are missing at each side. A fighter does not walk, run or charge over the lip. One that is knocked, thrown or leaps past it falls. An enemy that falls is dead and the room gets the kill. The player and anything too heavy to throw is hauled back for 16% (6% for a boss) of maximum health |
+| High ground | Two or three fixed ledges. Up to two of each wave's shooters are posted on them and hold them until knocked off |
+| Sliding bridge | A platform that crosses half the room every eight seconds and carries whoever stands on it, with one side open |
+| The lift | 400 units open at each side, shaft lights running past, and a small sliding bridge over the middle |
+
+Nothing is ever dropped in over an open edge. A leap after a player who stands on the lip can carry the leaper over, and that is left in on purpose: it is the player's reward for standing somewhere dangerous.
 
 ### Difficulty
 
