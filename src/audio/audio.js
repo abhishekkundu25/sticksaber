@@ -1566,11 +1566,11 @@ const MIX = {
   tetherSnap: 1, enrage: .37, dismount: .55, packHowl: .68, nerveBreak: .54,
   alarm: 1.53, twinSwap: 2.19, finisher: .42, uiHover: .32, tutorialDone: 2.2,
   pullIn: .9, pin: .47, reflect: .65,
-  // Room events peak near -4.5 dBFS at their loudest play, 2 dB or more under finisher; shop
+  // Room events peak near -5.5 dBFS at their loudest play, 2.5 dB or more under finisher; shop
   // and UI sit near -11 to -17.
-  surprise: .36, shadeArrive: .47, lightsOut: .4, stampedeWarn: .57, stampede: .28, quake: .45, thunder: .38, cacheDrop: .3, propBreak: .43,
+  surprise: .33, shadeArrive: .42, lightsOut: .4, stampedeWarn: .57, stampede: .25, quake: .36, thunder: .34, cacheDrop: .3, propBreak: .43,
   pickupShard: .51, buy: 2.04, uiDeny: .22, uiBack: .6, doorsOpen: .78, doorPick: .46,
-  pactTake: .49, rest: 1.07, challengeMet: 1.76, objectiveDone: .72, beaconFire: .31, markSet: 2.21, allyFreed: 1.17, courierGone: 1.64, bountyWon: 2.04, weaponSwap: .78,
+  pactTake: .49, rest: 1.07, challengeMet: 1.76, objectiveDone: .72, beaconFire: .26, markSet: 2.21, allyFreed: 1.17, courierGone: 1.64, bountyWon: 2.04, weaponSwap: .78,
 };
 
 // ---------------------------------------------------------------------------------------------
