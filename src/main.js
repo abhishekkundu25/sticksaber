@@ -14,6 +14,7 @@ import { DIFFS, DIFF_IDS, MODES, MODE_IDS, parseSeed, seedLabel } from './game/g
 import { hash32 } from './core/math.js';
 import { Meta } from './core/meta.js';
 import { BOON_IDS } from './game/boons.js';
+import { FORM_IDS } from './game/forms.js';
 
 const canvas = document.getElementById('game');
 const input = new Input();
@@ -137,6 +138,8 @@ function toMenu() {
   world.clearEnemies();
   world.input = new BotInput(world, 0.78);
   world.input.show = true;
+  // A different weapon in the sparring match each time the title comes up.
+  world.setForm(pick(FORM_IDS));
   demoQueue.length = 0; demoGap = 0; demoAlive = 0;
   buildMenu();
 }

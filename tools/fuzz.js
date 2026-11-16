@@ -129,5 +129,5 @@ const want = ['player:attack:RIPOSTE', 'player:attack:PLUNGE_LAND', 'player:atta
   'forgemaster:attack:fm_string', 'forgemaster:attack:fm_quake', 'forgemaster:attack:fm_ember', 'forgemaster:attack:fm_erupt', 'forgemaster:custom',
   'strain:attack:br_charge', 'strain:attack:d_throw', 'strain:stagger', 'strain:custom', 'champion:custom', 'champion:stagger', 'warden:custom', 'warden:stagger', 'warden:attack:p_slam', 'warden:attack:fm_erupt~', 'warden:guard',
   'generated:tempo', 'generated:chain', 'beast:attack:bt_hound_snap', 'beast:attack:bt_charger_charge', 'beast:attack:bt_raptor_leap', 'beast:attack:bt_ape_slam', 'beast:attack:bt_spit_shot', 'beast:custom', 'beast:ragdoll', 'beast:stagger',
-  'rider', 'enraged', 'shade:custom', 'shade:stagger', 'rival:attack:L1', 'herd:free', 'core:free', 'cache:free', 'cell:free', 'courier:free', 'twinA:attack:p_verdict', 'twinB:attack:ln_thrust', 'cartographer:custom', 'player:attack:TW_L1', 'player:attack:GS_H1', 'player:attack:ST_L1'];
+  'rider', 'enraged', 'shade:custom', 'shade:stagger', 'rival:attack:L1', 'beast:free', 'core:free', 'cache:free', 'cell:free', 'courier:free', 'ally:attack:L1', 'twinA:attack:p_verdict', 'twinB:attack:ln_thrust', 'cartographer:custom', 'player:attack:TW_L1', 'player:attack:GS_H1', 'player:attack:ST_L1'];
 for (const k of want) if (!seen[k]) console.log('  NOT REACHED:', k);

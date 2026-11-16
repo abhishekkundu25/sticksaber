@@ -86,7 +86,7 @@ These are the saber's. The other weapon forms use the same inputs with their own
 
 ## Weapon forms
 
-A new run opens with a choice of blade, kept for the whole run. Each form has a complete move list of its own on the same inputs.
+A new run opens with a choice of seven weapons. Each has a complete move list of its own on the same inputs. An armoury, the quartermaster or a card can trade it for another on the way up, and your build comes with you.
 
 | Form | Blade | How it plays |
 | --- | --- | --- |
@@ -94,6 +94,9 @@ A new run opens with a choice of blade, kept for the whole run. Each form has a 
 | Twin blades | Two short blades | Fast and short. A six-hit string that alternates hands, a long air string, about five hits a second for little damage each. Weak against guards. |
 | Greatsword | One long wide blade | Slow, wide arcs that hit several enemies. Its wind-ups shrug off light hits, and it breaks posture quickly. Three lights and a chargeable overhead that cracks the floor. |
 | Staff | A blade at each end | Spins that hit in front and behind at once, and long thrusts. Light damage on one target, strong in a crowd. |
+| Lash | A whip of light | Twice the saber's reach. The tip cracks and hits hardest; right up close it misses. The heavy wraps a target and drags it to you, or drags you to something too big to pull. |
+| Gauntlets | A short blade on each fist | The fastest strings and the shortest reach. Every punch that lands charges the fists, and the heavy spends the charge on a shockwave that grows with it. |
+| Drawblade | A long blade kept in its sheath | Quick draw cuts. Hold heavy to charge in the sheath through three levels, release to dash through the line, and the cuts land as the blade clicks home. Release just after a level's tick for a perfect draw. |
 
 Against a single target the twin blades and the greatsword deal within 6% of the saber's damage and the staff about 15% less.
 
@@ -196,7 +199,7 @@ Before a champion or a keeper the three doors are always rooms, never risks.
 
 ### Animals
 
-From sector II each sector adds one animal species, generated from one of eight body plans. Two animals of the same plan from different seeds look like different species: proportions, horns, tails, crests, colour and weapon all vary.
+Each generated sector adds one animal species, generated from one of eight body plans. A knocked-down or dead animal keeps its own body: a hound falls like a hound, a scorpion lands on its back, a flyer folds its wings. Two animals of the same plan from different seeds look like different species: proportions, horns, tails, crests, colour and weapon all vary.
 
 | Plan | What it does | Answer |
 | --- | --- | --- |

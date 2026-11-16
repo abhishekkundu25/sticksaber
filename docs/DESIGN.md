@@ -396,7 +396,7 @@ After floors 2, 4, 6, 8 and 9 of a sector the player picks one of three doors. B
 | Armoury | Three other weapons, or keep the one in hand |
 | Unmarked | A gift of 60 shards (one in three), a sanctuary, an elite guard, a shrine or an armoury |
 
-Shards drop from everything that falls: 2 to 8 by the enemy's health, double for an elite, 40 for a champion, 60 for the Shade and 80 for a keeper. A scripted player earns about 1,000 in a sprint and spends most of them.
+Shards drop from everything that falls: 2 to 8 by the enemy's health, double for an elite, 40 for a champion, 60 for the Shade and 80 for a keeper. A scripted player earns 1,400 to 2,000 in a sprint and spends most of them.
 
 Between floors the player keeps their health, with a floor of 40% of the maximum. It was 60% before sanctuaries existed, when it made a rest worth nothing.
 
@@ -455,7 +455,7 @@ A fall keeps the build. On Student and Adept it restarts the wave, on Master the
 
 ### Weapon forms
 
-A run played by a person opens with a choice of blade, kept for the run and saved with it. A form is a blade and a complete move list on the same inputs, so the choice changes how the whole game is played, not a number.
+A run played by a person opens with a choice of weapon, saved with the run. An armoury, the quartermaster or a card can trade it on the way up, and a Second Sheath carries two. A form is a blade and a complete move list on the same inputs, so the choice changes how the whole game is played, not a number.
 
 | Form | Blade | Character | Damage on one target, against the saber |
 | --- | --- | --- | --- |
@@ -551,4 +551,7 @@ Every sound is synthesized with the Web Audio API. A saber hum rises from 88 Hz 
 5. Tone of kills. Bodies are cut apart with glowing ends. Keep it, or hold dismemberment back for finishers only?
 6. Weapon forms. Their damage was balanced with a script, and the greatsword in particular needs a human's timing. Which one feels best, and is any of them a trap?
 7. Bonds. Are the threads and tags enough to read a bond in the middle of a fight, or does it need a stronger cue?
-8. Limp animals. A knocked-down or dead animal is drawn as thick bones, not with its living shape. It reads, but it loses the tail and head. Worth a proper limp drawing?
+8. Surprises. Do they feel like the tower doing something to you, or like a second wave with a banner? Which ones would you cut?
+9. The Shade. Its cuts are your moves slowed by a fifth so they can be parried. Does it still feel like fighting yourself?
+10. Run length. The sprint is thirty floors and half an hour for a script. Is that the right default, and is the climb still worth keeping?
+11. Money. A script earns about a thousand shards in a sprint and spends most of them. Are the prices right, and is there anything worth saving for?

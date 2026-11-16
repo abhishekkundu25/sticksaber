@@ -649,7 +649,7 @@ export class Hud {
       const col = Math.floor(i / rows), yy = y + (i % rows) * 19;
       this.text(ctx, `${g.name.toUpperCase()}${g.max > 1 ? `   ${roman(dir.build[g.id])}` : ''}`, rx + col * 200, yy, 12, RARITY_COL[g.r], 'left', 600, 1.5);
     });
-    const tail = dir.training ? '' : `FLOOR ${dir.stageDef.n}      ·      ${DIFFS[dir.diff].name}      ·      SEED ${seedLabel(dir.seed)}`;
+    const tail = dir.training ? '' : `${dir.daily ? `DAILY ${dir.daily}` : MODES[dir.mode].name}      ·      FLOOR ${dir.stageDef.n} OF ${dir.count}      ·      ${DIFFS[dir.diff].name}      ·      ${world.shards} SHARDS      ·      SCORE ${dir.score.toLocaleString('en-US')}      ·      SEED ${seedLabel(dir.seed)}`;
     this.text(ctx, `${touch ? '' : 'ESC resume      ·      Q quit to menu      ·      '}${tail}`, W / 2, H - 44, 13, '#ffffffcc', 'center', 600, 3);
     if (!dir.training && !touch) this.text(ctx, 'Your run is saved at the start of every floor', W / 2, H - 70, 11, '#ffffff66', 'center', 600, 2);
     if (!touch) {
