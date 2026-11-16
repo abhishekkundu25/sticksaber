@@ -66,7 +66,7 @@ export function resolveCombat(world) {
       if ((B.team === A.team && !(A.feud && B.feud && A.feud !== B.feud)) || B.remove || B.phantom || A.hitSet.has(B)) continue;
       const c = hurtCircles(B);
       const i = weaponTouches(A, h, c, B);
-      if (i >= 0) { const r = applyHit(world, A, B, h, c[i], c[i + 1]); h.onHit?.(world, A, B, r); } // a form's own follow-up
+      if (i >= 0) { const r = applyHit(world, A, B, h, c[i], c[i + 1]); h.onHit?.(world, A, B, r, h); } // a form's own follow-up
     }
   }
 }

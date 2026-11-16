@@ -7,7 +7,7 @@ import { World } from '../src/game/world.js';
 import { Director } from '../src/game/encounters.js';
 import { BotInput } from '../src/game/bot.js';
 import { rng } from '../src/core/math.js';
-import { generateRun } from '../src/game/gen.js';
+import { generateRun, SURPRISES } from '../src/game/gen.js';
 import { FORM_IDS } from '../src/game/forms.js';
 
 // The floor the Forgemaster keeps in the run with this seed.
@@ -66,11 +66,11 @@ function soak(label, secs, setup, god) {
 }
 
 // Plays the whole ascent with a scripted player. Gives up after `maxFalls`, which is a wall, not a bug.
-function playthrough(skill, repeat, seed, diff, maxFalls = 80, form = 'saber') {
+function playthrough(skill, repeat, seed, diff, maxFalls = 80, form = 'saber', mode = 'climb') {
   const { world, dir } = make((w) => new BotInput(w, skill));
   world.input.repeat = repeat; world.setForm(form);
-  dir.startRun(0, seed, diff);
-  const sec = Array.from({ length: 10 }, () => ({ falls: 0, t: 0 }));
+  dir.startRun(0, seed, diff, null, mode);
+  const sec = Array.from({ length: dir.run.sectors.length }, () => ({ falls: 0, t: 0 }));
   let mark = 0, deathsAt = 0, stage = 0, t = 0;
   for (; t < 3600 * 6 && dir.deaths < maxFalls; t += dt) {
     world.input.tick(dt); world.step(dt); dir.update(dt);
@@ -92,6 +92,18 @@ for (const f of quick ? [1, 23, 78] : [1, 6, 9, 13, 27, 38, 54, 66, 78, 93]) soa
 for (const f of quick ? [10, 45] : [5, 10, 20, 30, 45, 60, 80, 90]) soak(`random input, ${f % 10 ? 'champion' : 'keeper'} of floor ${f}`, quick ? 20 : 60, (d) => d.startRun(f - 1, 5 + f), true);
 soak('random input, forgemaster', quick ? 20 : 90, (d) => d.startRun(generateForge(5) - 1, 5), true);
 soak('random input, proctor', quick ? 20 : 120, (d) => d.startRun(99, 6), true);
+for (const f of quick ? [4, 22] : [1, 4, 9, 14, 22, 27, 30]) soak(`random input, sprint floor ${f}`, quick ? 15 : 40, (d) => d.startRun(f - 1, 2000 + f, 'normal', null, 'sprint'), true);
+// Every surprise and every objective, forced onto the last wave of a plain floor.
+for (const type of Object.keys(SURPRISES)) {
+  soak(`random input, surprise ${type}`, quick ? 14 : 30, (d) => {
+    d.startRun(16, 3000, 'normal', null, 'sprint');
+    const def = d.stageDef; def.objective = null; def.surprise = { type, tier: 2 };
+    d.enterStage(d.stage, type === 'shade' ? d.waveCount : d.waveCount - 1, true);
+  }, true);
+}
+for (const o of [{ type: 'survive', time: 12 }, { type: 'hunt' }, { type: 'hold', fx: 0.2, need: 6 }, { type: 'cores', at: [-0.6, 0, 0.6] }]) {
+  soak(`random input, objective ${o.type}`, quick ? 14 : 30, (d) => { d.startRun(16, 3100, 'normal', null, 'sprint'); const def = d.stageDef; def.surprise = null; def.objective = o; d.enterStage(d.stage, 0, true); }, true);
+}
 soak('training, full roster', quick ? 15 : 60, (d, w) => {
   d.startTraining();
   for (const k of ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'BracketLeft', 'BracketLeft', 'BracketLeft', 'BracketRight']) d.trainingKey(k);
@@ -99,6 +111,10 @@ soak('training, full roster', quick ? 15 : 60, (d, w) => {
 }, true);
 
 const seeds = quick ? [7000] : [7000, 7001, 7002];
+for (const [name, skill] of [['skilled', 0.9], ['average', 0.55], ['weak', 0.3]]) {
+  for (const seed of seeds) console.log(`sprint normal ${name.padEnd(8)} seed ${seed}: ${playthrough(skill, null, seed, 'normal', 80, 'saber', 'sprint')}`);
+}
+if (quick) { console.log(`ok: ${steps} steps (quick: the long climbs are skipped)`); process.exit(0); }
 for (const diff of ['easy', 'normal', 'hard']) {
   for (const [name, skill] of [['skilled', 0.9], ['average', 0.55], ['weak', 0.3]]) {
     for (const seed of seeds) console.log(`${diff.padEnd(6)} ${name.padEnd(8)} seed ${seed}: ${playthrough(skill, null, seed, diff)}`);
@@ -113,5 +129,5 @@ const want = ['player:attack:RIPOSTE', 'player:attack:PLUNGE_LAND', 'player:atta
   'forgemaster:attack:fm_string', 'forgemaster:attack:fm_quake', 'forgemaster:attack:fm_ember', 'forgemaster:attack:fm_erupt', 'forgemaster:custom',
   'strain:attack:br_charge', 'strain:attack:d_throw', 'strain:stagger', 'strain:custom', 'champion:custom', 'champion:stagger', 'warden:custom', 'warden:stagger', 'warden:attack:p_slam', 'warden:attack:fm_erupt~', 'warden:guard',
   'generated:tempo', 'generated:chain', 'beast:attack:bt_hound_snap', 'beast:attack:bt_charger_charge', 'beast:attack:bt_raptor_leap', 'beast:attack:bt_ape_slam', 'beast:attack:bt_spit_shot', 'beast:custom', 'beast:ragdoll', 'beast:stagger',
-  'rider', 'enraged', 'twinA:attack:p_verdict', 'twinB:attack:ln_thrust', 'cartographer:custom', 'player:attack:TW_L1', 'player:attack:GS_H1', 'player:attack:ST_L1'];
+  'rider', 'enraged', 'shade:custom', 'shade:stagger', 'rival:attack:L1', 'herd:free', 'core:free', 'cache:free', 'cell:free', 'courier:free', 'twinA:attack:p_verdict', 'twinB:attack:ln_thrust', 'cartographer:custom', 'player:attack:TW_L1', 'player:attack:GS_H1', 'player:attack:ST_L1'];
 for (const k of want) if (!seen[k]) console.log('  NOT REACHED:', k);

@@ -8,7 +8,7 @@ import { Director } from '../src/game/encounters.js';
 import { BotInput } from '../src/game/bot.js';
 import { MOVES, fairTells } from '../src/game/moves.js';
 import { applyHit } from '../src/game/combat.js';
-import { generateRun, doorsFor, MODES, SURPRISES, OBJECTIVES, CHALLENGES, DOORS, CURSES, PER } from '../src/game/gen.js';
+import { generateRun, doorsFor, MODES, SURPRISES, OBJECTIVES, CHALLENGES, DOORS, CURSES, ROOMS, PER } from '../src/game/gen.js';
 import { AUGMENTS, AUG, buildMods, draftAugments, draftPacts } from '../src/game/augments.js';
 import { FORMS, FORM_IDS } from '../src/game/forms.js';
 import { POWER_IDS } from '../src/game/powers.js';
@@ -93,7 +93,7 @@ test('every sector has one surprise, the Shade comes back stronger, and objectiv
         if (f.challenge) {
           assert.ok(CHALLENGES[f.challenge.type]); seenC.add(f.challenge.type);
           assert.ok(!S.school && f.pos !== 5 && f.pos !== 10 && !f.objective);
-          if (f.challenge.type === 'room') assert.ok(f.terrain && (f.terrain.vents.length || f.terrain.walls), 'a room challenge with no hazard in the room');
+          if (f.challenge.type === 'room') assert.ok(f.terrain && (f.terrain.vents.length || f.terrain.walls || f.terrain.pits?.length), 'a room challenge with no hazard in the room');
           if (f.challenge.type === 'swift') assert.ok(f.challenge.time >= 20);
         }
       }
@@ -461,4 +461,92 @@ test('a scripted player gets through the first sector of a sprint, doors and roo
   assert.ok(Object.values(dir.build).reduce((a, b) => a + b, 0) >= 9);
   assert.ok(dir.score > 1000);
   assert.ok(finite(world));
+});
+
+test('rooms have a shape: open edges, ledges with shooters on them, a sliding bridge and a lift', () => {
+  const seen = {};
+  let perched = 0;
+  for (const mode of ['sprint', 'climb']) for (let seed = 1; seed <= 25; seed++) {
+    const R = generateRun(seed, 'normal', mode);
+    for (const f of R.floors) {
+      if (!f.room) { assert.ok(!f.terrain?.pits && !f.terrain?.lift); continue; }
+      assert.ok(ROOMS[f.room]); seen[f.room] = (seen[f.room] || 0) + 1;
+      assert.ok(!f.boss && !R.sectors[f.sector].school, `floor ${f.n}: a shaped room for a champion, a keeper or the school`);
+      const T = f.terrain;
+      if (f.room === 'edges' || f.room === 'lift') assert.equal(T.pits.length, 2);
+      if (f.room === 'lift') assert.ok(T.lift && T.plats[0].amp > 0);
+      if (f.room === 'mover') assert.ok(T.pits.length === 1 && T.plats[0].amp > 0 && T.plats[0].fixed);
+      if (f.room === 'ledges') assert.ok(T.plats.filter((p) => p.fixed && !p.amp).length >= 2);
+      for (const w of f.waves) for (const s of w.spawns) if (s.perch !== undefined) { perched++; assert.equal(f.room, 'ledges'); assert.ok(s.perch < 2); }
+      // Whatever the edges take, there is room left to fight in.
+      const half = 950, open = (T.pits || []).reduce((n, q) => n + q.w, 0);
+      assert.ok(half * 2 - open > 1000, `floor ${f.n}: only ${half * 2 - open} of floor left`);
+    }
+  }
+  assert.deepEqual(Object.keys(seen).sort(), Object.keys(ROOMS).sort());
+  assert.ok(perched > 10, `only ${perched} shooters were posted on ledges`);
+
+  // The physics, on a floor with both edges open.
+  const g = boot(7, 77), { world, dir } = g, def = dir.stageDef;
+  def.surprise = null; def.objective = null; def.challenge = null;
+  def.terrain = { plats: [{ fx: 0, y: -150, w: 240, fixed: true, amp: 0.3, period: 4, phase: 0 }], vents: [], walls: false, pits: [{ side: -1, w: 300 }, { side: 1, w: 300 }] };
+  dir.enterStage(dir.stage, 0, true);
+  world.input = { tick() {}, held: () => false, axisX: () => 0, consume: () => false, peek: () => false, sincePress: () => 9 };
+  const lipR = world.maxX - 300, lipL = world.minX + 300;
+  assert.equal(world.pits.length, 2);
+  assert.ok(world.inPit(lipR + 50) && world.inPit(lipL - 50) && !world.inPit(0));
+  assert.equal(world.solidX(lipR + 120), lipR - 70);
+  // Nothing is ever dropped in over the open part.
+  for (const x of [world.maxX - 80, world.minX + 80]) { const f = world.spawnEnemy('initiate', x, false); assert.ok(!world.inPit(f.x), 'an enemy was spawned over the drop'); f.remove = true; }
+  run(g, 0.1, { god: false });
+  // An enemy walking at the edge stops on the lip.
+  // (A bulwark: it walks and charges but never leaps. A leap after a player who hangs over the drop is the leaper's own mistake.)
+  const walker = world.spawnEnemy('bulwark', lipR - 120, false);
+  world.player.x = lipR + 150; world.player.y = -900; world.player.vy = 0; world.player.invuln = 1e9;   // bait from over the drop
+  for (let i = 0; i < 360; i++) { world.player.y = -900; world.player.vy = 0; world.step(DT); }
+  assert.ok(!walker.dead && walker.y <= 0.01 && walker.x < lipR, `the enemy walked off the edge (x ${walker.x.toFixed(0)}, lip ${lipR})`);
+  // Knocked over it, the enemy is gone and the room gets the kill.
+  const before = world.stats.hazardKills;
+  world.player.x = 0;
+  applyHit(world, null, walker, { dmg: 1, post: 0, kx: 900, ky: -500, kind: 'knock', stop: 0, shake: 0, stun: 0.4, fromPlayer: true, id: 'T', fam: 'power', dir: 1 }, walker.cx, walker.cy);
+  for (let i = 0; i < 600 && !walker.remove; i++) world.step(DT);
+  assert.ok(walker.remove && walker.dead, 'the enemy survived the drop');
+  assert.equal(world.stats.hazardKills, before + 1);
+  // The player who falls is hauled back to the floor and pays for it.
+  const p = world.player; p.invuln = 0; p.hp = p.maxHp; p.x = lipL - 120; p.y = -10; p.vy = 0; p.onGround = false;
+  for (let i = 0; i < 600 && p.y > -100; i++) world.step(DT);
+  assert.ok(p.hp < p.maxHp && p.hp > p.maxHp * 0.7 && !world.inPit(p.x) && !p.dead, `hp ${p.hp} at x ${p.x.toFixed(0)}`);
+  for (let i = 0; i < 360; i++) world.step(DT);
+  assert.ok(p.onGround && Math.abs(p.y) < 0.01);
+  // The sliding bridge carries whoever stands on it.
+  const B = world.platforms[0]; p.x = B.x; p.y = B.y - 40; p.vy = 0; p.onGround = false; p.invuln = 1e9;
+  for (let i = 0; i < 60; i++) world.step(DT);
+  assert.ok(Math.abs(p.y - B.y) < 0.01, 'the player did not land on the bridge');
+  const off = p.x - B.x, x0 = B.x;
+  for (let i = 0; i < 180; i++) world.step(DT);
+  assert.ok(Math.abs(B.x - x0) > 60, 'the bridge did not move');
+  assert.ok(Math.abs((p.x - B.x) - off) < 2, 'the bridge left its rider behind');
+  assert.ok(finite(world));
+});
+
+test('a shooter posted on a ledge holds it until it is knocked off', () => {
+  const g = boot(7, 78), { world, dir } = g, def = dir.stageDef;
+  def.surprise = null; def.objective = null; def.challenge = null;
+  def.terrain = { plats: [{ fx: -0.5, y: -196, w: 300, fixed: true }, { fx: 0.5, y: -196, w: 300, fixed: true }], vents: [], walls: false };
+  def.waves = [{ spawns: [{ kind: 'marksman', dx: 400, t: 0, perch: 1 }], attackers: 2, hint: null }];
+  dir.enterStage(dir.stage, 0, true);
+  world.player.invuln = 1e9;
+  run(g, 4.5, { god: false, until: () => world.enemies.length > 0 && world.enemies[0].onGround });
+  const m = world.enemies[0], L = world.platforms[1];
+  assert.ok(m && m.perch === L, 'nobody was posted');
+  world.input = { tick() {}, held: () => false, axisX: () => 0, consume: () => false, peek: () => false, sincePress: () => 9 };
+  for (let i = 0; i < 120 * 8; i++) { world.step(DT); dir.update(DT); assert.ok(m.rag || Math.abs(m.x - L.x) <= L.w / 2 + 1, `the shooter left its ledge at x ${m.x.toFixed(0)}`); }
+  assert.ok(Math.abs(m.y - L.y) < 0.01, 'the shooter is not standing on its ledge');
+  // A ledge never overloads, however long it is stood on.
+  assert.ok(L.solid && L.load === 0);
+  // Knocked off, it lands on the floor and is an ordinary enemy again.
+  m.toRagdoll(-700, -300, 2);
+  for (let i = 0; i < 120 * 6 && (m.rag || m.y < -1); i++) { world.step(DT); dir.update(DT); }
+  for (let i = 0; i < 120 * 3; i++) { world.step(DT); dir.update(DT); }
+  assert.ok(m.dead || m.perch === null || Math.abs(m.y - L.y) < 0.01);
 });

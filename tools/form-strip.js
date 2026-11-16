@@ -59,7 +59,7 @@ async function main() {
       const sc = { z: Number(process.env.Z || 0.62), form, ...SCRIPTS[name] };
       if (process.env.EVERY) sc.every = +process.env.EVERY;
       if (process.env.FRAMES) sc.frames = +process.env.FRAMES;
-      if (!STRINGS[form] && sc.tokens) continue;
+      if (!STRINGS[form] && sc.tokens || name === 'sig' && !SIGNATURES[form]) continue;
       if (sc.tokens) sc.tokens = sc.tokens(STRINGS[form], form).split(' ');
       if (typeof sc.dist === 'function') sc.dist = sc.dist(form);
       const url = await page.evaluate(shoot, sc);

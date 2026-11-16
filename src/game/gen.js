@@ -132,7 +132,13 @@ const HINTS = {
   plats: 'LIGHT BRIDGES  ·  Jump onto them for a breather or a plunge. They overload if you stay. S + SPACE drops through',
   vents: 'VENTS  ·  The marked strips erupt on a timer and burn anyone standing there. Knock enemies into them',
   walls: 'CHARGED WALLS  ·  The walls are live. Knock or throw an enemy into one and it takes a shock',
+  edges: 'OPEN EDGES  ·  The floor ends before the wall. Knock them over the edge and they are gone. A fall costs you health',
+  ledges: 'LEDGES  ·  Shooters hold the high ground. Jump up to them, or launch something into them',
+  mover: 'SLIDING BRIDGE  ·  It crosses the room and carries whoever stands on it. One side of the floor is open',
+  lift: 'THE LIFT  ·  Both sides are open all the way up. Stay in the middle and send them over',
 };
+// Rooms with a shape: where the floor ends, what hangs over it and what moves.
+export const ROOMS = { edges: 'Open Edges', ledges: 'High Ground', mover: 'Sliding Bridge', lift: 'The Lift' };
 
 // [kind, x offset from the player, delay]
 const T = (hint, attackers, ...spawns) => ({ hint, attackers, spawns: spawns.map(([kind, dx, t = 0]) => ({ kind, dx, t })) });
@@ -487,14 +493,16 @@ export function generateRun(seed, diff = 'normal', mode = 'climb') {
   const floors = [];
   for (let n = 1; n <= M.floors; n++) floors.push(buildFloor(n, seed, D, roster, sectors, plan, M));
   for (const S of sectors) { S.strains = roster.strains[S.q]; S.champion = roster.champions[S.q]; S.boss = floors[S.i * PER + 9].boss; }
-  decorate(seed, M, sectors, floors);
+  decorate(seed, M, sectors, floors, roster);
   return { seed, diff: D.id, mode: M.id, count: M.floors, roster, sectors, floors };
 }
 
 // Surprises, objectives and challenges are laid over the finished floors, each from its own random
 // stream, so adding one kind never moves the others or the waves underneath.
-function decorate(seed, M, sectors, floors) {
-  const rs = makeRng(hash32(seed, 0x5a9e)), ro = makeRng(hash32(seed, 0x0b1e)), rc = makeRng(hash32(seed, 0xc4a1));
+function decorate(seed, M, sectors, floors, roster) {
+  // What can be posted on a ledge: it shoots, and it stands on something.
+  const shoots = (kind) => { const d = roster.defs[kind]; return kind === 'marksman' || (!!d && (d.base === 'marksman' || (!!d.beast && !!d.ranged && !d.flying))); };
+  const rs = makeRng(hash32(seed, 0x5a9e)), ro = makeRng(hash32(seed, 0x0b1e)), rc = makeRng(hash32(seed, 0xc4a1)), rt = makeRng(hash32(seed, 0x700e));
   const live = sectors.filter((S) => !S.school);
   // The Shade comes once in a sprint and three times on the climb, spread over the run. Every other
   // surprise turns up once before any repeats.
@@ -519,10 +527,26 @@ function decorate(seed, M, sectors, floors) {
       f.reward = 'rare'; f.sub = `Floor ${f.n}  ·  ${OBJECTIVES[type].tag}`;
       f.waves[0].hint = OBJECTIVES[type].text(o);
     }
+    // About one floor in four has a shape of its own. Champions and keepers keep a plain room.
+    for (let pos = 1; pos <= 9; pos++) {
+      const f = at(pos);
+      if (pos === 5 || rt() > 0.27) continue;
+      const shape = pick(rt, ['edges', 'edges', 'edges', 'ledges', 'ledges', 'mover', 'lift', 'lift']), T = f.terrain || { plats: [], vents: [], walls: false };
+      f.room = shape;
+      if (shape === 'edges') f.terrain = { ...T, walls: false, pits: [{ side: -1, w: 250 + Math.round(rt() * 90) }, { side: 1, w: 250 + Math.round(rt() * 90) }] };
+      else if (shape === 'ledges') {
+        f.terrain = { ...T, plats: [{ fx: -0.52, y: -196, w: 300, fixed: true }, { fx: 0.52, y: -196, w: 300, fixed: true }, ...(rt() < 0.5 ? [{ fx: 0, y: -330, w: 220, fixed: true }] : [])] };
+        // The floor's shooters take the high ground, one to a ledge.
+        for (const w of f.waves) { let k = 0; for (const sp of w.spawns) { if (k < 2 && sp.g === undefined && shoots(sp.kind)) sp.perch = k++; } }
+      } else if (shape === 'mover') f.terrain = { ...T, walls: false, plats: [{ fx: 0, y: -150, w: 260, fixed: true, amp: 0.5, period: 8, phase: +rt().toFixed(2) }], pits: [{ side: rt() < 0.5 ? -1 : 1, w: 300 }] };
+      else { f.terrain = { plats: [{ fx: 0, y: -165, w: 230, fixed: true, amp: 0.28, period: 7, phase: +rt().toFixed(2) }], vents: [], walls: false, pits: [{ side: -1, w: 400 }, { side: 1, w: 400 }], lift: true }; f.title = 'FREIGHT LIFT'; }
+      if (!f.waves[0].hint && S.i <= 3) f.waves[0].hint = HINTS[shape];
+      if (!f.objective && !/New|Bond/.test(f.sub)) f.sub = `Floor ${f.n}  ·  ${ROOMS[shape]}`;
+    }
     for (let pos = 1; pos <= 9; pos++) {
       const f = at(pos);
       if (pos === 5 || f.objective || rc() > 0.3) continue;
-      const hazard = f.terrain && (f.terrain.vents.length || f.terrain.walls);
+      const hazard = f.terrain && (f.terrain.vents.length || f.terrain.walls || f.terrain.pits?.length);
       const type = pick(rc, hazard ? ['untouched', 'swift', 'pure', 'parry', 'aerial', 'room', 'room'] : ['untouched', 'swift', 'pure', 'parry', 'aerial']);
       f.challenge = { type };
       if (type === 'swift') f.challenge.time = 16 + 5 * f.waves.reduce((n, w) => n + w.spawns.length, 0);

@@ -326,3 +326,29 @@ test('techniques work with the new forms: undertow, meteor, razor step, aerialis
     assert.equal(m.move?.id, formMove(p, 'L1'), `${id}: the mirror image did not repeat the move`);
   }
 });
+
+test('a drawblade cut still lands when the draw is cancelled before the blade is sheathed', () => {
+  const { world, p, e } = room('drawblade', 110);
+  world.input.press('heavy', 0.1 + DRAW_LEVELS[1] + 0.05);
+  let pressed = false, released = -1;
+  run(world, 2.0, (t) => {
+    if (released < 0 && p.chargeDone) released = t;
+    // Cancel into a light as soon as the recovery allows, before the sheathe at 0.58.
+    if (!pressed && released >= 0 && p.state === 'attack' && p.move.id === 'DB_H1' && p.mt >= p.move.cancel * 0.75 && p.mt < 0.55) { world.input.press('light'); pressed = true; }
+  });
+  assert.ok(pressed, 'the cancel was never pressed');
+  assert.ok(1e5 - e.hp > 20, `only ${(1e5 - e.hp).toFixed(1)} landed`);
+  assert.ok(!p.marks?.length && !p.cuts?.length, 'marks were left behind');
+});
+
+test('changing form on a live fighter clears what the last form left behind', () => {
+  const { world, p } = room('drawblade', 400);
+  run(world, 0.2);
+  assert.ok(p.sheathed, 'the drawblade should rest in its sheath');
+  world.setForm('saber'); run(world, 0.1);
+  assert.ok(!p.sheathed && p.blade === FORMS.saber.blade, 'the saber is hidden as if sheathed');
+  world.setForm('lash'); run(world, 0.1);
+  assert.ok(p.lash, 'the whip did not start');
+  world.setForm('twin'); run(world, 0.1);
+  assert.ok(!p.lash, 'whip points left on a twin-blade fighter would turn its hit test into a whip');
+});

@@ -14,6 +14,21 @@ import { bind } from '../src/game/bonds.js';
 const DT = 1 / 120;
 const finite = (f) => [f.x, f.y, f.vx, f.vy, f.hp, f.posture, f.bx, f.by, f.tx, f.ty, f.saddleX ?? 0, f.saddleY ?? 0, f.hdA ?? 0, f.spA ?? 0, f.roll ?? 1, ...f.j, ...f.p,
   ...(f.tl ?? []), ...(f.xl ?? []), ...(f.wg ?? [])].every(Number.isFinite);
+// Every point the beast draw functions pose a body from, in world space. Head and spine frames
+// include the roll, so a body that flips its drawn side shows up as a jump here.
+function drawn(f) {
+  const out = [...f.j, ...f.tl, ...f.xl];
+  if (f.B.wing) out.push(...f.wg);
+  const B = f.B, s = f.scale, FX = f.facing * f.xm, c = Math.cos(f.hdA), sn = Math.sin(f.hdA);
+  for (const [a, b] of [[1, 0], [-0.3, 0.8], [0.6, -0.6]]) {
+    out.push(f.j[0] + (c * a * B.head * s - sn * b * B.headR * s * f.roll) * FX, f.j[1] - (sn * a * B.head * s + c * b * B.headR * s * f.roll));
+  }
+  const dx = f.j[2] - f.j[4], dy = f.j[3] - f.j[5], d = Math.hypot(dx, dy) || 1, g = B.girth * s * f.roll;
+  out.push((f.j[2] + f.j[4]) / 2 + (dy / d) * f.facing * g, (f.j[3] + f.j[5]) / 2 - (dx / d) * f.facing * g);
+  return out;
+}
+const jump = (a, b) => { let m = 0; for (let i = 0; i < a.length; i += 2) m = Math.max(m, Math.hypot(a[i] - b[i], a[i + 1] - b[i + 1])); return m; };
+
 function hueOf(hex) {
   const n = parseInt(hex.slice(1), 16), r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
@@ -88,12 +103,16 @@ test('each plan fights the scripted player for 10 seconds with every number fini
     const def = makeBeast(makeRng(99 + plan.length), `f_${plan}`, plan, 9, new Set());
     const world = arena(def);
     const es = [world.spawnEnemy(def.kind, 320, true), world.spawnEnemy(def.kind, -360, true)];
-    const seen = new Set();
+    const seen = new Set(), last = es.map(() => null);
     for (let t = 0; t < 10; t += DT) {
       world.input.tick(DT); world.step(DT);
       if (world.player.hp < 40) world.player.hp = 100;
-      for (const e of es) {
+      for (const [k, e] of es.entries()) {
         assert.ok(finite(e), `${plan}: non-finite at ${t.toFixed(2)} in ${e.state}`);
+        // Hits on a limp body change its speed, never its shape: nothing may jump from one frame to the next.
+        const now = e.rag && !e.remove ? { rag: e.rag, pts: drawn(e) } : null;
+        if (now && last[k]?.rag === now.rag) assert.ok(jump(last[k].pts, now.pts) < 40, `${plan}: limp body jumped ${jump(last[k].pts, now.pts).toFixed(0)} px in a fight`);
+        last[k] = now;
         if (e.state === 'attack') seen.add(e.move.src);
       }
       for (const e of es) if (e.dead && e.deadT > 2) { e.remove = true; }
@@ -162,20 +181,6 @@ test('mounts expose a saddle on their back', () => {
   }
 });
 
-// Every point the beast draw functions pose a body from, in world space. Head and spine frames
-// include the roll, so a body that flips its drawn side shows up as a jump here.
-function drawn(f) {
-  const out = [...f.j, ...f.tl, ...f.xl];
-  if (f.B.wing) out.push(...f.wg);
-  const B = f.B, s = f.scale, FX = f.facing * f.xm, c = Math.cos(f.hdA), sn = Math.sin(f.hdA);
-  for (const [a, b] of [[1, 0], [-0.3, 0.8], [0.6, -0.6]]) {
-    out.push(f.j[0] + (c * a * B.head * s - sn * b * B.headR * s * f.roll) * FX, f.j[1] - (sn * a * B.head * s + c * b * B.headR * s * f.roll));
-  }
-  const dx = f.j[2] - f.j[4], dy = f.j[3] - f.j[5], d = Math.hypot(dx, dy) || 1, g = B.girth * s * f.roll;
-  out.push((f.j[2] + f.j[4]) / 2 + (dy / d) * f.facing * g, (f.j[3] + f.j[5]) / 2 - (dx / d) * f.facing * g);
-  return out;
-}
-const jump = (a, b) => { let m = 0; for (let i = 0; i < a.length; i += 2) m = Math.max(m, Math.hypot(a[i] - b[i], a[i + 1] - b[i + 1])); return m; };
 
 test('each plan goes limp as itself, comes to rest in the arena and stands up without a visible swap', () => {
   for (const plan of BEAST_PLANS) {
@@ -295,4 +300,85 @@ test('the humanoid ragdoll behaves exactly as before', () => {
     for (let k = 0; k < r.n; k++) h = (h * 31 + Math.round(r.x[k] * 100) + Math.round(r.y[k] * 100)) | 0;
   }
   assert.deepEqual([h, r.rest.toFixed(4), r.n], [-1601036175, '1.6500', 13]);
+});
+
+// Lay a limp body on its back: turn every point half a turn about the middle of the spine.
+function flip(e) {
+  const r = e.rag, mx = (r.x[1] + r.x[2]) / 2, my = (r.y[1] + r.y[2]) / 2;
+  let lift = 0;
+  for (let i = 0; i < r.n; i++) { r.x[i] = 2 * mx - r.x[i]; r.y[i] = 2 * my - r.y[i]; r.vx[i] = 0; r.vy[i] = 0; lift = Math.max(lift, r.y[i] + r.r[i]); }
+  for (let i = 0; i < r.n; i++) r.y[i] -= lift + 2;
+  for (let i = 0; i < 11; i++) { e.j[i * 2] = r.x[i]; e.j[i * 2 + 1] = r.y[i]; }
+  r.want = 0;
+}
+function limpBeast(plan, seed, world) {
+  const def = makeBeast(makeRng(seed * 13 + plan.length), `b_${plan}_${seed}`, plan, 5, new Set());
+  world.roster[def.kind] = def;
+  const e = world.spawnEnemy(def.kind, 200, false);
+  e.def = { ...e.def, ctrl: null };
+  for (let i = 0; i < 20; i++) world.step(DT);
+  return e;
+}
+
+test('every plan gets up from its back by rolling over, without a visible swap', () => {
+  for (const plan of BEAST_PLANS) {
+    const world = arena(makeBeast(makeRng(1), 'x', plan, 1, new Set()), 3);
+    world.lockInput = true;
+    const e = limpBeast(plan, 4, world);
+    e.toRagdoll(0, -200, 0);
+    world.step(DT);
+    flip(e);
+    e.limpParts();
+    let prev = drawn(e);
+    e.getUp(e.def.getup);
+    assert.equal(e.guRoll, -1, `${plan}: lying on its back should roll over`);
+    assert.ok(jump(prev, drawn(e)) < 1e-3, `${plan}: the frame it gets up changes shape`);
+    let rolled = false;
+    for (let t = 0; t < 2; t += DT) {
+      world.step(DT);
+      const now = drawn(e);
+      assert.ok(jump(prev, now) < 40, `${plan}: a point jumped ${jump(prev, now).toFixed(0)} px (${e.state}, roll ${e.roll.toFixed(2)})`);
+      prev = now;
+      if (e.state === 'getup' && Math.abs(e.roll) < 0.3) rolled = true;
+      if (e.state === 'free') break;
+    }
+    assert.ok(rolled, `${plan}: did not get up from its back`);
+    assert.equal(e.roll, 1);
+  }
+});
+
+test('a roll over cut short by a death or a hit eases on, without a flip', () => {
+  for (const cut of ['die', 'hitstun']) {
+    const world = arena(makeBeast(makeRng(1), 'x', 'scorpion', 1, new Set()), 6);
+    world.lockInput = true;
+    const e = limpBeast('scorpion', 2, world);
+    e.toRagdoll(0, -200, 0);
+    world.step(DT);
+    flip(e);
+    let n = 0;
+    while (!(e.state === 'getup' && e.st > e.stDur * 0.4) && n++ < 900) world.step(DT);
+    assert.ok(e.state === 'getup' && e.roll < 0.5, `${cut}: no roll under way (${e.state} ${e.roll})`);
+    if (cut === 'die') e.die(200, -300, 0); else e.setState('hitstun', 0.5);
+    let prev = e.roll;
+    for (let i = 0; i < 120; i++) {
+      world.step(DT);
+      assert.ok(e.roll >= prev && e.roll - prev < 0.05, `${cut}: roll went ${prev.toFixed(2)} to ${e.roll.toFixed(2)}`);
+      prev = e.roll;
+    }
+    assert.equal(e.roll, 1, `${cut}: roll stuck at ${e.roll}`);
+  }
+});
+
+test('a spider or a scorpion knocked onto a light bridge gets up on it', () => {
+  for (const plan of ['stalker', 'scorpion', 'hound']) {
+    const world = arena(makeBeast(makeRng(1), 'x', plan, 1, new Set()), 2);
+    world.lockInput = true;
+    const e = limpBeast(plan, 3, world);
+    world.platforms = [{ x: 420, y: -150, w: 600, solid: true, load: 0, off: 0 }];
+    e.toRagdoll(260, -900, 0);
+    let up = false;
+    for (let t = 0; t < 6 && !up; t += DT) { const was = !!e.rag; world.step(DT); if (was && !e.rag) up = true; }
+    assert.ok(up, `${plan}: never got up`);
+    assert.equal(e.y, -150, `${plan}: got up at ${e.y}, not on the bridge`);
+  }
 });

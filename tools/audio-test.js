@@ -29,6 +29,17 @@ const GROUPS = {
   Bonds: ['tetherSnap', 'enrage', 'dismount', 'packHowl', 'nerveBreak'],
   'Bosses & polish': ['alarm', 'twinSwap', 'finisher', 'uiHover', 'tutorialDone'],
   Techniques: ['pullIn', 'pin', 'reflect'],
+  Surprises: ['surprise', 'shadeArrive', 'lightsOut', 'stampedeWarn', 'stampede', 'quake', 'thunder', 'cacheDrop', 'propBreak'],
+  'Shop & doors': ['pickupShard', 'buy', 'uiDeny', 'uiBack', 'doorsOpen', 'doorPick', 'weaponSwap'],
+  'Objectives & pacts': ['pactTake', 'rest', 'challengeMet', 'objectiveDone', 'beaconFire', 'markSet', 'allyFreed', 'courierGone', 'bountyWon'],
+};
+// The floor-event sounds the checks below hold to the spec; a later batch adds its own group.
+const EVENT_SOUNDS = [...GROUPS.Surprises, ...GROUPS['Shop & doors'], ...GROUPS['Objectives & pacts']];
+// The spec's "about N s" lengths, as [min, max] dry length to -60 dBFS.
+const ABOUT = {
+  surprise: [0.55, 0.85], shadeArrive: [0.85, 1.2], lightsOut: [0.45, 0.75], stampedeWarn: [1.2, 1.6], stampede: [1.0, 1.4],
+  quake: [1.3, 1.7], thunder: [1.3, 1.7], doorsOpen: [0.5, 0.75], pactTake: [0.85, 1.2], rest: [0.85, 1.2],
+  objectiveDone: [0.65, 1.0], weaponSwap: [0.18, 0.32],
 };
 const LOOP_NAMES = ['heal', 'throw', 'rain'];
 const TRACK_NAMES = ['menu', 'combat', 'boss', 'boss2'];
@@ -55,6 +66,9 @@ const LIMIT = {
   tetherSnap: 0.45, enrage: 0.7, dismount: 0.45, packHowl: 1.2, nerveBreak: 0.8,
   alarm: 0.8, twinSwap: 0.45, finisher: 2.0, uiHover: 0.06, tutorialDone: 0.7,
   pullIn: 0.5, pin: 0.45, reflect: 0.45,
+  surprise: 0.85, shadeArrive: 1.2, lightsOut: 0.75, stampedeWarn: 1.6, stampede: 1.4, quake: 1.7, thunder: 1.7, cacheDrop: 0.8, propBreak: 0.5,
+  pickupShard: 0.1, buy: 0.6, uiDeny: 0.25, uiBack: 0.15, doorsOpen: 0.75, doorPick: 0.7, weaponSwap: 0.32,
+  pactTake: 1.2, rest: 1.2, challengeMet: 0.7, objectiveDone: 1.0, beaconFire: 1.6, markSet: 0.5, allyFreed: 1.0, courierGone: 0.4, bountyWon: 0.9,
 };
 // Sequences the game plays; the soundboard has a button for each.
 const SEQUENCES = {
@@ -73,6 +87,11 @@ const SEQUENCES = {
   'swingTwin x8': Array.from({ length: 8 }, (_, i) => [i * 0.125, 'swingTwin', { pitch: 0.9 + (i % 3) * 0.1 }]),
   'hazard arm + zap': [[0, 'hazardArm'], [0.8, 'hazardZap']],
   'boss finisher': [[0, 'hitHeavy'], [0, 'finisher']],
+  'shard run x15': Array.from({ length: 15 }, (_, i) => [i * 0.05, 'pickupShard', { vol: 0.5, pitch: 1 + Math.min(0.5, (i + 1) * 0.04) }]),
+  'stampede warn + run': [[0, 'stampedeWarn'], [1.4, 'stampede']],
+  'shop: deny, buy, back': [[0, 'uiDeny'], [0.5, 'buy'], [1.2, 'uiBack']],
+  'doors: open + pick': [[0, 'doorsOpen'], [1, 'doorPick']],
+  'challenge + objective': [[0, 'challengeMet'], [0.9, 'objectiveDone']],
 };
 const SILENCE = 0.001; // -60 dBFS
 const WARM = 0.5;
@@ -113,6 +132,7 @@ async function runNode() {
     m.audio.setTheme(-7);
     m.audio.setTheme('x');
     m.audio.play('sectorUp');
+    m.audio.play('pickupShard', { vol: 0.5, pitch: 1.5 });
     m.audio.update(0.016);
     console.log('PASS  node import: every method is a silent no-op');
   } catch (err) {
@@ -531,6 +551,105 @@ async function runPage() {
       } });
       check(`priorities: under a full voice cap, ${important.join('/')} steal; ${yielding.join(', ')} yield`,
         res.filled === 24 && res.important === important.length && res.frequent === 0 && res.dropped === yielding.length, JSON.stringify(res));
+    }
+
+    // Floor events, shop, doors and objectives.
+    {
+      const by = Object.fromEntries(R.sounds.map((s) => [s.name, s]));
+      const fin = by.finisher;
+      const over = EVENT_SOUNDS.filter((n) => by[n].dryPeak > fin.dryPeak || by[n].loud > fin.loud || by[n].fullPeak > fin.fullPeak);
+      check(`floor events: none of the ${EVENT_SOUNDS.length} is louder than finisher (dry peak, loudest 50 ms, master peak)`, !over.length,
+        (over.length ? `louder: ${over.map((n) => `${n} ${fmtDb(by[n].dryPeak)}/${fmtDb(by[n].loud)}/${fmtDb(by[n].fullPeak)}`).join(', ')}; ` : '') + `finisher ${fmtDb(fin.dryPeak)} dBFS / ${fmtDb(fin.loud)} dB / ${fmtDb(fin.fullPeak)} dBFS`);
+      // Noise layers make every play a little different, so the loudest events are held to their
+      // worst of six plays, with 1.5 dB to spare under the quietest of six finishers.
+      const worst = async (name, pick) => {
+        let x = pick === Math.max ? 0 : Infinity, l = x;
+        for (let i = 0; i < 6; i++) {
+          const a = analyze((await audioDev.render({ seconds: 2.5, dry: true, script: (api) => api.play(name) })).buffer);
+          x = pick(x, a.peak);
+          l = pick(l, a.loud);
+        }
+        return { peak: x, loud: l };
+      };
+      const finMin = await worst('finisher', Math.min), margin = 10 ** (-1.5 / 20);
+      const loudSet = ['surprise', 'shadeArrive', 'stampede', 'quake', 'thunder', 'cacheDrop', 'pactTake', 'beaconFire'];
+      const ws = {};
+      for (const n of loudSet) ws[n] = await worst(n, Math.max);
+      const hot = loudSet.filter((n) => ws[n].peak > finMin.peak * margin || ws[n].loud > finMin.loud * margin);
+      check('floor events: the loudest stay 1.5 dB under finisher on their worst of six plays', !hot.length,
+        `finisher at least ${fmtDb(finMin.peak)} dBFS / ${fmtDb(finMin.loud)} dB; ` + loudSet.map((n) => `${n} ${fmtDb(ws[n].peak)}/${fmtDb(ws[n].loud)}${hot.includes(n) ? ' (hot)' : ''}`).join(', '));
+      const off = Object.entries(ABOUT).filter(([n, [lo, hi]]) => by[n].dryDur < lo || by[n].dryDur > hi);
+      check('floor events: lengths match the spec', !off.length,
+        Object.keys(ABOUT).map((n) => `${n} ${by[n].dryDur.toFixed(2)}${off.some(([m]) => m === n) ? ` (want ${ABOUT[n].join('-')})` : ''}`).join(', '));
+      check('surprise: as loud as a light hit or louder, so it cuts through a fight', by.surprise.loud > by.hitLight.loud,
+        `loudest 50 ms ${fmtDb(by.surprise.loud)} vs hitLight ${fmtDb(by.hitLight.loud)} dB`);
+      check('objectiveDone: broader than challengeMet (longer and louder)', by.objectiveDone.dryDur > by.challengeMet.dryDur && by.objectiveDone.loud > by.challengeMet.loud,
+        `${by.objectiveDone.dryDur.toFixed(2)} vs ${by.challengeMet.dryDur.toFixed(2)} s, ${fmtDb(by.objectiveDone.loud)} vs ${fmtDb(by.challengeMet.loud)} dB`);
+      check('uiDeny, uiBack: quieter than a light hit', by.uiDeny.loud < by.hitLight.loud && by.uiBack.loud < by.hitLight.loud,
+        `uiDeny ${fmtDb(by.uiDeny.loud)}, uiBack ${fmtDb(by.uiBack.loud)}, hitLight ${fmtDb(by.hitLight.loud)} dB`);
+
+      // pickupShard: the absolute -60 dBFS length undercounts a quiet tick, so its 60 to 90 ms is
+      // measured to -60 dB below its own peak.
+      const one = await audioDev.render({ seconds: 0.5, dry: true, script: (a) => a.play('pickupShard') });
+      const d0 = one.buffer.getChannelData(0), pk = analyze(one.buffer).peak;
+      let lastI = 0;
+      for (let i = 0; i < d0.length; i++) if (Math.abs(d0[i]) > pk * 1e-3) lastI = i;
+      const relLen = (lastI + 1) / one.buffer.sampleRate;
+      check('pickupShard: a 60 to 90 ms tick, at least 8 dB under a light hit', relLen >= 0.06 && relLen <= 0.09 && db(by.pickupShard.loud) < db(by.hitLight.loud) - 8,
+        `${(relLen * 1000).toFixed(0)} ms to -60 dB below its peak, loudest 50 ms ${fmtDb(by.pickupShard.loud)} vs hitLight ${fmtDb(by.hitLight.loud)} dB`);
+      const bright = async (pitch) => {
+        const r = await audioDev.render({ seconds: 0.3, dry: true, script: (a) => a.play('pickupShard', { pitch }) });
+        const x = analyze(r.buffer);
+        return { hz: (x.hf * r.buffer.sampleRate) / (2 * Math.PI), dur: x.dur };
+      };
+      const b1 = await bright(1), b15 = await bright(1.5);
+      check('pickupShard: pitch 1.5 is clearly higher than pitch 1 at about the same length', b15.hz > b1.hz * 1.3 && Math.abs(b15.dur - b1.dur) < 0.03,
+        `~${b1.hz.toFixed(0)} -> ~${b15.hz.toFixed(0)} Hz, ${b1.dur.toFixed(3)} vs ${b15.dur.toFixed(3)} s`);
+      // The game plays one per collected shard at vol 0.5, pitch rising 4% each, up to every frame.
+      const run = await audioDev.render({ seconds: 0.8, dry: true, fps: 60, script: (a, t, i) => i < 12 && a.play('pickupShard', { vol: 0.5, pitch: 1 + Math.min(0.5, (i + 1) * 0.04) }) });
+      check('pickupShard: twelve at 60 fps with rising pitch all play, none limited', run.engine.stats.played === 12 && !run.engine.stats.limited && analyze(run.buffer).peak < 1,
+        `${JSON.stringify(run.engine.stats)} peak ${fmtDb(analyze(run.buffer).peak)} dBFS`);
+      // On a 120 Hz display the game ticks about every 8 ms.
+      const run120 = await audioDev.render({ seconds: 0.5, dry: true, fps: 120, script: (a, t, i) => i < 24 && a.play('pickupShard', { vol: 0.5, pitch: 1 + Math.min(0.5, (i + 1) * 0.04) }) });
+      check('pickupShard: twenty-four at 120 fps all play, none limited', run120.engine.stats.played === 24 && !run120.engine.stats.limited && analyze(run120.buffer).peak < 1,
+        `${JSON.stringify(run120.engine.stats)} peak ${fmtDb(analyze(run120.buffer).peak)} dBFS`);
+      const burst = await audioDev.render({ seconds: 0.3, dry: true, script: (a) => { for (let i = 0; i < 6; i++) a.play('pickupShard', { vol: 0.5 }); } });
+      check('pickupShard: six in the same instant merge into one tick', burst.engine.stats.played === 1 && burst.engine.stats.limited === 5, JSON.stringify(burst.engine.stats));
+      const SETTLE = 3;
+      let red = 0;
+      const full = await audioDev.render({ seconds: SETTLE + 1.5, fps: 60, script: (a, t, i, e) => {
+        const k = i - SETTLE * 60;
+        if (k >= 0) {
+          if (k < 30) a.play('pickupShard', { vol: 0.5, pitch: 1 + Math.min(0.5, (k + 1) * 0.04), pan: Math.random() * 0.6 - 0.3 });
+          red = Math.min(red, e.comp.reduction, e.lim.reduction);
+        }
+      } });
+      check('pickupShard: thirty in half a second through the master chain move the compressor under 1 dB', red > -1 && analyze(full.buffer, SETTLE).peak < 0.5 && full.engine.stats.played === 30,
+        `played ${full.engine.stats.played}, peak ${fmtDb(analyze(full.buffer, SETTLE).peak)} dBFS, most gain reduction ${red.toFixed(2)} dB`);
+
+      // Voice priorities: room events steal a voice under a full cap; shards yield.
+      const filler = names.filter((n) => !['footstep', 'uiMove', 'pickupHealth', 'pickupFocus', 'burn', 'powerSwap'].includes(n) && !/^power|^(kill|sever|parry|guardBreak|telegraph|telegraphRed|shockwave|slam|bossRoar|bossPhase|healInterrupt|adapt|stagger|blink|explode|pillar|hammer|heatUp|vent|elite|death|perfectDodge|waveClear|victory|summon|championIntro|sectorUp|secondWind)$/.test(n)).slice(0, 24);
+      const important = ['surprise', 'shadeArrive', 'stampede', 'quake', 'beaconFire'];
+      let res = null;
+      await audioDev.render({ seconds: 0.5, dry: true, script: (a, t, i, e) => {
+        filler.forEach((n) => a.play(n));
+        const s0 = { ...e.stats };
+        important.forEach((n) => a.play(n));
+        const s1 = { ...e.stats };
+        a.play('pickupShard');
+        res = { filled: filler.length, important: s1.played - s0.played, frequent: e.stats.played - s1.played, dropped: e.stats.dropped - s1.dropped };
+      } });
+      check(`priorities: under a full voice cap, ${important.join('/')} steal; pickupShard yields`,
+        res.filled === 24 && res.important === important.length && res.frequent === 0 && res.dropped === 1, JSON.stringify(res));
+
+      // Clean-up: once every new sound has finished, no voice or node is left behind.
+      let left = -1;
+      await audioDev.render({ seconds: 3.5, fps: 20, script: (a, t, i, e) => {
+        if (i === 0) EVENT_SOUNDS.forEach((n, k) => k < 20 && a.play(n));
+        if (i === 10) EVENT_SOUNDS.forEach((n, k) => k >= 20 && a.play(n));
+        left = e.voices.length;
+      } });
+      check('floor events: every voice is released after it ends', left === 0, `voices left after 3 s: ${left}`);
     }
 
     // Rate limit and polyphony.

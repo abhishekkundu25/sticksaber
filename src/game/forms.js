@@ -390,21 +390,21 @@ function lashWrap(world, A, B, r) {
 }
 // Bodies too big to move: the lash pulls its owner to them instead.
 const anchored = (B) => !!(B.def.boss || B.def.armor >= 2 || B.def.noRagdoll || B.def.prop || B.riding || B.scale > 1.3 || (B.def.beast && B.scale > 1.1));
-// The heavy: wrap the target and drag it in to where the whip bites hardest, or, if it will not move,
-// drag yourself to it.
+// The heavy: wrap the target and bring it to where the whip bites hardest (dragged in from afar,
+// shoved out from too close), or, if it will not move, drag yourself to it.
 function lashPull(world, A, B, r) {
   lashHit(world, A, B, r);
   if (r !== 'hit' && r !== 'break') return;
   A.lashHold = B; A.lashHoldT = 0.3;
-  const dir = B.x >= A.x ? 1 : -1, go = Math.max(0, Math.abs(B.x - A.x) - A.bladeLen * 0.72), fx = world.fx;
+  const dir = B.x >= A.x ? 1 : -1, go = Math.abs(B.x - A.x) - A.bladeLen * 0.72, fx = world.fx; // < 0: too close
   if (anchored(B)) {
     A.vx = dir * Math.min(1500, Math.sqrt(2 * 2400 * Math.max(0, Math.abs(B.x - A.x) - 80))); A.invuln = Math.max(A.invuln, 0.2);
     fx.ghost(A, A.color, 0.25);
-  } else if (B.rag) B.rag.kick(-dir * Math.min(900, go * 4), -240, 0);
+  } else if (B.rag) B.rag.kick(-dir * Math.max(-600, Math.min(900, go * 4)), -240, 0);
   else {
     const fr = B.state === 'stagger' ? 2200 : 1500;
     if (B.state !== 'stagger') B.setState('hitstun', 0.55);
-    B.vx = -dir * Math.sqrt(2 * fr * go);
+    B.vx = -dir * Math.sign(go) * Math.sqrt(2 * fr * Math.abs(go));
   }
   fx.slash((A.x + B.x) / 2, B.cy, 0, Math.abs(B.x - A.x), A.color, 0.18, 3);
   world.sfx('lashPull', B.x);
@@ -642,6 +642,8 @@ function drawTick(f, world, dt) {
       world.sfx('dbLevel', f.x, 0.8 + lv * 0.1, 0.9 + lv * 0.2);
     }
   } else if (!m?.levels) f.drawLevel = 0;
+  // Marks whose attack ended without a sheathe (cancelled, interrupted) are cut now, never lost.
+  if (f.marks?.length && (f.state !== 'attack' || f.atkSerial !== f.markSerial)) cutMarks(world, f);
   const C = f.cuts;
   if (C?.length) {
     if (f.dead) C.length = 0;
@@ -665,28 +667,32 @@ function dbRelease(world, f) {
     world.sfx('dbPerfect', f.x); world.slow(0.4, 0.16);
   }
 }
-// A cut that passes: the target is marked, and is cut for real when the blade is sheathed.
-function dbMark(world, A, B, r) {
+// A cut that passes: the target is marked, and is cut for real when the blade is sheathed. The cut
+// rides on the passing hit (`h.cut`), or, for the charged draw, is what its release set.
+function dbMark(world, A, B, r, h) {
   if (r !== 'hit' && r !== 'break') return;
-  if (A.markSerial !== A.atkSerial) { A.markSerial = A.atkSerial; (A.marks ||= []).length = 0; }
+  if (A.marks?.length && A.markSerial !== A.atkSerial) cutMarks(world, A);
+  A.markSerial = A.atkSerial; A.marks ||= [];
   // `safe` is when the grace this very pass gave the target runs out (a struck player is untouchable
   // for a moment). The cut ignores that grace, or a draw could never cut the player.
-  if (!A.marks.some((m) => m.B === B)) A.marks.push({ B, safe: world.time + B.invuln });
+  const cut = h.cut || A.drawCut;
+  if (cut && !A.marks.some((m) => m.B === B)) A.marks.push({ B, safe: world.time + B.invuln, h: cut });
 }
-// The sheathe: a click, and every mark of this attack is cut, one after another. `h` is the cut; the
-// heavy passes none and uses what its release set.
-const sheathe = (h) => (world, f) => {
+// Turn every mark into a cut, one after another.
+function cutMarks(world, f) {
+  const M = f.marks, C = (f.cuts ||= []), ang = f.facing > 0 ? -0.35 : Math.PI + 0.35;
+  for (let i = 0; i < M.length; i++) C.push({ B: M[i].B, safe: M[i].safe, at: world.time + 0.06 + i * 0.07, h: M[i].h, ang, n: i });
+  M.length = 0;
+}
+// The sheathe: a click, and every mark of this attack is cut.
+function dbSheathe(world, f) {
   f.sheathAt = f.atkSerial;
   const x = f.j[4] + f.facing * 10 * f.scale, y = f.j[5] - 4 * f.scale;
   world.fx.spark(x, y, -Math.PI / 2, 0.8, 4, 200, '#ffffff', { white: 0.8, life: 0.15 });
   const M = f.marks;
   world.sfx('dbSheathe', f.x, M?.length ? 1 : 0.6);
-  if (!M?.length || f.markSerial !== f.atkSerial) return;
-  const cut = h || f.drawCut;
-  if (cut) { const C = (f.cuts ||= []); for (let i = 0; i < M.length; i++) C.push({ B: M[i].B, safe: M[i].safe, at: world.time + 0.06 + i * 0.07, h: cut, ang: f.facing > 0 ? -0.35 : Math.PI + 0.35, n: i }); }
-  M.length = 0;
-};
-const dbSheathe = sheathe(null);
+  if (M?.length) cutMarks(world, f);
+}
 function landCut(world, f, c) {
   const B = c.B;
   if (B.remove) return;
@@ -726,7 +732,7 @@ const db = {
   DB_L4: { fam: 'light', dur: 0.66, cancel: 0.44, next: {},
     keys: [[0, DCROUCH], [0.08, { ...DCROUCH, py: 34 }], [0.16, DPASS, 'in'], [0.32, { ...DPASS, ha: -0.3, bl: -0.2, lean: 0.6, py: 34 }], [0.4, { ha: -0.6, hr: 0.9, bl: -1.0, lean: 0.4, py: 40 }],
       [0.46, { ...DH, lean: 0.3, py: 42 }], [0.66, { ...DH, lean: 0.12, py: 46 }]],
-    hits: [pass(0.1, 0.24, 6, { stun: 0.6 })], step: [[0.08, 0.2, 900], [0.2, 0.24, 80]], ev: [sfx(0.08, 'swingDraw'), [0.46, 'form', sheathe(FLASH_CUT)]] },
+    hits: [pass(0.1, 0.24, 6, { stun: 0.6, cut: FLASH_CUT })], step: [[0.08, 0.2, 900], [0.2, 0.24, 80]], ev: [sfx(0.08, 'swingDraw'), [0.46, 'form', dbSheathe]] },
 
   // Heavy: the charged draw (see DRAW_LEVELS). Crouched with a hand on the hilt; on release, through
   // the line in one stroke. Everything passed is marked, and cut as the blade clicks home.
@@ -744,7 +750,7 @@ const db = {
   DB_FIN: { fam: 'heavy', dur: 0.82, cancel: 0.56, next: {}, tier: 2,
     keys: [[0, DCROUCH], [0.12, { ...DCROUCH, py: 34 }], [0.2, DPASS, 'in'], [0.36, { ...DPASS, ha: -0.3, bl: -0.2, lean: 0.6, py: 34 }], [0.44, { ha: -0.6, hr: 0.9, bl: -1.0, lean: 0.4, py: 40 }],
       [0.5, { ...DH, lean: 0.3, py: 42 }], [0.82, { ...DH, lean: 0.12, py: 46 }]],
-    hits: [pass(0.13, 0.3, 4, { stun: 0.7 })], step: [[0.12, 0.26, 1300], [0.26, 0.3, 100]], ev: [sfx(0.1, 'swingDraw'), sfx(0.12, 'dbDash'), [0.5, 'form', sheathe(CROSS_CUT)]] },
+    hits: [pass(0.13, 0.3, 4, { stun: 0.7, cut: CROSS_CUT })], step: [[0.12, 0.26, 1300], [0.26, 0.3, 100]], ev: [sfx(0.1, 'swingDraw'), sfx(0.12, 'dbDash'), [0.5, 'form', dbSheathe]] },
   // Dash attack: a running draw.
   DB_DA: { fam: 'light', dur: 0.42, cancel: 0.22, next: { light: 'DB_L2', heavy: 'DB_LAUNCH' },
     keys: [[0, { ...DH, lean: 0.6, py: 38 }], [0.04, { ...DH, lean: 0.62, py: 37 }], [0.12, { ...DOUT, lean: 0.7, py: 36, f1x: 30 }, 'in'], [0.22, { ha: 0.6, hr: 0.9, bl: 1.0, lean: 0.45 }],
@@ -777,8 +783,8 @@ const db = {
   // Riposte: through the attacker in a blink; the cut lands when the blade clicks home.
   DB_RIP: { fam: 'riposte', dur: 0.62, cancel: 0.4, next: {}, tier: 3, invuln: [0, 0.5],
     keys: [[0, { ...DCROUCH, py: 34 }], [0.07, { ...DPASS, lean: 0.8 }, 'in'], [0.28, { ...DPASS, ha: -0.3, bl: -0.2, lean: 0.6, py: 34 }], [0.36, { ...DH, lean: 0.3, py: 42 }], [0.62, { ...DH, lean: 0.15, py: 46 }]],
-    hits: [pass(0.03, 0.18, 8, { stun: 0.8, stop: 0.04, shake: 0.2, post: 10, unblockable: true })], step: [[0.03, 0.16, 1700], [0.16, 0.2, 100]],
-    ev: [sfx(0.02, 'dbDash'), [0.04, 'fx', 'riposteLine'], [0.36, 'form', sheathe(RIP_CUT)]] },
+    hits: [pass(0.03, 0.18, 8, { stun: 0.8, stop: 0.04, shake: 0.2, post: 10, unblockable: true, cut: RIP_CUT })], step: [[0.03, 0.16, 1700], [0.16, 0.2, 100]],
+    ev: [sfx(0.02, 'dbDash'), [0.04, 'fx', 'riposteLine'], [0.36, 'form', dbSheathe]] },
 };
 
 // What the scripted player (bot.js) needs to fight with a form: the distance it closes to, and
@@ -822,8 +828,14 @@ export const FORM_IDS = Object.keys(FORMS);
 export function equipForm(f, id) {
   const F = FORMS[id] || FORMS.saber;
   f.form = F; f.blade = F.blade; f.double = !!F.blade.double; f.twin = !!F.blade.twin; f.bladeLen = F.blade.len * f.scale;
-  f.lash = null; f.lashO = null; f.lashHold = null; f.fistCharge = 0; f.sheathed = false; f.drawLevel = 0;
+  resetFormState(f);
   return F;
+}
+// Clear what one form left on a fighter, so the next form starts clean (a sheathed flag left behind
+// would hide a saber).
+export function resetFormState(f) {
+  f.lash = null; f.lashO = null; f.lashHold = null; f.fistCharge = 0; f.sheathed = false; f.drawLevel = 0;
+  if (f.marks) f.marks.length = 0;
 }
 // The move a fighter's form plays for one of the player's slots ('L1', 'H1', 'LAUNCH' and so on).
 export const formMove = (f, slot) => f.form?.moves[slot] || slot;

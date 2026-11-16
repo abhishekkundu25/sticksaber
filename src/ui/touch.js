@@ -31,12 +31,13 @@ export class Touch {
     root.id = 'touch'; root.dataset.mode = this.mode;
     root.innerHTML = '<div class="pad"></div><div class="base"><div class="knob"></div></div>'
       + BUTTONS.map(([a, label, r, b, s]) => `<button class="act" data-a="${a}" style="right:${r}vh;bottom:${b}vh;width:${s}vh;height:${s}vh">${label.replace('\n', '<br>')}</button>`).join('')
-      + '<button class="sys pause" data-cmd="pause">II</button><button class="sys spawn" data-cmd="spawn">SPAWN</button>'
+      + '<button class="sys pause" data-cmd="pause">II</button><button class="sys spawn" data-cmd="spawn">SPAWN</button><button class="sys blade" data-cmd="blade">BLADE</button>'
       + '<button class="sys resume" data-cmd="resume">RESUME</button><button class="sys quit" data-cmd="quit">QUIT</button>';
     document.body.appendChild(root);
     this.base = root.querySelector('.base'); this.knob = root.querySelector('.knob'); this.od = root.querySelector('[data-a="overdrive"]');
     this.sp = root.querySelector('[data-a="special"]'); this.burst = false; this.power = 'THROW';
     this.swap = root.querySelector('[data-a="cycle"]'); this.swap.style.display = 'none'; this.multi = false;
+    this.blade = root.querySelector('.blade'); this.blade.style.display = 'none'; this.two = false;
     const opts = { passive: false };
     root.addEventListener('touchstart', (e) => this.onStart(e), opts);
     root.addEventListener('touchmove', (e) => this.onMove(e), opts);
@@ -64,6 +65,8 @@ export class Touch {
     if (label !== this.power) { this.power = label; if (!this.burst) this.sp.textContent = label; }
     if (multi !== this.multi) { this.multi = multi; this.swap.style.display = multi ? '' : 'none'; }
   }
+  // BLADE switches weapons. It appears once a second one is carried.
+  setBlade(on) { if (this.enabled && on !== this.two) { this.two = on; this.blade.style.display = on ? 'block' : 'none'; } }
   // The same button bursts. While a burst is available it says so and lights up.
   setBurst(on) {
     if (!this.enabled || on === this.burst) return;

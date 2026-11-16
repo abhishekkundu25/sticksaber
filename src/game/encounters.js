@@ -173,6 +173,9 @@ export class Director {
     }
     w.maxAttackers = wave.attackers; w.freeCast = !!w.mods.freeCast;
     if (this.wave > 0) w.banner(`WAVE ${this.wave + 1} / ${this.waveCount}`, '', 1.4);
+    // A champion or a keeper is announced by name as it lands.
+    const B = def.boss && w.def(def.boss);
+    if (B?.boss) { w.banner(B.name, B.title, 2.6); w.bannerMsg.intro = B.color; w.slow(0.45, 0.5); }
     if (def.objective && (this.wave === 0 || def.objective.type === 'hunt')) this.startObjective(def.objective, last);
     // A surprise waits for the floor's last wave, so the first one can be read in peace.
     const sur = def.surprise;
@@ -409,13 +412,16 @@ export class Director {
   through(door) {
     const w = this.world, p = w.player, n = this.stageDef.n;
     let type = door.type;
-    if (type === 'unknown') { type = door.hidden; this.picked = { name: type === 'gift' ? 'A GIFT' : DOORS[type].name, t: 1.8 }; }
+    this.picked = { name: DOORS[door.type].name, sub: 'YOU GO THROUGH', color: DOORS[door.type].color, t: 1.5 };
+    if (type === 'unknown') { type = door.hidden; this.picked = { name: type === 'gift' ? 'A GIFT' : DOORS[type].name, sub: type === 'gift' ? '60 SHARDS' : 'BEHIND THE UNMARKED DOOR', color: type === 'gift' ? '#ffd36b' : DOORS[type].color, t: 1.9 }; }
     this.route = type === 'elite' || type === 'cursed' ? { type, curse: door.curse } : null;
-    if (type === 'rest') { p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.45 * w.mods.healK); w.sfx('rest', p.x); this.picked = { name: 'RESTED', t: 1.6 }; }
+    if (type === 'rest') { p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.45 * w.mods.healK); w.sfx('rest', p.x); this.picked = { name: 'SANCTUARY', sub: 'YOUR WOUNDS CLOSE', color: DOORS.rest.color, t: 1.6 }; }
     else if (type === 'gift') { w.shards += 60; w.stats.shards += 60; w.sfx('buy', p.x); }
-    else if (type === 'shop') this.queue.unshift(this.shop(n));
-    else if (type === 'shrine') this.queue.unshift(this.shrine(n));
-    else if (type === 'armory') this.queue.unshift(this.armory(n));
+    else if (type === 'shop' || type === 'shrine' || type === 'armory') {
+      // A room opens straight away, so nothing is written over it.
+      const room = type === 'shop' ? this.shop(n) : type === 'shrine' ? this.shrine(n) : this.armory(n);
+      if (room) { this.queue.unshift(room); this.picked = null; }
+    }
   }
   // The floor is over: settle what it pays, then offer the doors.
   finishFloor() {
@@ -496,6 +502,9 @@ export class Director {
           if ((s.t -= dt) > 0) continue;
           const f = w.spawnEnemy(s.kind, w.player.x + s.dx, true, s);
           this.pending.splice(i, 1);
+          // A shooter posted to a ledge lands on it and holds it.
+          const L = s.perch === undefined ? null : w.platforms.filter((p) => p.fixed && !p.amp)[s.perch];
+          if (L) { f.x = L.x + (rng() - 0.5) * L.w * 0.5; f.y = L.y - 420; f.perch = L; }
           if (this.sur?.on) joinSurprise(this, w, this.sur, f);
           // Members of a bonded group arrive together; the bond is made when the last one lands in the list.
           if (s.g !== undefined) {

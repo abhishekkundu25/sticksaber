@@ -2,6 +2,7 @@
 // it runs headless for fuzz tests; sound and input are injected.
 import { clamp, lerp, rand, noise1, rng } from '../core/math.js';
 import { Fighter } from './fighter.js';
+import { Ragdoll } from './ragdoll.js';
 import { resolveCombat, applyHit } from './combat.js';
 import { Projectiles } from './projectiles.js';
 import { Fx } from '../render/fx.js';
@@ -10,7 +11,7 @@ import { ENEMIES, echoDef } from './enemies.js';
 import { baseMods, buildMods } from './augments.js';
 import { POWERS } from './powers.js';
 import { Beast } from './beasts.js';
-import { FORMS } from './forms.js';
+import { FORMS, resetFormState } from './forms.js';
 import { tickBonds, bind } from './bonds.js';
 import { makeShade, makeClimber } from './shade.js';
 import { PROPS } from './props.js';
@@ -67,6 +68,7 @@ const DASH_HIT = { dmg: 12, post: 14, kx: 60, ky: 0, kind: 'flinch', stop: 0.03,
 const FLOOD_HIT = { dmg: 24, post: 30, kx: 300, ky: -520, kind: 'knock', stop: 0.08, shake: 0.5, stun: 0.5, unblockable: true, hazard: true };
 const WALL_HIT = { dmg: 16, post: 30, kx: 260, ky: -200, kind: 'flinch', stop: 0.05, shake: 0.3, stun: 0.4, unblockable: true, hazard: true };
 const NEUTRAL = { team: 2, color: '#ff7a2e' }; // owner of the room's own hazards: they burn everyone
+const PIT_HIT = { dmg: 0, post: 0, kx: 0, ky: 0, kind: 'knock', stop: 0, shake: 0, stun: 0, hazard: true };
 const BURST_HIT = { dmg: 18, post: 30, kx: 640, ky: -440, kind: 'knock', stop: 0, shake: 0, stun: 0.4, fromPlayer: true, id: 'BURST', fam: 'power', unblockable: true };
 // The mirror image: the player's body with a brain that only copies.
 const MIRROR = { ...PLAYER, name: 'Mirror', ribbons: [], ctrl: mirrorCtrl };
@@ -109,6 +111,7 @@ export class World {
     this.dark = 0; this.darkK = 0;         // a blackout: `dark` is where the lights are heading, `darkK` where they are
     this.zone = null;                      // a ring on the floor the director is watching: { x, r, k, color }
     this.form2 = null;                     // the second weapon, for a build that carries two
+    this.pits = []; this.lift = false;     // open edges of the floor ({ x0, x1 }), and whether the room is a rising lift
   }
 
   // ───────────── setup ─────────────
@@ -132,7 +135,8 @@ export class World {
   }
   applyForm(p) {
     const F = this.form;
-    p.blade = F.blade; p.double = !!F.blade.double; p.twin = !!F.blade.twin; p.dmgMul = F.dmg ?? 1; p.form = F;
+    p.blade = F.blade; p.double = !!F.blade.double; p.twin = !!F.blade.twin; p.dmgMul = F.dmg ?? 1;
+    if (p.form !== F) { p.form = F; resetFormState(p); }
     p.speedMul = this.mods.speed * (F.speed ?? 1);
     if (this.overdrive <= 0) p.bladeLen = this.baseBlade(p);
   }
@@ -155,13 +159,45 @@ export class World {
   // Height of the ground under a falling body: the floor, or a platform it is landing on.
   groundAt(x, y, vy, dt, f) {
     const P = this.platforms;
-    if (!P.length || vy < 0 || f.dropT > 0) return 0;
-    for (const p of P) {
-      if (!p.solid || x < p.x - p.w / 2 || x > p.x + p.w / 2) continue;
-      // One-way: only a body that was above the top a moment ago lands on it.
-      if (y >= p.y - 1 && y - vy * dt <= p.y + 6) return p.y;
+    if (P.length && vy >= 0 && !(f.dropT > 0)) {
+      for (const p of P) {
+        if (!p.solid || x < p.x - p.w / 2 || x > p.x + p.w / 2) continue;
+        // One-way: only a body that was above the top a moment ago lands on it.
+        if (y >= p.y - 1 && y - vy * dt <= p.y + 6) return p.y;
+      }
     }
-    return 0;
+    // Over an open edge there is no floor at all.
+    return this.pits.length && this.inPit(x) ? 1e9 : 0;
+  }
+  inPit(x) { for (const q of this.pits) if (x > q.x0 && x < q.x1) return q; return null; }
+  // The nearest spot to `x` with floor under it, `pad` clear of any edge.
+  solidX(x, pad = 70) {
+    const q = this.inPit(x) || this.inPit(x - pad) || this.inPit(x + pad);
+    return !q ? x : q.x0 <= this.minX ? q.x1 + pad : q.x1 >= this.maxX ? q.x0 - pad : x - q.x0 < q.x1 - x ? q.x0 - pad : q.x1 + pad;
+  }
+  // Something went over the edge. An enemy is gone for good, and that counts as the room's kill. The
+  // player and anything too big to throw are hauled back up, poorer for it.
+  fell(f) {
+    const at = f.rag ? f.rag.x[2] : f.x, q = this.inPit(at), x = this.solidX(at, 90), fx = this.fx;
+    if (f.dead || f.def.prop || f.herd) { f.remove = true; return; }
+    fx.beam(q ? clamp((q.x0 + q.x1) / 2, this.minX + 40, this.maxX - 40) : x, 0.5, f.isPlayer ? '#ff5060' : '#ffd36b'); this.sfx('ringOut', x);
+    if (!f.isPlayer && !f.def.boss && f.team !== 0) {
+      f.hp = 0; if (!f.rag) f.toRagdoll(0, 200, 0);
+      f.dead = true; f.remove = true;
+      fx.text(x, -90, 'OVER THE EDGE', '#ffd36b', 18, 1.1);
+      this.onKill(null, f, PIT_HIT, x, -30, f.facing, 0);
+      return;
+    }
+    if (f.rag) f.getUp(0.25);
+    f.setState('free'); f.x = x; f.y = -280; f.vx = 0; f.vy = 300; f.onGround = false; f.invuln = Math.max(f.invuln, 1.3);
+    f.hp -= f.maxHp * (f.isPlayer ? 0.16 * this.mods.taken : 0.06); f.barT = 3;
+    fx.beam(x, 0.7, f.color);
+    if (f.isPlayer) {
+      this.style.hurt(); this.stats.hitsTaken++; this.flashScreen('#ff2a3a', 0.3); this.shake(0.5);
+      fx.text(x, -200, 'HAULED BACK', '#ff6b6b', 16, 1);
+      if (this.overdrive > 0) this.endOverdrive(true);
+      if (f.hp <= 0) { f.hp = 0; f.die(0, -200, 0); this.onKill(null, f, PIT_HIT, f.cx, f.cy, 1, 0); }
+    } else if (f.hp < 1) f.hp = 1;
   }
   spawnPlayer(x = 0) {
     const p = new Fighter(PLAYER, x, 0);
@@ -174,7 +210,7 @@ export class World {
   // opts: { elite: 'swift' | 'armored' | 'volatile', temper: 'aggressive' | 'cautious' | 'flank' }
   spawnEnemy(kind, x, drop = true, opts = null) {
     const def = this.def(kind);
-    const f = new (def.beast ? Beast : Fighter)(def, clamp(x, this.minX + 60, this.maxX - 60), 1);
+    const f = new (def.beast ? Beast : Fighter)(def, this.solidX(clamp(x, this.minX + 60, this.maxX - 60)), 1);
     if (def.hitWall) f.hitWall = (w) => def.hitWall(f, w);
     f.face(this.player ? this.player.x : 0);
     if (opts?.temper) f.temper = opts.temper;
@@ -234,7 +270,7 @@ export class World {
   }
   // A thing in the room that can be broken: a core, a cache, a holding cell.
   spawnProp(kind, x, y = 0) {
-    const f = new Fighter(PROPS[kind], clamp(x, this.minX + 80, this.maxX - 80), PROPS[kind].team);
+    const f = new Fighter(PROPS[kind], this.solidX(clamp(x, this.minX + 80, this.maxX - 80)), PROPS[kind].team);
     f.y = y; f.onGround = y >= 0; f.armed = false; f.hp = f.maxHp = Math.round(PROPS[kind].hp * (PROPS[kind].scales ? this.hpMul : 1));
     this.fighters.push(f);
     this.fx.ring(f.x, y - 60, 10, 90, 0.4, f.color, 1, 4);
@@ -267,7 +303,11 @@ export class World {
   // `T` comes from the floor: { plats: [{ fx, y, w }], vents: [{ fx, w, period, phase }], walls }.
   setTerrain(T) {
     const half = this.maxX - 150;
-    this.platforms = (T?.plats || []).map((p) => ({ x: p.fx * half, y: p.y, w: p.w, solid: true, load: 0, off: 0 }));
+    // A bridge of light overloads if stood on. A ledge (`fixed`) is part of the room and does not. A
+    // mover (`amp`) slides from side to side and carries whoever stands on it.
+    this.platforms = (T?.plats || []).map((p) => ({ x: p.fx * half, y: p.y, w: p.w, solid: true, load: 0, off: 0, fixed: !!p.fixed, cx: p.fx * half, amp: (p.amp || 0) * half, period: p.period || 0, ph: p.phase || 0 }));
+    this.pits = (T?.pits || []).map((q) => (q.side < 0 ? { x0: this.minX - 400, x1: this.minX + q.w } : { x0: this.maxX - q.w, x1: this.maxX + 400 }));
+    this.lift = !!T?.lift;
     this.hazards = (T?.vents || []).map((v) => ({ x: v.fx * half, w: v.w, period: v.period, t: v.phase + 2.5, armed: false }));
     this.walls = !!T?.walls; this.flood = null;
   }
@@ -277,6 +317,13 @@ export class World {
     for (let i = P.length - 1; i >= 0; i--) {
       const p = P[i];
       if (p.life !== undefined && (p.life -= dt) <= 0) { P.splice(i, 1); this.sfx('platformOff', p.x, 0.7); continue; }
+      if (p.amp) {
+        const nx = p.cx + Math.sin((this.time / p.period + p.ph) * 6.2832) * p.amp, dx = nx - p.x;
+        // Whoever stands on it goes with it.
+        for (const f of this.fighters) if (f.onGround && !f.rag && Math.abs(f.y - p.y) < 3 && Math.abs(f.x - p.x) <= p.w / 2 + 2) f.x += dx;
+        p.x = nx;
+      }
+      if (p.fixed) continue;
       if (p.solid) {
         // A bridge overloads if the player stands on it too long, so it is a breather, not a refuge.
         const on = pl && pl.onGround && Math.abs(pl.y - p.y) < 3 && Math.abs(pl.x - p.x) <= p.w / 2;
@@ -750,7 +797,7 @@ export class World {
     const pl = this.player, M = this.mods;
     if (pl && !pl.dead) pl.hp = Math.min(pl.maxHp, pl.hp + (2 + M.killHeal) * M.healK + Math.min(this.rally, 6));
     if (M.reap) this.gainFocus(M.reap);
-    this.dropOrbs(B, cx, cy);
+    this.dropOrbs(B, this.pits.length ? this.solidX(cx, 30) : cx, cy);
     // Twins share one life: the other body falls too.
     if (B.twin2 && !B.twin2.dead) { const o = B.twin2; B.twin2 = null; o.twin2 = null; o.die((o.x >= cx ? 1 : -1) * 320, -460, rand(-6, 6)); this.chop(o, o.cx, o.cy, dir * 380, -200, 3); }
     if (B.def.boss) {
@@ -795,6 +842,7 @@ export class World {
     this.time += dt;
 
     const fs = this.fighters;
+    Ragdoll.pits = this.pits.length ? this.pits : null;
     for (let i = 0; i < fs.length; i++) {
       const f = fs[i], d = f.team === 0 ? dt : dt * ets;
       if (f.hunts && !f.dead) {
@@ -807,6 +855,7 @@ export class World {
         this.player = keep;
       } else f.update(this, d);
     }
+    if (this.pits.length) for (let i = 0; i < fs.length; i++) { const f = fs[i]; if (!f.remove && (f.rag ? f.rag.y[2] : f.y) > 230) this.fell(f); }
     if (this.dark !== this.darkK) this.darkK = Math.abs(this.dark - this.darkK) < 0.01 ? this.dark : this.darkK + (this.dark - this.darkK) * Math.min(1, dtReal * 2.4);
     this.separate(dt);
     if (this.bonds.length) tickBonds(this, dt);

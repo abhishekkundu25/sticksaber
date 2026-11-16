@@ -232,13 +232,16 @@ export class Beast extends Fighter {
     this.tb = new Float32Array(this.tl.length); this.xb = new Float32Array(this.xl.length); this.wgb = new Float32Array(16);
     this.guHd = 0; this.guRoll = 1; this.guK = 1;
     this.roll = 1;   // the drawn body's up side: -1 shows it belly up, eased through 0 as it rolls over
-    this.wsg = [1, 1]; // which side of a limp wing the fingers fan to, fixed when it goes limp
+    this.wsg = [1, 1]; // which side of each wing's forearm the fingers fan to
   }
 
   update(world, dt) {
     if (!this.dead && !this.def.blade.gun) this.bladeOn = approach(this.bladeOn, this.state === 'attack' ? 1 : 0.4, dt * 5);
     const limp = !!this.rag;
     super.update(world, dt);
+    // A roll over that a hit or a death cut short finishes on its own, limp or not, so the body
+    // never stays drawn flat or flips back.
+    if (this.state !== 'getup' && this.roll < 1) this.roll = Math.min(1, this.roll + dt * 4);
     // Stand-up blends the joints after computeJoints; rebuild the parts hung off them. Not on the
     // frame it gets up: that frame is still drawn from the limp body.
     if (this.state === 'getup' && !this.rag && !limp) this.derive();
@@ -335,8 +338,8 @@ export class Beast extends Fighter {
     const aiming = this.state === 'attack' && this.move.aim && this.aimLocal !== undefined && this.mt < this.move.dur - 0.5;
     if (aiming) this.hdA += (this.aimLocal - this.hdA) * 0.75;
     // Standing up: the head turns and the body rolls over from where the limp body lay, at the same
-    // pace as the Fighter blends the joints.
-    this.roll = 1; this.guK = 1;
+    // pace as the Fighter blends the joints. Cut short, the roll eases on by itself (see update).
+    this.guK = 1;
     if (this.state === 'getup' && this.stDur > 0) {
       const k = this.guK = EASE.io(clamp(this.st / this.stDur, 0, 1));
       this.hdA = this.guHd + wrapPi(this.hdA - this.guHd) * k;
@@ -611,7 +614,7 @@ class BeastRagdoll extends Ragdoll {
     super(f.j, f.lens, f.scale);
     const B = f.B, s = f.scale, P = this.P = LIMP[B.plan], T = B.tail, j = f.j;
     const nt = T.n ? T.n + 1 : 0, n = 12 + nt + B.xn * 3;
-    this.n = n; this.f = f.facing; this.want = 0;
+    this.n = n; this.f = f.facing; this.want = 0; this.surf = 0;
     this.t0 = 12; this.x0 = 12 + nt;
     const x = this.x = new Float32Array(n), y = this.y = new Float32Array(n);
     this.vx = new Float32Array(n); this.vy = new Float32Array(n);
@@ -629,7 +632,7 @@ class BeastRagdoll extends Ragdoll {
     // "Down": the spine is as low as a humanoid's counts as down (so a body popped by hits on the
     // floor still gets up in time, as before), or as thick as it is, or the body stands on the floor
     // no taller than it stands alive (a spider on its curled legs).
-    this.low = -Math.max(34 * s, r[1] * 1.25 + 6 * s); this.stand = -(B.hipH * s * 1.7 + 8);
+    this.low = -Math.max(34 * s, r[1] * 1.25 + 6 * s); this.stand = P.curl ? -(B.hipH * s * 1.7 + 8) : 0;
 
     const bones = this.bones = [[1, 2], [1, 0], [0, 11]], lims = this.lims = [], hinges = this.hinges = [], att = this.att = [];
     lims.push([0, 2, 0.75 * d0(0, 2), 1e9], [11, 1, 0.8 * d0(11, 1), 1e9]);
@@ -754,7 +757,7 @@ class BeastRagdoll extends Ragdoll {
         x[i] = mx + dx * c - dy * sn; y[i] = my + dx * sn + dy * c;
       }
     }
-    let impact = 0, wall = 0;
+    let impact = 0, wall = 0, surf = this.surf; // the height of whatever it last touched
     HIT.fill(0, 0, n);
     for (let it = 0; it < 5; it++) {
       this.follow();
@@ -789,19 +792,27 @@ class BeastRagdoll extends Ragdoll {
           for (let q = 0; q < plats.length; q++) {
             const Pl = plats[q];
             if (!Pl.solid || x[i] < Pl.x - Pl.w / 2 || x[i] > Pl.x + Pl.w / 2) continue;
-            if (y[i] > Pl.y - r[i] && PY0[i] <= Pl.y - r[i] + 8) { y[i] = Pl.y - r[i]; HIT[i] = 1; if (i === 2) this.floorY = Pl.y; }
+            if (y[i] > Pl.y - r[i] && PY0[i] <= Pl.y - r[i] + 8) { y[i] = Pl.y - r[i]; HIT[i] = 1; surf = Pl.y; if (i === 2) this.floorY = Pl.y; }
           }
         }
-        if (y[i] > -r[i]) { y[i] = -r[i]; HIT[i] = 1; if (i === 2) this.floorY = 0; }
-        if (x[i] < minX + r[i]) { x[i] = minX + r[i]; HIT[i] |= 2; }
-        else if (x[i] > maxX - r[i]) { x[i] = maxX - r[i]; HIT[i] |= 2; }
+        // A point that began the step inside the floor or a wall (it went limp that way) is eased out
+        // 6 px a step instead of in one jump.
+        const fl = -r[i], lo = minX + r[i], hi = maxX - r[i];
+        if (y[i] > fl) { y[i] = PY0[i] > fl + 1 ? Math.max(fl, Math.min(y[i], PY0[i] - 6)) : fl; HIT[i] = 1; surf = 0; if (i === 2) this.floorY = 0; }
+        if (x[i] < lo) { x[i] = PX0[i] < lo - 1 ? Math.min(lo, Math.max(x[i], PX0[i] + 6)) : lo; HIT[i] |= 2; }
+        else if (x[i] > hi) { x[i] = PX0[i] > hi + 1 ? Math.max(hi, Math.min(x[i], PX0[i] - 6)) : hi; HIT[i] |= 2; }
       }
     }
     this.follow();
     let speed = 0, torsoDown = false, touch = false;
     const fr = Math.max(0, 1 - P.fric * dt), bounce = this.bounce * P.bounce;
+    // What the constraints moved becomes speed over at least 1/240 s, and no more than 900 px/s of it.
+    // A body can go limp with its head in the floor (a charger gored into it at a wall); pushing that
+    // out in one step must not fling the whole body, and neither may a tiny slow-motion step.
+    const cdt = Math.max(dt, 1 / 240), cap = 900;
     for (let i = 0; i < n; i++) {
-      let nvx = (x[i] - PX0[i]) / dt, nvy = (y[i] - PY0[i]) / dt;
+      const cx = (x[i] - PX0[i] - PVX[i] * dt) / cdt, cy = (y[i] - PY0[i] - PVY[i] * dt) / cdt;
+      let nvx = PVX[i] + (cx < -cap ? -cap : cx > cap ? cap : cx), nvy = PVY[i] + (cy < -cap ? -cap : cy > cap ? cap : cy);
       if (HIT[i] & 1) {
         if (PVY[i] > 160) { nvy = -PVY[i] * bounce; if (i < 3 && PVY[i] > impact) impact = PVY[i]; }
         else if (nvy > 0) nvy = 0;
@@ -811,7 +822,7 @@ class BeastRagdoll extends Ragdoll {
       if (HIT[i] & 2) {
         if (Math.abs(PVX[i]) > 200) { nvx = -PVX[i] * 0.45; if (i < 3) wall = Math.max(wall, Math.abs(PVX[i])); }
       }
-      if (y[i] >= -r[i] - 3) touch = true;
+      if ((HIT[i] & 1) || y[i] >= surf - r[i] - 3) touch = true;
       vx[i] = nvx * 0.999; vy[i] = nvy;
       if (i < 3) speed += Math.abs(nvx) + Math.abs(nvy);
     }
@@ -822,7 +833,9 @@ class BeastRagdoll extends Ragdoll {
       for (let i = 0; i < n; i++) { vx[i] *= k; vy[i] *= k; }
     }
     this.wallImpact = wall;
-    if (y[1] > this.low || y[2] > this.low || (touch && Math.min(y[1], y[2]) > this.stand)) torsoDown = true;
+    if (y[1] > this.low || y[2] > this.low || (touch && Math.min(y[1], y[2]) - surf > this.stand)) torsoDown = true;
+    // Stand up on whatever it lies or stands on, even if the hip never touched it.
+    this.surf = surf; this.floorY = surf;
     this.age += dt;
     this.air = !torsoDown;
     this.grounded = torsoDown ? this.grounded + dt : 0;

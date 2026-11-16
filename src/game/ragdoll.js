@@ -148,7 +148,11 @@ export class Ragdoll {
             if (y[i] > P.y - r[i] && py[i] <= P.y - r[i] + 8) { y[i] = P.y - r[i]; hitG[i] = 1; if (i === 2) this.floorY = P.y; }
           }
         }
-        if (y[i] > -r[i]) { y[i] = -r[i]; hitG[i] = 1; if (i === 2) this.floorY = 0; }
+        // Over an open edge there is no floor, and below its lip the shaft's wall holds the joint in.
+        let pit = null;
+        if (Ragdoll.pits) for (let q = 0; q < Ragdoll.pits.length; q++) { const Q = Ragdoll.pits[q]; if (x[i] > Q.x0 - (y[i] > 4 ? r[i] : 0) && x[i] < Q.x1 + (y[i] > 4 ? r[i] : 0)) pit = Q; }
+        if (pit) { if (y[i] > 4) { if (x[i] < pit.x0 + r[i]) x[i] = pit.x0 + r[i]; else if (x[i] > pit.x1 - r[i]) x[i] = pit.x1 - r[i]; } }
+        else if (y[i] > -r[i]) { y[i] = -r[i]; hitG[i] = 1; if (i === 2) this.floorY = 0; }
         if (x[i] < minX + r[i]) { x[i] = minX + r[i]; hitG[i] |= 2; }
         else if (x[i] > maxX - r[i]) { x[i] = maxX - r[i]; hitG[i] |= 2; }
       }
@@ -184,3 +188,4 @@ export class Ragdoll {
 Ragdoll.px = new Float32Array(CAP); Ragdoll.py = new Float32Array(CAP);
 Ragdoll.pvx = new Float32Array(CAP); Ragdoll.pvy = new Float32Array(CAP);
 Ragdoll.hitG = new Uint8Array(CAP);
+Ragdoll.pits = null; // open edges of the current floor, set by the world each step

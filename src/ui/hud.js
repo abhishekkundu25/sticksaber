@@ -6,6 +6,7 @@ import { AUG, AUGMENTS, RARITY, RARITY_COL } from '../game/augments.js';
 import { POWERS } from '../game/powers.js';
 import { FORMS } from '../game/forms.js';
 import { BOONS } from '../game/boons.js';
+import { drawCodex } from './codex.js';
 
 const FONT = '"Avenir Next Condensed", "Bahnschrift", "DIN Condensed", "Roboto Condensed", "Arial Narrow", sans-serif';
 const PRESENTS = 'A B H I S H E K   K U N D U   P R E S E N T S';
@@ -16,7 +17,7 @@ const MOVELIST = [
   ['LIGHT STRING', 'J  J  J  J'], ['HEAVY  ·  hold to charge', 'K'], ['GUARD  ·  tap on impact to PARRY', 'L'],
   ['RIPOSTE  (after a parry)', 'J or K'], ['LAUNCHER', 'S + K   or   J J K'], ['BREAKER  ·  COMET', 'J K   ·   J J J K'],
   ['AIR STRING  ·  SPIKE', 'J J J   ·   K'], ['PLUNGE  (in the air)', 'S + K'], ['DASH CUT', 'SHIFT then J'],
-  ['FOCUS POWER  (the one shown)', 'I'], ['SWITCH POWER', 'U   or   1 - 9'], ['BURST  (1 focus, while hit or down)', 'I'], ['OVERDRIVE  (full focus)', 'O'],
+  ['FOCUS POWER  (the one shown)', 'I'], ['SWITCH POWER', 'U   or   1 - 9'], ['SWITCH WEAPON  (with a Second Sheath)', 'T'], ['BURST  (1 focus, while hit or down)', 'I'], ['OVERDRIVE  (full focus)', 'O'],
   ['RECOVER  (as you hit the floor)', 'SHIFT'], ['PAUSE  ·  GRAPHICS QUALITY', 'ESC   ·   G'],
 ];
 
@@ -58,7 +59,7 @@ export function menuLayout(W, H, menu) {
 // The two buttons on the pause screen.
 export function pauseButton(W, H, i) { return { x: W / 2 + (i ? 20 : -240), y: H - 124, w: 220, h: 40 }; }
 const POWER_GLYPH = { throw: 'loop', crescent: 'up', arc: 'bolt', mend: 'plus', nova: 'star', stasis: 'clock', mirror: 'ghost', judgment: 'bars', flash: 'chev' };
-const FORM_GLYPH = { saber: 'slash', twin: 'twin', great: 'hammer', staff: 'long', lash: 'whip', gauntlets: 'fist', drawblade: 'draw' };
+export const FORM_GLYPH = { saber: 'slash', twin: 'twin', great: 'hammer', staff: 'long', lash: 'whip', gauntlets: 'fist', drawblade: 'draw' };
 
 export class Hud {
   constructor() {
@@ -181,16 +182,28 @@ export class Hud {
     if (app.state === 'play' && dir.state === 'dead') this.dead(ctx, W, H, dir, app.touch);
     if (app.state === 'play' && dir.state === 'victory') this.victory(ctx, W, H, world, dir, app.touch);
     if ((app.state === 'play' || app.state === 'pause') && dir.state === 'draft' && dir.draft) this.draft(ctx, W, H, world, dir, app.touch);
-    if (dir.fade > 0) { ctx.globalAlpha = dir.fade; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+    if (dir.fade > 0) {
+      ctx.globalAlpha = dir.fade; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+      // Going up: the floor number climbs in the corner while the screen is dark.
+      if (app.state === 'play' && !dir.training && !dir.picked && dir.state !== 'draft') {
+        const s = dir.stageDef, up = dir.state === 'transition';
+        ctx.globalAlpha = dir.fade * 0.9;
+        this.text(ctx, `FLOOR ${up ? s.n + 1 : s.n}`, W / 2, H / 2 - 6 + (up ? (1 - dir.fade) * 26 : (dir.fade - 1) * 26), 30, '#ffffff', 'center', 700, 14);
+        ctx.fillStyle = '#56e9ff'; ctx.fillRect(W / 2 - 60, H / 2 + 20, 120 * (up ? dir.fade : 1), 1.5);
+        this.text(ctx, `OF ${dir.count}`, W / 2, H / 2 + 38, 11, '#ffffff77', 'center', 600, 6);
+      }
+      ctx.globalAlpha = 1;
+    }
     if (dir.picked && app.state === 'play') {
       ctx.globalAlpha = Math.min(1, dir.picked.t * 2);
       this.text(ctx, dir.picked.name, W / 2, H / 2 - 8, 40, '#ffffff', 'center', 700, 12);
-      this.text(ctx, 'ADDED TO YOUR BUILD', W / 2, H / 2 + 30, 13, '#56e9ff', 'center', 600, 5);
+      this.text(ctx, dir.picked.sub || 'ADDED TO YOUR BUILD', W / 2, H / 2 + 30, 13, dir.picked.color || '#56e9ff', 'center', 600, 5);
       ctx.globalAlpha = 1;
     }
     if (app.state === 'menu') this.menu(ctx, W, H, app);
     if (app.state === 'controls') this.controls(ctx, W, H, app.touch ? 'TAP to return' : 'ENTER or ESC to return');
     if (app.state === 'pause') this.pause(ctx, W, H, world, dir, app.touch, this.hover);
+    drawCodex(this, ctx, W, H, app, dt);
     if (app.toast) { ctx.globalAlpha = Math.min(1, app.toast.t * 3); this.text(ctx, app.toast.text, W / 2, 96, 16, '#56e9ff', 'center', 700, 5); ctx.globalAlpha = 1; }
     if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
   }
@@ -349,6 +362,19 @@ export class Hud {
       ctx.globalAlpha = a * 0.12; ctx.fillRect(W / 2 - 420 * k, y - 32, 840 * k, 66);
       ctx.globalAlpha = a * 0.7; this.text(ctx, b.title, W / 2 + slide + j + 3, y, 46, '#ff2e6e', 'center', 700, 14); this.text(ctx, b.title, W / 2 + slide - j - 3, y, 46, '#56e9ff', 'center', 700, 14);
       ctx.globalAlpha = a;
+    }
+    if (b.intro) {
+      // A champion or a keeper steps in: its name in its own colour between two bars that close on it.
+      const k = Math.min(1, (b.max - b.t) * 2.5);
+      ctx.fillStyle = b.intro; ctx.globalAlpha = a * 0.9;
+      ctx.fillRect(W / 2 - 560 + 300 * k, y - 38, 260, 3); ctx.fillRect(W / 2 + 300 - 300 * k, y - 38, 260, 3);
+      ctx.fillRect(W / 2 - 560 + 300 * k, y + 76, 260, 3); ctx.fillRect(W / 2 + 300 - 300 * k, y + 76, 260, 3);
+      ctx.globalAlpha = a * 0.5; this.text(ctx, b.title, W / 2 + slide + 2, y + 2, 52, b.intro, 'center', 800, 14);
+      ctx.globalAlpha = a; this.text(ctx, b.title, W / 2 + slide, y, 52, '#ffffff', 'center', 800, 14);
+      ctx.fillStyle = b.intro; ctx.fillRect(W / 2 - 190 * a, y + 36, 380 * a, 2);
+      if (b.sub) this.text(ctx, b.sub.toUpperCase(), W / 2 - slide, y + 58, 14, b.intro, 'center', 700, 6);
+      ctx.globalAlpha = 1;
+      return;
     }
     this.text(ctx, b.title, W / 2 + slide, y, 46, '#ffffff', 'center', 700, 14);
     ctx.fillStyle = b.alarm ? '#ff2e6e' : '#ffffff'; ctx.fillRect(W / 2 - 150 * a, y + 34, 300 * a, 1.5);

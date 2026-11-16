@@ -387,7 +387,8 @@ class Voice {
 
 // ---------------------------------------------------------------------------------------------
 // One-shot definitions. vary: random pitch spread per play. rev: reverb send. Gains live in MIX.
-// pri: 0 may be dropped under load, 2 may steal any voice.
+// pri: 0 may be dropped under load, 2 may steal any voice. gap: seconds between triggers of
+// the same name, for sounds the game repeats faster than RATE_LIMIT allows.
 
 const SFX = {
   // ----- Blades -----
@@ -1299,6 +1300,248 @@ const SFX = {
     v.noise({ gp: [[0, 0], [0.01, 1], [0.12, 0.6], [0.16, 0]], g: 0.25, bp: { pts: [[0, 1500], [0.12, 6000]], q: 1.5 } });
     v.thump(260, 140, 0.08, 0.45);
   } },
+
+  // ----- Surprises: room events that break into a floor. Each opens with energy in the first
+  // 100 ms so it reads at once over a fight. -----
+  // Ambush sting: a low thump and two square stabs a tritone apart, each beating against a note a
+  // semitone off. Square waves at 1 to 2 kHz carry over blade noise.
+  surprise: { vary: 0, pri: 2, rev: 0.2, fn(v) {
+    v.click({ g: 0.5, hp: 1500, d: 0.012 });
+    v.thump(85, 32, 0.5, 1, { drive: 0.6, h: 0.02 });
+    v.noise({ color: 'brown', a: 0.001, d: 0.25, g: 0.6, lp: { f: 1800, to: 200 } });
+    for (const [at, m, h, d] of [[0, 82, 0.09, 0.22], [0.15, 76, 0.2, 0.32]]) {
+      v.tone({ at, type: 'square', unison: [0, 100], f: mtof(m), a: 0.003, h, d, g: 0.07, lp: { f: 4500, to: 1500 } });
+      v.tone({ at, type: 'sawtooth', f: mtof(m - 12), a: 0.003, h, d, g: 0.06, drive: 0.6, lp: 2500 });
+      v.tone({ at, f: mtof(m), a: 0.003, h, d: d + 0.03, g: 0.1 });
+    }
+  } },
+  // The dark copy drops in: air sucked in (a reversed swell), cut into ignite's recipe pitched down
+  // an octave, driven hard and beating against a detuned low partner.
+  shadeArrive: { vary: 0.02, pri: 2, rev: 0.3, fn(v) {
+    const S = 0.38, gp = [[0, 0], [0.04, 0.25], [S * 0.7, 0.5], [S, 1], [S + 0.01, 0]];
+    v.noise({ gp, g: 0.4, bp: { pts: [[0, 600], [S, 3600]], q: 1.4 } });
+    v.tone({ type: 'sawtooth', unison: [-12, 12], fp: [[0, 70], [S, 160]], gp, g: 0.06, lp: { pts: [[0, 400], [S, 2200]] } });
+    v.click({ at: S, g: 0.5, hp: 2500, d: 0.014 });
+    v.crackle({ at: S, d: 0.35, g: 0.4, bp: { f: 2600, q: 0.7 } });
+    const gi = [[0, 0], [0.03, 0.7], [0.14, 1], [0.4, 0.6], [0.66, 0]];
+    v.tone({ at: S, type: 'sawtooth', unison: [-30, -10, 12, 31], fp: [[0, 22], [0.14, 56], [0.3, 47]], gp: gi, g: 0.2, drive: 1.4, lp: { pts: [[0, 150], [0.14, 1800], [0.5, 500]], q: 4 } });
+    v.tone({ at: S, fp: [[0, 22], [0.18, 30]], gp: gi, g: 0.4 });
+    v.thump(70, 28, 0.35, 0.6, { at: S, drive: 0.4 });
+  } },
+  // Blackout: a power whine falling away under a crushed mains buzz, then a relay clunk.
+  lightsOut: { vary: 0.03, pri: 2, rev: 0.15, fn(v) {
+    const D = 0.42, gp = [[0, 0], [0.01, 1], [0.25, 0.7], [D, 0]];
+    v.tone({ fp: [[0, 2400], [D, 180]], gp, g: 0.12, vib: { rate: 22, depth: 30 } });
+    v.tone({ type: 'sawtooth', unison: [-8, 8], fp: [[0, 1200], [D, 90]], gp, g: 0.06, bp: { pts: [[0, 2400], [D, 300]], q: 2 } });
+    v.tone({ type: 'square', f: 100, gp: [[0, 0], [0.005, 1], [0.2, 0.6], [D, 0]], g: 0.06, curve: 'crush', lp: 2500, am: { rate: 50, depth: 0.5, type: 'square' } });
+    v.click({ at: D, g: 0.6, hp: 1500, d: 0.012 });
+    v.thump(170, 70, 0.1, 0.8, { at: D, drive: 0.4 });
+    v.noise({ color: 'brown', at: D, a: 0.001, d: 0.06, g: 0.5, lp: 1200 });
+    v.noise({ at: D + 0.035, a: 0.0005, d: 0.02, g: 0.25, bp: { f: 1800, q: 2 } });
+  } },
+  // Herd incoming: muffled galloping that grows louder, under a two-note horn. The hooves are
+  // low-passed so they read as far away until `stampede` arrives.
+  stampedeWarn: { vary: 0.02, pri: 2, rev: 0.25, fn(v) {
+    const D = 1.3;
+    let t = 0, i = 0;
+    while (t < D - 0.1) {
+      const k = 0.25 + 0.75 * (t / D);
+      v.thump(v.r(95, 120), 45, 0.07, 0.7 * k, { at: t, lp: 500 });
+      v.noise({ color: 'brown', at: t, a: 0.002, d: 0.05, g: 0.5 * k, lp: 450 });
+      t += [0.07, 0.07, 0.16][i++ % 3] * v.r(0.9, 1.1);
+    }
+    v.noise({ color: 'brown', gp: [[0, 0], [0.1, 0.3], [D - 0.1, 1], [D, 0]], g: 0.35, lp: 300 });
+    for (const [at, m, h] of [[0.05, 62, 0.35], [0.6, 67, 0.55]]) {
+      const bank = v.bank([[[[0, 750]], 5, 1.6], [[[0, 1250]], 6, 0.9]]);
+      v.tone({ at, type: 'sawtooth', unison: [-9, 9], f: mtof(m), a: 0.04, h, d: 0.12, g: 0.4, vib: { rate: 5, depth: 8 }, dest: bank });
+      v.tone({ at, f: mtof(m), a: 0.04, h, d: 0.12, g: 0.08 });
+    }
+  } },
+  // Herd arrives: a heavy first impact and a dense, close gallop over a rumble.
+  stampede: { vary: 0.03, pri: 2, rev: 0.15, fn(v) {
+    v.click({ g: 0.5, hp: 1200, d: 0.015 });
+    v.thump(90, 30, 0.4, 1, { drive: 0.7, h: 0.02 });
+    v.noise({ color: 'brown', gp: [[0, 0], [0.01, 1], [0.5, 0.7], [1.1, 0]], g: 0.75, lp: { pts: [[0, 2000], [1.1, 300]] }, am: { rate: 13, depth: 0.35 } });
+    let t = 0.04;
+    while (t < 1.0) {
+      const k = 1 - 0.7 * t;
+      v.thump(v.r(110, 150), 50, 0.06, 0.9 * k, { at: t, drive: 0.3 });
+      v.noise({ color: 'pink', at: t, a: 0.001, d: 0.04, g: 0.4 * k, bp: { f: v.r(600, 1000), q: 1.2 } });
+      t += v.r(0.04, 0.075);
+    }
+  } },
+  // The room shifts: a deep groan of strained structure, then rubble knocking down after it.
+  quake: { vary: 0.03, pri: 2, rev: 0.3, fn(v) {
+    const D = 1.35, gp = [[0, 0], [0.12, 0.8], [0.5, 1], [1.0, 0.6], [D, 0]];
+    const bank = v.bank([[[[0, 180], [0.6, 260], [D, 150]], 6, 2.2], [[[0, 420], [0.6, 560], [D, 380]], 7, 1.2]]);
+    v.tone({ type: 'sawtooth', unison: [-25, 0, 22], fp: [[0, 46], [0.5, 40], [D, 30]], gp, g: 0.8, drive: 1, vib: { rate: 3, depth: 40 }, am: { rate: 21, depth: 0.3 }, dest: bank });
+    v.tone({ fp: [[0, 34], [D, 24]], gp, g: 0.4 });
+    v.noise({ color: 'brown', gp, g: 0.6, lp: { pts: [[0, 600], [0.4, 900], [D, 200]] } });
+    v.thump(75, 28, 0.4, 0.8, { drive: 0.5 });
+    for (let i = 0; i < 9; i++) {
+      const at = 0.25 + i * 0.11 + v.r(0, 0.06), k = 1 - i * 0.08;
+      v.thump(v.r(160, 260), 80, 0.05, 0.4 * k, { at });
+      v.noise({ color: 'pink', at, a: 0.001, d: v.r(0.03, 0.07), g: 0.35 * k, bp: { f: v.r(700, 1800), q: 1.5 } });
+    }
+  } },
+  // Storm: a split-second crack (bright noise bursts) and a long low roll that rumbles unevenly.
+  thunder: { vary: 0.04, pri: 2, rev: 0.4, fn(v) {
+    v.click({ g: 0.6, hp: 1200, d: 0.015 });
+    v.noise({ gp: [[0, 0], [0.002, 1], [0.03, 0.35], [0.05, 0.9], [0.09, 0.3], [0.12, 0.6], [0.3, 0]], g: 0.45, hp: 1500 });
+    v.crackle({ d: 0.35, g: 0.5, bp: { f: 2500, q: 0.6 } });
+    v.thump(90, 30, 0.35, 0.7, { drive: 0.4 });
+    const gp = [[0, 0], [0.04, 1], [0.3, 0.75], [0.55, 0.9], [0.9, 0.45], [1.4, 0]];
+    v.noise({ color: 'brown', gp, g: 0.85, lp: { pts: [[0, 1600], [1.4, 150]] }, am: { rate: v.r(5, 8), depth: 0.4 } });
+    v.tone({ fp: [[0, 48], [1.4, 30]], gp, g: 0.3 });
+  } },
+  // Supply cache lands: a heavy inharmonic clang over a thud, then a clean high ping.
+  cacheDrop: { vary: 0.04, rev: 0.25, fn(v) {
+    v.click({ g: 0.6, hp: 1500, d: 0.012 });
+    v.thump(120, 38, 0.35, 1, { drive: 0.6, h: 0.02 });
+    v.noise({ color: 'brown', a: 0.001, d: 0.25, g: 0.7, lp: { f: 2000, to: 200 } });
+    v.fm({ f: v.r(300, 330), ratio: 1.41, index: 5, index1: 0.4, it: 0.4, a: 0.001, d: 0.7, g: 0.12 });
+    v.fm({ f: 870, ratio: 2.76, index: 2.5, index1: 0.2, a: 0.001, d: 0.45, g: 0.06 });
+    v.bell(96, { at: 0.08, d: 0.45, g: 0.08 });
+  } },
+  // Prop broken: an electrical pop then a spray of crystal fragments.
+  propBreak: { vary: 0.05, rev: 0.2, fn(v) {
+    v.click({ g: 0.6, hp: 2000, d: 0.01 });
+    v.thump(220, 90, 0.08, 0.6, { drive: 0.4 });
+    v.tone({ type: 'square', f: v.r(140, 170), a: 0.001, h: 0.02, d: 0.06, g: 0.1, curve: 'crush', lp: 4000 });
+    v.crackle({ d: 0.15, g: 0.5, bp: { f: 3500, q: 0.7 } });
+    v.noise({ gp: [[0, 0], [0.002, 1], [0.03, 0.4], [0.05, 0.8], [0.25, 0]], g: 0.3, hp: 4500 });
+    v.shards(14, 0.2, 2500, 7500, 0.1, 0.01);
+  } },
+
+  // ----- Currency, shop and doors -----
+  // Shard collected: a tiny bright tick. The game raises the pitch along a run (1 to 1.5), so the
+  // pitch is not varied, and `gap` lets a tick land every frame. A gap above zero still merges
+  // shards collected in the same instant into one tick rather than stacking them.
+  pickupShard: { vary: 0, pri: 0, gap: 0.004, rev: 0.1, fn(v) {
+    v.tone({ type: 'triangle', f: 2093, a: 0.001, d: 0.07, g: 0.25 });
+    v.tone({ f: 4186, a: 0.001, d: 0.03, g: 0.06 });
+  } },
+  // Purchase: a soft click and two bells a fifth apart.
+  buy: { vary: 0, rev: 0.25, fn(v) {
+    v.click({ g: 0.12, hp: 4000, d: 0.004 });
+    v.bell(84, { d: 0.25, g: 0.12 });
+    v.bell(91, { at: 0.07, d: 0.4, g: 0.12 });
+  } },
+  // Cannot afford: a short low buzz, two squares a beating semitone-fraction apart.
+  uiDeny: { vary: 0, fn(v) {
+    v.tone({ type: 'square', unison: [0, 60], f: 110, a: 0.003, h: 0.09, d: 0.05, g: 0.12, lp: 900 });
+    v.tone({ f: 110, a: 0.003, h: 0.09, d: 0.05, g: 0.2 });
+  } },
+  // Leave a screen: uiSelect's opposite, one soft blip falling a fifth.
+  uiBack: { vary: 0, fn(v) {
+    v.tone({ type: 'triangle', fp: [[0, 1320], [0.07, 880]], a: 0.001, d: 0.09, g: 0.25 });
+  } },
+  // Doors appear: a rough stone-on-metal slide under a rising band of air and a faint pad.
+  doorsOpen: { vary: 0, rev: 0.35, fn(v) {
+    const D = 0.55, gp = [[0, 0], [0.03, 0.8], [0.35, 1], [D, 0]];
+    v.noise({ color: 'pink', gp, g: 0.5, bp: { pts: [[0, 350], [D, 600]], q: 1.5 }, am: { rate: 27, depth: 0.45 } });
+    v.fm({ f: 190, fp: [[0, 190], [D, 230]], ratio: 1.41, index: 2, index1: 1, gp, g: 0.04, lp: 1500 });
+    v.noise({ gp: [[0, 0], [0.4, 1], [D, 0]], g: 0.15, bp: { pts: [[0, 1200], [D, 6000]], q: 1.5 } });
+    v.chord([57, 64, 69], { gp: [[0, 0], [0.4, 1], [D, 0]], g: 0.02, lp: { pts: [[0, 400], [D, 2000]] } });
+    v.thump(80, 40, 0.15, 0.4, { at: D - 0.08 });
+  } },
+  // Through a door: a rush of air into a low thud.
+  doorPick: { vary: 0.03, rev: 0.25, fn(v) {
+    const D = 0.26;
+    v.whoosh({ d: D, g: 0.5, color: 'pink', lo: 300, hi: 1800, end: 500, q: 1.2, peak: 0.6 });
+    v.thump(95, 34, 0.3, 0.9, { at: D - 0.04, drive: 0.4 });
+    v.noise({ color: 'brown', at: D - 0.04, a: 0.001, d: 0.15, g: 0.5, lp: 900 });
+  } },
+
+  // ----- Pacts, rest, objectives -----
+  // Pact sealed: a diminished "ah" choir through a formant bank, a low drone and one heartbeat.
+  pactTake: { vary: 0, pri: 2, rev: 0.45, fn(v) {
+    const D = 1.0, gp = [[0, 0], [0.06, 0.5], [0.3, 1], [0.6, 0.7], [D, 0]];
+    const bank = v.bank([[[[0, 650], [D, 550]], 5, 2], [[[0, 1050], [D, 950]], 6, 1.2], [[[0, 2500]], 8, 0.4]]);
+    for (const m of [45, 48, 51, 57]) v.tone({ type: 'sawtooth', unison: [-10, 9], f: mtof(m), gp, g: 0.18, vib: { rate: 5, depth: 12 }, dest: bank });
+    v.noise({ gp, g: 0.1, dest: bank });
+    v.tone({ f: mtof(33), gp, g: 0.3 });
+    v.thump(70, 30, 0.22, 1, { at: 0.02, drive: 0.4 });
+    v.thump(60, 28, 0.3, 0.7, { at: 0.24, drive: 0.4 });
+  } },
+  // Sanctuary rest: a warm major pad opening upward with soft chimes climbing over it.
+  rest: { vary: 0, rev: 0.4, fn(v) {
+    const D = 1.0, gp = [[0, 0], [0.05, 0.4], [0.45, 1], [D, 0]];
+    v.chord([57, 61, 64, 69], { gp, g: 0.03, lp: { pts: [[0, 500], [0.5, 2200], [D, 900]] } });
+    v.tone({ f: mtof(45), gp, g: 0.2 });
+    [76, 81, 85, 88].forEach((m, i) => v.bell(m, { at: 0.04 + i * 0.12, d: 0.45, g: 0.06 }));
+  } },
+  // Challenge met: a quick rising major arpeggio in bright saws, the last note held.
+  challengeMet: { vary: 0, rev: 0.3, fn(v) {
+    [72, 76, 79].forEach((m, i) => {
+      const last = i === 2;
+      v.tone({ at: i * 0.07, type: 'sawtooth', unison: [-7, 7], f: mtof(m), a: 0.004, h: last ? 0.1 : 0.03, d: last ? 0.3 : 0.1, g: 0.06, lp: { f: 3200, to: 1400 } });
+      v.tone({ at: i * 0.07, type: 'triangle', f: mtof(m), a: 0.004, h: last ? 0.1 : 0.03, d: last ? 0.3 : 0.1, g: 0.1 });
+    });
+    v.bell(91, { at: 0.14, d: 0.35, g: 0.06 });
+  } },
+  // Objective met: broader than challengeMet: a low knock, a full held chord and a bell run.
+  objectiveDone: { vary: 0, pri: 2, rev: 0.4, fn(v) {
+    v.thump(90, 40, 0.3, 0.6);
+    v.chord([60, 64, 67, 72], { a: 0.01, h: 0.25, d: 0.6, g: 0.035, lp: { f: 3000, to: 900 } });
+    v.tone({ f: mtof(48), a: 0.01, h: 0.25, d: 0.6, g: 0.22 });
+    [79, 84, 88, 91].forEach((m, i) => v.bell(m, { at: i * 0.06, d: i === 3 ? 0.7 : 0.3, g: 0.07 }));
+  } },
+  // Beacon fires: a rising charge whine cut into a huge blast with a ring over it.
+  beaconFire: { vary: 0, pri: 2, rev: 0.4, fn(v) {
+    const S = 0.32, gp = [[0, 0], [0.03, 0.3], [S * 0.8, 0.7], [S, 1], [S + 0.01, 0]];
+    v.tone({ type: 'sawtooth', unison: [-10, 10], fp: [[0, 300], [S, 1800]], gp, g: 0.07, bp: { pts: [[0, 600], [S, 3600]], q: 2 } });
+    v.tone({ fp: [[0, 600], [S, 2400]], gp, g: 0.08, vib: { rate: 18, depth: 25 } });
+    v.noise({ gp, g: 0.3, bp: { pts: [[0, 800], [S, 6000]], q: 1.4 } });
+    v.click({ at: S, g: 0.5, hp: 1500, d: 0.015 });
+    v.thump(80, 26, 0.85, 1, { at: S, drive: 0.9, h: 0.05 });
+    v.tone({ at: S, f: 34, a: 0.01, h: 0.1, d: 0.9, g: 0.45 });
+    v.noise({ color: 'brown', at: S, a: 0.001, d: 0.6, g: 0.9, lp: { f: 3500, to: 120 } });
+    v.noise({ color: 'pink', at: S, a: 0.001, d: 0.3, g: 0.45, bp: { f: 1200, to: 400, q: 0.8 } });
+    v.crackle({ at: S, d: 0.6, g: 0.45, bp: { f: 2600, q: 0.6 } });
+    v.fm({ at: S, f: 1175, ratio: 2.414, index: 3, index1: 0.2, a: 0.002, d: 0.8, g: 0.07 });
+  } },
+  // Target marked: a golden FM ping and two short square blips of a lock-on.
+  markSet: { vary: 0, rev: 0.25, fn(v) {
+    v.fm({ f: mtof(91), ratio: 2, index: 1.2, index1: 0.05, a: 0.001, d: 0.35, g: 0.12 });
+    v.tone({ f: mtof(91) * 3.01, a: 0.001, d: 0.12, g: 0.02 });
+    for (const at of [0.07, 0.12]) v.tone({ at, type: 'square', f: 2637, a: 0.0005, h: 0.018, d: 0.012, g: 0.05, lp: 6000 });
+  } },
+  // Captive freed: glass breaking open, then a bright, higher relative of ignite.
+  allyFreed: { vary: 0.02, rev: 0.3, fn(v) {
+    v.click({ g: 0.4, hp: 3000, d: 0.008 });
+    v.shards(10, 0.12, 3000, 8000, 0.08);
+    v.noise({ a: 0.001, d: 0.12, g: 0.15, hp: 5000 });
+    const S = 0.12, gi = [[0, 0], [0.03, 0.6], [0.14, 1], [0.4, 0.55], [0.7, 0]];
+    v.crackle({ at: S, d: 0.25, g: 0.35, bp: { f: 4000, q: 0.7 } });
+    v.tone({ at: S, type: 'sawtooth', unison: [-12, 0, 12], fp: [[0, 70], [0.14, 190], [0.3, 165]], gp: gi, g: 0.14, drive: 0.4, lp: { pts: [[0, 300], [0.14, 4000], [0.5, 1500]], q: 3 } });
+    v.tone({ at: S, fp: [[0, 70], [0.2, 95]], gp: gi, g: 0.2 });
+    v.bell(88, { at: S + 0.12, d: 0.4, g: 0.05 });
+  } },
+  // Courier escapes: a quick upward zip, then a short wobbling "nyeh" a step higher.
+  courierGone: { vary: 0.02, rev: 0.15, fn(v) {
+    v.tone({ type: 'triangle', fp: [[0, 400], [0.13, 1800]], gp: [[0, 0], [0.01, 1], [0.13, 0.8], [0.15, 0]], g: 0.18 });
+    v.noise({ gp: [[0, 0], [0.02, 1], [0.15, 0]], g: 0.12, bp: { pts: [[0, 800], [0.15, 5000]], q: 2 } });
+    v.tone({ at: 0.17, type: 'square', fp: [[0, 1400], [0.06, 1250], [0.12, 1600]], a: 0.004, h: 0.08, d: 0.05, g: 0.05, lp: 3500, vib: { rate: 14, depth: 50 } });
+  } },
+  // Bounty won: a spray of coin pings (two partials each) and a major chime.
+  bountyWon: { vary: 0, pri: 2, rev: 0.3, fn(v) {
+    for (let i = 0; i < 12; i++) {
+      const at = Math.random() * Math.random() * 0.35, f = v.r(2600, 4200);
+      v.fm({ at, f, ratio: 1.5, index: 0.8, index1: 0.05, a: 0.0005, d: v.r(0.06, 0.14), g: v.r(0.04, 0.07) });
+      v.tone({ at, f: f * 2.4, a: 0.0005, d: 0.05, g: 0.015 });
+    }
+    v.click({ g: 0.2, hp: 3000, d: 0.006 });
+    [84, 88, 91].forEach((m) => v.bell(m, { at: 0.12, d: 0.6, g: 0.06 }));
+  } },
+  // Weapon switch: a short metal slide, then a small ignition blip from the new blade.
+  weaponSwap: { vary: 0.04, fn(v) {
+    v.noise({ gp: [[0, 0], [0.01, 1], [0.09, 0.6], [0.11, 0]], g: 0.3, bp: { pts: [[0, 2200], [0.11, 4800]], q: 2.5 }, am: { rate: 60, depth: 0.4 } });
+    v.click({ at: 0.11, g: 0.35, hp: 3000, d: 0.008 });
+    v.tone({ at: 0.11, type: 'sawtooth', unison: [-10, 10], fp: [[0, 60], [0.05, 120], [0.13, 105]], gp: [[0, 0], [0.02, 1], [0.13, 0]], g: 0.16, lp: { pts: [[0, 300], [0.05, 2400], [0.13, 600]], q: 2 } });
+    v.crackle({ at: 0.11, d: 0.08, g: 0.2 });
+  } },
+  // A later batch for the whip, gauntlets and drawn blade goes after this point.
 };
 
 // Mix: per-sound voice gain, set from measured dry peaks (node tools/audio-test.js) toward
@@ -1323,6 +1566,11 @@ const MIX = {
   tetherSnap: 1, enrage: .37, dismount: .55, packHowl: .68, nerveBreak: .54,
   alarm: 1.53, twinSwap: 2.19, finisher: .42, uiHover: .32, tutorialDone: 2.2,
   pullIn: .9, pin: .47, reflect: .65,
+  // Room events peak near -4.5 dBFS at their loudest play, 2 dB or more under finisher; shop
+  // and UI sit near -11 to -17.
+  surprise: .36, shadeArrive: .47, lightsOut: .4, stampedeWarn: .57, stampede: .28, quake: .45, thunder: .38, cacheDrop: .3, propBreak: .43,
+  pickupShard: .51, buy: 2.04, uiDeny: .22, uiBack: .6, doorsOpen: .78, doorPick: .46,
+  pactTake: .49, rest: 1.07, challengeMet: 1.76, objectiveDone: .72, beaconFire: .31, markSet: 2.21, allyFreed: 1.17, courierGone: 1.64, bountyWon: 2.04, weaponSwap: .78,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -2277,7 +2525,7 @@ class Engine {
     if (!def || !this.live()) return;
     const now = this.ctx.currentTime;
     const last = this.lastPlay.get(name);
-    if (last !== undefined && now - last < RATE_LIMIT && now >= last) {
+    if (last !== undefined && now - last < (def.gap ?? RATE_LIMIT) && now >= last) {
       this.stats.limited++;
       return;
     }

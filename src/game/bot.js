@@ -49,6 +49,17 @@ export class BotInput {
   }
 
   tick(dt) {
+    this.think(dt);
+    // Open edges: whatever it decided, it never runs or dashes toward one that is close.
+    const w = this.world, p = w.player;
+    if (!w.pits.length || !p || p.dead || p.rag) return;
+    const dir = this.down.right ? 1 : this.down.left ? -1 : 0;
+    if (dir && w.inPit(p.x + dir * 130)) this.down.left = this.down.right = false;
+    if (this.down.dash && w.inPit(p.x + (dir || p.facing) * 360)) { this.down.dash = false; this.pressedAt.dash = -9; }
+    // Standing on the lip: step back from it before doing anything else.
+    if (p.onGround && w.inPit(p.x + p.facing * 80) && !w.inPit(p.x - p.facing * 160)) { this.down.left = p.facing > 0; this.down.right = p.facing < 0; }
+  }
+  think(dt) {
     this.now += dt;
     for (const a of ACTIONS) if (this.hold[a] > 0 && (this.hold[a] -= dt) <= 0) this.down[a] = false;
     const w = this.world, p = w.player;

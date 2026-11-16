@@ -544,6 +544,7 @@ export class Renderer {
   // bloom layer, so a floor with terrain does not widen the area the bloom has to cover.
   terrain(ctx, world) {
     const t = world.time, P = world.platforms, Hz = world.hazards;
+    if (world.pits.length) this.pits(ctx, world, t);
     if (!P.length && !Hz.length && !world.walls) return;
     for (const h of Hz) {
       ctx.globalAlpha = 1; ctx.fillStyle = '#15100c'; ctx.fillRect(h.x - h.w, -4, h.w * 2, 6);
@@ -556,6 +557,23 @@ export class Renderer {
         // Out: a ghost of the bridge, and a bar that fills as it comes back.
         ctx.globalAlpha = 0.25; ctx.fillStyle = '#9fe8ff'; ctx.fillRect(x0, p.y, p.w, 1);
         ctx.globalAlpha = 0.6; ctx.fillRect(x0, p.y + 3, p.w * (1 - p.off / 4.5), 1.5);
+        continue;
+      }
+      if (p.fixed) {
+        // A ledge is part of the room: a slab hung from above. A mover rides a rail and shows which way it is going.
+        ctx.globalAlpha = 1; ctx.fillStyle = '#070a10'; ctx.fillRect(x0, p.y, p.w, 12);
+        ctx.fillStyle = p.amp ? '#ffd36b' : '#c9d6e6'; ctx.fillRect(x0, p.y, p.w, 2.5);
+        ctx.globalAlpha = 0.35; ctx.fillRect(x0 + 6, p.y + 11, p.w - 12, 1);
+        ctx.strokeStyle = '#0a0d14'; ctx.lineWidth = 3; ctx.globalAlpha = 0.9;
+        ctx.beginPath(); ctx.moveTo(x0 + 18, p.y); ctx.lineTo(x0 + 18, p.y - 900); ctx.moveTo(x0 + p.w - 18, p.y); ctx.lineTo(x0 + p.w - 18, p.y - 900); ctx.stroke();
+        if (p.amp) {
+          const dir = Math.cos((t / p.period + p.ph) * 6.2832) >= 0 ? 1 : -1;
+          ctx.strokeStyle = '#ffd36b'; ctx.lineWidth = 2; ctx.globalAlpha = 0.5 + Math.sin(t * 6) * 0.2;
+          ctx.beginPath(); for (let i = -1; i <= 1; i++) { const cx = p.x + i * 26; ctx.moveTo(cx - dir * 5, p.y + 3.5); ctx.lineTo(cx + dir * 5, p.y + 6.5); ctx.lineTo(cx - dir * 5, p.y + 9.5); } ctx.stroke();
+        }
+        ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.18;
+        ctx.drawImage(glowSprite(p.amp ? '#ffd36b' : '#9fb4c8'), x0 - 24, p.y - 16, p.w + 48, 34);
+        ctx.globalCompositeOperation = 'source-over';
         continue;
       }
       const hot = p.load > 2 ? 0.55 + Math.sin(t * 40) * 0.4 : p.life !== undefined && p.life < 1 ? 0.5 + Math.sin(t * 30) * 0.4 : 1;
@@ -581,6 +599,33 @@ export class Renderer {
   }
 
   // ───────────── solid pass ─────────────
+  // Open edges: the floor is cut away to a dark shaft, with a lit lip and warning marks beside it.
+  // On a lift the shaft's lights run past downward.
+  pits(ctx, world, t) {
+    for (const q of world.pits) {
+      const x0 = Math.max(q.x0, world.minX - 200), x1 = Math.min(q.x1, world.maxX + 200), lip = q.x0 <= world.minX ? q.x1 : q.x0, out = lip === q.x1 ? -1 : 1;
+      ctx.globalAlpha = 1; ctx.fillStyle = '#020308'; ctx.fillRect(x0, -1, x1 - x0, 700);
+      // The inside wall catches a little light near the top.
+      ctx.fillStyle = '#56e9ff';
+      for (let i = 0; i < 6; i++) { ctx.globalAlpha = 0.16 * (1 - i / 6) ** 2; ctx.fillRect(lip + (out > 0 ? 0 : -5), i * 22, 5, 22); }
+      if (world.lift) {
+        // Shaft lights passing: short dashes that fall the faster the deeper they are.
+        ctx.globalAlpha = 0.5;
+        for (let i = 0; i < 5; i++) { const lx = lip + out * (40 + i * 70), ly = ((t * (520 + i * 90) + i * 173) % 760) - 20; if (lx > x0 && lx < x1) ctx.fillRect(lx, ly, 2, 46); }
+      }
+      // The lip itself, and chevrons on the floor pointing at the drop.
+      ctx.globalAlpha = 1; ctx.fillStyle = '#ffd36b'; ctx.fillRect(lip - 2, -2, 4, 3);
+      ctx.globalAlpha = 0.55 + Math.sin(t * 3 + lip) * 0.15; ctx.strokeStyle = '#ffd36b'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 1; i <= 3; i++) { const cx = lip - out * i * 26; ctx.moveTo(cx - out * 6, -1); ctx.lineTo(cx + out * 6, 2); }
+      ctx.stroke();
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.22;
+      ctx.drawImage(glowSprite('#ffd36b'), lip - 46, -14, 92, 26);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.globalAlpha = 1;
+  }
+
   bodyFighter(ctx, f, world) {
     if (f.fade <= 0.01) return;
     if (f.def.prop) return bodyProp(ctx, f, world);

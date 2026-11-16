@@ -11,16 +11,17 @@ import { TAU } from '../core/math.js';
 import { glowSprite } from './fx.js';
 
 const RIM = 2.6;
-let S = 1, FX = 1, HC = 1, HS = 0, HX = 0, HY = 0, HLen = 1, HRad = 1;
+let S = 1, FX = 1, FR = 1, HC = 1, HS = 0, HX = 0, HY = 0, HLen = 1, HRad = 1;
 let UX = 1, UY = 0, NX = 0, NY = -1, SL = 1, OX = 0, OY = 0, G = 1;
 const Q = new Float32Array(64); // scratch points for smooth outlines
 
 // ───────────── frames ─────────────
 // Head frame: a along the head in head lengths, b up in head radii; origin at the eye (joint 0).
-// `roll` below 0 turns the up side over, for a body getting up from its back.
+// `roll` below 0 turns the up side over, for a body getting up from its back. FR is "forward" for
+// parts that only point along the facing (toes, hooves, claws): they turn over with the roll too.
 function headFrame(f) {
   const B = f.B;
-  S = f.scale; FX = f.facing * f.xm; HC = Math.cos(f.hdA); HS = Math.sin(f.hdA); HX = f.j[0]; HY = f.j[1]; HLen = B.head * S; HRad = B.headR * S * f.roll;
+  S = f.scale; FX = f.facing * f.xm; FR = FX * f.roll; HC = Math.cos(f.hdA); HS = Math.sin(f.hdA); HX = f.j[0]; HY = f.j[1]; HLen = B.head * S; HRad = B.headR * S * f.roll;
 }
 const hx = (a, b) => HX + (HC * a * HLen - HS * b * HRad) * FX;
 const hy = (a, b) => HY - (HS * a * HLen + HC * b * HRad);
@@ -110,7 +111,7 @@ function circle(ctx, x, y, r) { ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, TAU); 
 function ellipse(ctx, x, y, rx, ry, a) { ctx.moveTo(x + Math.cos(a) * rx, y + Math.sin(a) * rx); ctx.ellipse(x, y, rx, ry, a, 0, TAU); }
 function bone(ctx, j, a, b, c) { ctx.moveTo(j[a * 2], j[a * 2 + 1]); ctx.lineTo(j[b * 2], j[b * 2 + 1]); ctx.lineTo(j[c * 2], j[c * 2 + 1]); }
 // A foot stub forward from a joint, along the floor.
-function toe(ctx, j, k, len) { const x = j[k * 2], y = j[k * 2 + 1]; ctx.moveTo(x, y); ctx.lineTo(x + FX * len, Math.min(-1, y + len * 0.15)); }
+function toe(ctx, j, k, len) { const x = j[k * 2], y = j[k * 2 + 1]; ctx.moveTo(x, y); ctx.lineTo(x + FR * len, Math.min(-1, y + len * 0.15)); }
 function extraLegs(ctx, f, side) {
   const B = f.B, xl = f.xl;
   for (let i = 0; i < B.xn; i++) {
@@ -204,7 +205,7 @@ function charger(ctx, f, rim, body, a) {
   spineFrame(f); headFrame(f);
   // Far side: legs, far horn or tusk.
   ctx.beginPath(); quadLegs(ctx, f, false); strokeTwice(ctx, rim, body, lw * 0.9, a, 0.5);
-  if (B.weapon === 'horn' || B.weapon === 'tusk') { ctx.beginPath(); hornShape(ctx, f, (B.weapon === 'tusk' ? 2.4 : 3.8) * s, -FX * 4 * s, -2 * s); fillRim(ctx, rim, body, a, 0.5); }
+  if (B.weapon === 'horn' || B.weapon === 'tusk') { ctx.beginPath(); hornShape(ctx, f, (B.weapon === 'tusk' ? 2.4 : 3.8) * s, -FR * 4 * s, -2 * s); fillRim(ctx, rim, body, a, 0.5); }
   ctx.beginPath(); quadLegs(ctx, f, true); ctx.globalAlpha = a; ctx.strokeStyle = rim; ctx.lineWidth = lw + RIM; ctx.stroke();
   ctx.beginPath();
   torso(ctx, f);
@@ -218,8 +219,8 @@ function charger(ctx, f, rim, body, a) {
   if (B.kind === 'rhino' && B.horn2) wedge(ctx, hx(0.45, 0.85), hy(0.45, 0.85), hx(0.3, 1.9), hy(0.3, 1.9), 3 * s, 0.6 * s);
   if (B.mane) spikes(ctx, 0.55, 1.05, 5, 0.55 + B.hump * 0.35, 0.45, 0.08);
   // Hooves: a short dark block at each near foot.
-  wedge(ctx, j[8] - FX * 2 * s, j[9] + 1, j[8] + FX * tl, j[9] + 1, lw * 0.65, lw * 0.5);
-  wedge(ctx, j[16] - FX * 2 * s, j[17] + 1, j[16] + FX * tl, j[17] + 1, lw * 0.65, lw * 0.5);
+  wedge(ctx, j[8] - FR * 2 * s, j[9] + 1, j[8] + FR * tl, j[9] + 1, lw * 0.65, lw * 0.5);
+  wedge(ctx, j[16] - FR * 2 * s, j[17] + 1, j[16] + FR * tl, j[17] + 1, lw * 0.65, lw * 0.5);
   fillRim(ctx, rim, body, a, 1);
   ctx.beginPath(); quadLegs(ctx, f, true); ctx.strokeStyle = body; ctx.lineWidth = lw; ctx.stroke();
   // Rim-coloured details: a ram's curl, an elk's antlers, the nostril.
@@ -248,7 +249,7 @@ function raptor(ctx, f, rim, body, a) {
   tailShape(ctx, f);
   wedge(ctx, j[4] + UX * G * 0.3, j[5] + UY * G * 0.3, j[14], j[15], G * 0.75, lw * 0.55);
   // The S of the neck: a bend forward between the shoulder and the head.
-  const mx = (j[2] + j[0]) / 2 + FX * B.neck * 0.16 * s, my = (j[3] + j[1]) / 2 + B.neck * 0.05 * s;
+  const mx = (j[2] + j[0]) / 2 + FR * B.neck * 0.16 * s, my = (j[3] + j[1]) / 2 + B.neck * 0.05 * s;
   wedge(ctx, j[2], j[3], mx, my, G * 0.6, G * 0.42); wedge(ctx, mx, my, hx(-0.2, 0), hy(-0.2, 0), G * 0.42, HRad * 0.8);
   circle(ctx, mx, my, G * 0.42);
   headPoly(ctx, H.saurian, true); jaw(ctx, H.saurJaw, f.p[6] * 0.7);
@@ -259,9 +260,9 @@ function raptor(ctx, f, rim, body, a) {
   ctx.beginPath(); bone(ctx, j, 2, 7, 8); toe(ctx, j, 8, tl); bone(ctx, j, 1, 3, 4); ctx.strokeStyle = body; ctx.lineWidth = lw; ctx.stroke();
   // Sickle claws held up off the floor, feathers.
   ctx.beginPath();
-  for (const k of [8, 10]) { const x = j[k * 2], y = j[k * 2 + 1]; ctx.moveTo(x + FX * 2 * s, y - 1); ctx.quadraticCurveTo(x + FX * 4 * s, y - 9 * s, x + FX * 9 * s, y - 7 * s); }
+  for (const k of [8, 10]) { const x = j[k * 2], y = j[k * 2 + 1]; ctx.moveTo(x + FR * 2 * s, y - 1); ctx.quadraticCurveTo(x + FR * 4 * s, y - 9 * s, x + FR * 9 * s, y - 7 * s); }
   if (B.crest === 'feathers') for (let i = 0; i < 4; i++) { ctx.moveTo(hx(-0.2 - i * 0.12, 0.7), hy(-0.2 - i * 0.12, 0.7)); ctx.lineTo(hx(-0.9 - i * 0.2, 1.4 + i * 0.25), hy(-0.9 - i * 0.2, 1.4 + i * 0.25)); }
-  if (B.armFeathers) { const x = j[6], y = j[7]; for (let i = 0; i < 3; i++) { ctx.moveTo(x, y); ctx.lineTo(x - FX * (7 + i * 3) * s, y + (3 + i * 3) * s); } }
+  if (B.armFeathers) { const x = j[6], y = j[7]; for (let i = 0; i < 3; i++) { ctx.moveTo(x, y); ctx.lineTo(x - FR * (7 + i * 3) * s, y + (3 + i * 3) * s); } }
   ctx.globalAlpha = a; ctx.strokeStyle = rim; ctx.lineWidth = 1.8 * s; ctx.stroke();
 }
 
@@ -420,7 +421,7 @@ function spitter(ctx, f, rim, body, a) {
     // A collar of spines around the neck that fans open as it winds up to spit.
     const cx = hx(-0.45, 0), cy = hy(-0.45, 0), r = B.frill * s * (0.75 + swell * 0.55), a0 = f.hdA;
     for (let i = 0; i < 7; i++) {
-      const t = a0 + 1.0 + i * 0.36, t0 = t - 0.16, t1 = t + 0.16, rr = r * (0.82 + (i % 2) * 0.18);
+      const t = a0 + (1.0 + i * 0.36) * f.roll, t0 = t - 0.16, t1 = t + 0.16, rr = r * (0.82 + (i % 2) * 0.18);
       QN = 0; qp(cx, cy); qp(cx + Math.cos(t0) * rr * 0.75 * FX, cy - Math.sin(t0) * rr * 0.75); qp(cx + Math.cos(t) * rr * FX, cy - Math.sin(t) * rr); qp(cx + Math.cos(t1) * rr * 0.75 * FX, cy - Math.sin(t1) * rr * 0.75); emit(ctx, 4, false);
     }
   }

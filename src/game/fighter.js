@@ -161,6 +161,12 @@ export class Fighter {
       this.x = mt.saddleX ?? mt.cx; this.y = (mt.saddleY ?? mt.cy - 16 * mt.scale) + 24 * this.scale; this.vx = 0; this.vy = 0; this.onGround = true;
     } else {
       if (this.def.rooted) this.vx = 0; // a prop stays where it was put
+      if (this.onGround && !this.isPlayer && this.vx !== 0 && (world.pits.length || this.perch) && this.state !== 'hitstun' && this.state !== 'recoil' && this.state !== 'stagger') {
+        // Nobody walks off an edge on purpose. Being knocked off one is another matter.
+        const ahead = this.x + this.vx * dt + Math.sign(this.vx) * 34 * this.scale, P = this.perch;
+        if (P && (!P.solid || Math.abs(this.y - P.y) > 3)) this.perch = null;
+        else if (P ? Math.abs(ahead - P.x) > P.w / 2 : world.inPit(ahead) && !world.inPit(this.x)) this.vx = 0;
+      }
       if (!this.onGround) this.vy += G * grav * (this.gravMul ?? 1) * world.gravK * dt;
       this.x += this.vx * dt; this.y += this.vy * dt;
       const gy = world.groundAt(this.x, this.y, this.vy, dt, this);
@@ -170,6 +176,11 @@ export class Fighter {
       } else if (this.y < gy) this.onGround = false;
     }
     const pad = 26 * this.scale;
+    if (this.y > 8 && world.pits.length) {
+      // Below the lip, the shaft's own wall holds the body in until it is out of sight.
+      const q = world.inPit(this.x) || world.inPit(this.x - pad) || world.inPit(this.x + pad);
+      if (q) this.x = clamp(this.x, q.x0 + pad, q.x1 - pad);
+    }
     if (this.x < world.minX + pad) { this.x = world.minX + pad; this.hitWall?.(world); }
     if (this.x > world.maxX - pad) { this.x = world.maxX - pad; this.hitWall?.(world); }
     if (this.onGround) this.runPhase += (this.vx * this.facing * dt) / 26;

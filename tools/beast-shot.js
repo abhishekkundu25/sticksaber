@@ -215,7 +215,7 @@ async function limp(plan) {
         if (fr === 6) shot(2, `air ${t.toFixed(2)}`);
         if (fr === 18) shot(3, `air ${t.toFixed(2)}`);
         if (e.rag && !landed && !e.rag.air && fr > 4) { landed = true; shot(4, `land ${t.toFixed(2)}`); }
-        if (e.rag && landed && !rested && e.rag.rest > 0.2) { rested = true; shot(5, `rest ${t.toFixed(2)}`); }
+        if (e.rag && landed && !rested) { rested = e.rag.rest > 0.2; shot(5, `${rested ? 'rest' : 'settling'} ${t.toFixed(2)}`); }
         if (e.dead) { if (t > 2.4) { shot(6, `dead ${t.toFixed(1)}s`); break; } continue; }
         if (e.rag) { shot(6, `last limp ${t.toFixed(2)}`); continue; }
         if (gotUp < 0) { gotUp = fr; dur = e.stDur; shot(7, `getup +0 roll${e.roll.toFixed(1)}`); }

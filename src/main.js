@@ -5,6 +5,7 @@ import { Director } from './game/encounters.js';
 import { Renderer } from './render/renderer.js';
 import { buildArena, ARENA_IDS } from './render/arenas.js';
 import { Hud, draftCard, menuLayout, pauseButton, skipButton } from './ui/hud.js';
+import { codexTab, codexBack, CODEX_PAGES } from './ui/codex.js';
 import { Touch } from './ui/touch.js';
 import { audio } from './audio/audio.js';
 import { BotInput } from './game/bot.js';
@@ -22,6 +23,7 @@ const hud = new Hud();
 const world = new World();
 world.input = input;
 const meta = new Meta();
+hud.meta = meta;
 
 // The run in progress (seed, difficulty, floor, build) is saved at every floor, so a hundred floors
 // do not have to be climbed in one sitting. Storage can be unavailable (private windows), so every
@@ -42,7 +44,7 @@ const query = new URLSearchParams(location.search);
 const fixedSeed = parseSeed(query.get('seed') || '');
 const fixedFloor = clamp(parseInt(query.get('floor'), 10) || 0, 0, 100);
 
-const app = { state: 'menu', idx: 0, muted: false, menu: [], toast: null, manual: false, touch: false, hover: '', diff: DIFFS[query.get('diff')] ? query.get('diff') : DIFFS[store.get(PREF_KEY)] ? store.get(PREF_KEY) : 'normal',
+const app = { state: 'menu', idx: 0, muted: false, menu: [], toast: null, feat: null, codexPage: 0, manual: false, touch: false, hover: '', diff: DIFFS[query.get('diff')] ? query.get('diff') : DIFFS[store.get(PREF_KEY)] ? store.get(PREF_KEY) : 'normal',
   mode: MODES[query.get('mode')] ? query.get('mode') : MODES[store.get(MODE_KEY)] ? store.get(MODE_KEY) : 'sprint' };
 
 // Phones and tablets: taps drive the menus, an on-screen stick and buttons drive the fight.
@@ -185,6 +187,7 @@ function startRun(floor = 1, seed = fixedSeed || undefined, diff = app.diff, sav
 const startDaily = (date = today()) => startRun(1, dailySeed(date), 'normal', null, 'sprint', date);
 function startTraining() { world.input = input; app.state = 'play'; director.startTraining(); }
 const toast = (text) => { app.toast = { text, t: 1.8 }; };
+const codexPage = (i) => { const n = CODEX_PAGES.length, p = (i + n) % n; if (p !== app.codexPage) { app.codexPage = p; audio.play('uiMove'); } };
 function copyResult() { const text = resultText(); (navigator.clipboard?.writeText(text) || Promise.reject()).then(() => toast('RESULT COPIED'), () => toast('COULD NOT COPY')); }
 
 addEventListener('resize', () => renderer.resize());
@@ -214,8 +217,12 @@ function shell() {
       const n = director.draft.options.length;
       for (let i = 0; i < n; i++) if (inRect(draftCard(renderer.view.w, n, i), t)) { director.draft.idx = i; confirm = true; }
       if (director.draft.skip && inRect(skipButton(renderer.view.w), t)) skip = true;
-    } else if (app.state !== 'codex') confirm = true;
-    else back = true;
+    } else if (app.state === 'codex') {
+      // The codex turns its pages by tab and leaves by its back control; a stray tap does nothing.
+      const W = renderer.view.w;
+      for (let i = 0; i < CODEX_PAGES.length; i++) if (inRect(codexTab(W, i, true), t)) codexPage(i);
+      if (inRect(codexBack(W, true), t)) back = true;
+    } else confirm = true;
   }
   taps.length = 0;
   // Mouse: what is under the pointer, then what was clicked.
@@ -230,6 +237,7 @@ function shell() {
     }
     else if (app.state === 'pause') { for (let i = 0; i < 2; i++) if (inRect(pauseButton(W, H, i), mouse)) hover = `p${i}`; }
     else if (app.state === 'play') { for (const c of hud.chips) if (inRect(c, mouse)) hover = `c${c.i}`; }
+    else if (app.state === 'codex') { for (let i = 0; i < CODEX_PAGES.length; i++) if (inRect(codexTab(W, i, false), mouse)) hover = `k${i}`; if (inRect(codexBack(W, false), mouse)) hover = 'kb'; }
     for (const c of clicks) {
       if (c.button !== 0) continue;
       if (hover[0] === 'm') { app.idx = +hover.slice(1); confirm = true; }
@@ -238,7 +246,9 @@ function shell() {
       else if (hover === 'p0') back = true;
       else if (hover === 'p1') { clicks.length = 0; mouse.moved = false; toMenu(); return; }
       else if (hover[0] === 'c') world.selectPower(+hover.slice(1));
-      else if (app.state === 'controls' || app.state === 'codex' || (app.state === 'play' && (director.state === 'dead' || director.state === 'victory'))) confirm = true;
+      else if (hover === 'kb') back = true;
+      else if (hover[0] === 'k') codexPage(+hover.slice(1));
+      else if (app.state === 'controls' || (app.state === 'play' && (director.state === 'dead' || director.state === 'victory'))) confirm = true;
     }
   }
   if (hover !== app.hover) { if (hover) audio.play('uiHover', { vol: 0.6 }); app.hover = hover; }
@@ -250,6 +260,7 @@ function shell() {
     else if (c === 'resume' && app.state === 'pause') back = true;
     else if (c === 'quit' && app.state === 'pause') { cmds.length = 0; toMenu(); return; }
     else if (c === 'spawn') director.trainingKey(SPAWNS[spawnIdx++ % SPAWNS.length]);
+    else if (c === 'blade' && fighting()) world.swapForm();
   }
   cmds.length = 0;
   switch (app.state) {
@@ -273,12 +284,16 @@ function shell() {
         else if (item.id === 'mode') { app.mode = MODE_IDS[(MODE_IDS.indexOf(app.mode) + 1) % MODE_IDS.length]; store.set(MODE_KEY, app.mode); buildMenu(true); }
         else if (item.id === 'diff') { app.diff = DIFF_IDS[(DIFF_IDS.indexOf(app.diff) + 1) % DIFF_IDS.length]; store.set(PREF_KEY, app.diff); buildMenu(true); }
         else if (item.id === 'train') startTraining();
-        else if (item.id === 'codex') app.state = 'codex';
+        else if (item.id === 'codex') { app.state = 'codex'; app.codexPage = 0; }
         else app.state = 'controls';
       }
       break;
     }
-    case 'controls': case 'codex': if (confirm || back) { app.state = 'menu'; audio.play('uiMove'); } break;
+    case 'codex':
+      if (hit('ArrowLeft', 'KeyA')) codexPage(app.codexPage - 1);
+      if (hit('ArrowRight', 'KeyD')) codexPage(app.codexPage + 1);
+    // falls through: confirm and back leave the codex as they leave the controls
+    case 'controls': if (confirm || back) { app.state = 'menu'; audio.play('uiMove'); } break;
     case 'pause':
       if (back || hit('KeyP')) app.state = 'play';
       else if (hit('KeyQ')) toMenu();
@@ -345,6 +360,9 @@ function advance(dt, now) {
   shell();
   world.view = renderer.view;
   if (app.toast && (app.toast.t -= dt) <= 0) app.toast = null;
+  // Feats finished during play are announced one at a time, so two at once are both seen.
+  if (app.feat && (app.feat.t -= dt) <= 0) app.feat = null;
+  if (!app.feat && meta.fresh.length) { app.feat = { id: meta.fresh.shift(), t: 4.5, max: 4.5 }; audio.play('challengeMet'); }
   if (app.state === 'menu') demo(dt);
   if (app.state === 'play' || app.state === 'menu') {
     // The fight holds still while a draft is open. Otherwise sub-step so no sim step exceeds 1/120 s
@@ -361,6 +379,7 @@ function advance(dt, now) {
     touch.setReady(world.focus >= world.maxFocus && world.overdrive <= 0);
     const pl = world.player;
     touch.setPower(world.power.short, world.powers.length > 1);
+    touch.setBlade(fighting && !!world.form2 && !!world.mods.sheath);
     touch.setBurst(fighting && pl && !pl.dead && BURST_STATES[pl.state] === 1 && world.focus >= 100 && world.time - world.lastBurst >= 1.5);
   }
   sound(dt);
