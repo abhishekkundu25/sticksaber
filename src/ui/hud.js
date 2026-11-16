@@ -577,7 +577,7 @@ export class Hud {
     this.text(ctx, how, W / 2, H - 112, 14, '#ffffffcc', 'center', 600, 3);
     // What the build already holds.
     const own = AUGMENTS.filter((g) => dir.build[g.id]).map((g) => `${g.name}${dir.build[g.id] > 1 ? ` ${roman(dir.build[g.id])}` : ''}`);
-    const lines = this.wrap(ctx, own.length ? own.join('   ·   ') : d.first ? 'An armoury on the way up will trade it for another' : 'Your build is empty', W - 220, 12, 600, 1).slice(0, 3);
+    const lines = this.wrap(ctx, own.length ? own.join('   ·   ') : d.type === 'boon' ? 'A head start for this run only' : d.first ? 'An armoury on the way up will trade it for another' : 'Your build is empty', W - 220, 12, 600, 1).slice(0, 3);
     lines.forEach((l, k) => this.text(ctx, l.toUpperCase(), W / 2, H - 78 + k * 17, 12, '#ffffff66', 'center', 600, 1));
     ctx.globalAlpha = 1;
   }
