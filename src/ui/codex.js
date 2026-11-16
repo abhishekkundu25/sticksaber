@@ -172,7 +172,7 @@ function feats(hud, ctx, W, H, top, bot, snap, u) {
     // A ring of progress around it.
     if (!lit && F.k > 0) { ctx.globalAlpha = a; ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(gx, gy, r, -Math.PI / 2, -Math.PI / 2 + 6.283 * F.k * a); ctx.stroke(); }
     ctx.globalAlpha = a * (lit ? 1 : 0.5);
-    hud.glyph(ctx, F.B?.glyph || 'star', gx, gy, 13 * u, lit ? col : '#c8d4e4');
+    hud.glyph(ctx, F.B?.glyph || 'star', gx, gy, 13 * u, lit ? col : '#c8d4e4', !!lit);
     const tx = x + 80 * u, tw = cw - 80 * u - 14;
     ctx.globalAlpha = a;
     hud.text(ctx, F.f.name, tx, y + ch * 0.2, 17 * u, lit ? '#ffffff' : '#e3edf8', 'left', 700, 2);
@@ -263,7 +263,7 @@ function records(hud, ctx, W, H, top, bot, snap, u) {
     card(ctx, x, y, cw, h, D ? col : '#8fa3b8', a, !!D);
     ctx.globalAlpha = a;
     hud.text(ctx, "TODAY'S DAILY CLIMB", x + cw / 2, y + 18 * u, 10 * u, D ? col : '#8fa3b8', 'center', 700, 3);
-    hud.glyph(ctx, 'clock', x + cw / 2, y + h * 0.45, 16 * u, D ? col : '#8fa3b866');
+    hud.glyph(ctx, 'clock', x + cw / 2, y + h * 0.45, 16 * u, D ? col : '#8fa3b866', !!D);
     if (D) {
       hud.text(ctx, D.score, x + cw / 2, y + h - 40 * u, 26 * u, '#ffffff', 'center', 700, 2);
       hud.text(ctx, D.line, x + cw / 2, y + h - 16 * u, 10 * u, '#ffffffaa', 'center', 600, 2);
@@ -281,7 +281,7 @@ function records(hud, ctx, W, H, top, bot, snap, u) {
     card(ctx, x, y, fw, fh, on ? f.col : '#8fa3b8', a, on);
     ctx.globalAlpha = a * (on ? 1 : 0.45);
     const small = fh < 80;
-    hud.glyph(ctx, f.glyph, small ? x + 24 * u : x + fw / 2, small ? y + fh / 2 : y + fh * 0.34, (small ? 11 : 16) * u, on ? f.col : '#8fa3b8');
+    hud.glyph(ctx, f.glyph, small ? x + 24 * u : x + fw / 2, small ? y + fh / 2 : y + fh * 0.34, (small ? 11 : 16) * u, on ? f.col : '#8fa3b8', on);
     ctx.globalAlpha = a;
     const tx = small ? x + 44 * u : x + fw / 2, al = small ? 'left' : 'center';
     hud.text(ctx, f.name, tx, small ? y + fh / 2 - 7 * u : y + fh * 0.7, 11 * u, on ? '#ffffff' : '#8fa3b8', al, 700, 1.5);

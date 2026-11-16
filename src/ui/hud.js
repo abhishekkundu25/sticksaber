@@ -6,6 +6,7 @@ import { AUG, AUGMENTS, RARITY, RARITY_COL } from '../game/augments.js';
 import { POWERS } from '../game/powers.js';
 import { FORMS } from '../game/forms.js';
 import { BOONS } from '../game/boons.js';
+import { glowSprite } from '../render/fx.js';
 import { drawCodex } from './codex.js';
 
 const FONT = '"Avenir Next Condensed", "Bahnschrift", "DIN Condensed", "Roboto Condensed", "Arial Narrow", sans-serif';
@@ -276,7 +277,7 @@ export class Hud {
       ctx.fillStyle = on ? '#000000aa' : '#00000066'; ctx.fillRect(cx, y - 11 - (on ? pop : 0), w, 22 + (on ? pop * 2 : 0));
       if (on) { ctx.fillStyle = F.color; ctx.fillRect(cx, y + 10 + pop, w, 2); }
       ctx.globalAlpha = on ? 1 : 0.45;
-      this.glyph(ctx, FORM_GLYPH[id] || 'slash', cx + w / 2, y, 7, on ? F.color : '#ffffff');
+      this.glyph(ctx, FORM_GLYPH[id] || 'slash', cx + w / 2, y, 7, on ? F.color : '#ffffff', on);
       ctx.globalAlpha = 1;
       cx += w + 4;
     }
@@ -486,17 +487,33 @@ export class Hud {
   }
 
   // A card's picture: a few strokes in the card's colour. `k` is the size.
-  glyph(ctx, kind, x, y, k, col) {
-    ctx.save(); ctx.translate(x, y); ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = Math.max(2, k * 0.09); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // Signs are drawn the way the game draws a blade: a tube of light. Under the sign a soft pool of its
+  // colour, then the strokes three times over (a wide faint halo, the coloured tube, a thin white-hot
+  // core). `neon` false draws the plain strokes, for a sign that is switched off.
+  glyph(ctx, kind, x, y, k, col, neon = true) {
+    const base = Math.max(2, k * 0.09), a0 = ctx.globalAlpha, hue = col.slice(0, 7);
+    ctx.save(); ctx.translate(x, y); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const pass = (lw, color, alpha, comp, fills) => { ctx.globalCompositeOperation = comp; ctx.globalAlpha = a0 * alpha; ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = lw; this.sign(ctx, kind, k, fills); };
+    if (!neon) pass(base, col, 1, 'source-over', true);
+    else {
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = a0 * 0.42;
+      const R = k * 2.2; ctx.drawImage(glowSprite(hue), -R, -R, R * 2, R * 2);
+      pass(base * 4, hue, 0.13, 'lighter', false); pass(base * 2.1, hue, 0.36, 'lighter', true);
+      pass(base, hue, 1, 'source-over', true); pass(Math.max(0.8, base * 0.3), '#ffffff', 0.85, 'source-over', false);
+    }
+    ctx.restore();
+  }
+  // One pass over a sign's strokes, with whatever stroke the caller has set. Solid parts are drawn only when `fills` is set.
+  sign(ctx, kind, k, fills) {
     const L = (...p) => { ctx.beginPath(); ctx.moveTo(p[0] * k, p[1] * k); for (let q = 2; q < p.length; q += 2) ctx.lineTo(p[q] * k, p[q + 1] * k); ctx.stroke(); };
-    const O = (cx, cy, r, fill) => { ctx.beginPath(); ctx.arc(cx * k, cy * k, r * k, 0, 6.283); if (fill) ctx.fill(); else ctx.stroke(); };
+    const O = (cx, cy, r, fill) => { ctx.beginPath(); ctx.arc(cx * k, cy * k, r * k, 0, 6.283); if (!fill) ctx.stroke(); else if (fills) ctx.fill(); };
     switch (kind) {
       case 'slash': L(-0.7, 0.7, 0.7, -0.7); L(-0.78, 0.42, -0.42, 0.78); break;
       case 'long': L(-0.9, 0.5, 0.9, -0.5); L(-0.95, 0.25, -0.65, 0.75); L(0.55, -0.15, 0.9, -0.5, 0.6, -0.62); break;
       case 'twin': L(-0.7, 0.6, 0.2, -0.7); L(-0.2, 0.7, 0.7, -0.6); break;
       case 'hammer': L(-0.6, 0.75, 0.2, -0.25); ctx.lineWidth *= 2.4; L(-0.1, -0.6, 0.55, 0.05); break;
       case 'plus': L(0, -0.7, 0, 0.7); L(-0.7, 0, 0.7, 0); break;
-      case 'bars': for (let q = -1; q <= 1; q++) { ctx.fillRect((q * 0.55 - 0.2) * k, -0.5 * k, 0.4 * k, 1.0 * k); } break;
+      case 'bars': ctx.lineWidth *= 1.4; for (let q = -1; q <= 1; q++) L(q * 0.6, -0.45, q * 0.6, 0.45); ctx.lineWidth /= 1.4; break;
       case 'chev': L(-0.8, -0.5, -0.3, 0, -0.8, 0.5); L(-0.2, -0.5, 0.3, 0, -0.2, 0.5); L(0.4, -0.5, 0.9, 0, 0.4, 0.5); break;
       case 'up': L(-0.6, 0.1, 0, -0.6, 0.6, 0.1); L(-0.6, 0.7, 0, 0, 0.6, 0.7); break;
       case 'drop': ctx.beginPath(); ctx.moveTo(0, -0.8 * k); ctx.quadraticCurveTo(0.75 * k, 0.2 * k, 0, 0.75 * k); ctx.quadraticCurveTo(-0.75 * k, 0.2 * k, 0, -0.8 * k); ctx.stroke(); break;
@@ -524,7 +541,16 @@ export class Hud {
       case 'draw': ctx.lineWidth *= 1.8; L(-0.9, 0.55, -0.1, 0.1); ctx.lineWidth /= 1.8; L(-0.1, 0.1, 0.85, -0.45); L(-0.2, -0.05, 0, 0.25); break;
       default: O(0, 0, 0.6);
     }
-    ctx.restore();
+  }
+  // A neon outline: `shape` traces the path, and it is stroked as a tube of light. `k` is how lit it is, 0 to 1.
+  tube(ctx, shape, col, k, a) {
+    ctx.lineJoin = 'round';
+    ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = col;
+    ctx.globalAlpha = a * (0.05 + 0.1 * k); ctx.lineWidth = 12; ctx.beginPath(); shape(); ctx.stroke();
+    ctx.globalAlpha = a * (0.1 + 0.2 * k); ctx.lineWidth = 5.5; ctx.beginPath(); shape(); ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = a * (0.4 + 0.6 * k); ctx.lineWidth = 1.4 + k * 1.2; ctx.beginPath(); shape(); ctx.stroke();
+    if (k > 0.5) { ctx.globalAlpha = a * 0.85; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.9; ctx.beginPath(); shape(); ctx.stroke(); }
   }
 
   // Shards: the count, with a pulse when some have just been picked up.
@@ -561,8 +587,15 @@ export class Hud {
       ctx.fillStyle = col;
       for (let b = 0; b < 7; b++) { ctx.globalAlpha = a * show * fade * (sel ? 0.2 : 0.11) * (1 - b / 7) ** 1.5; ctx.fillRect(x, y + b * 24, w, 24); }
       ctx.globalAlpha = a * show * fade;
-      ctx.fillRect(x, y, w, sel ? 5 : 3);
-      ctx.strokeStyle = sel ? edge : `${col}55`; ctx.lineWidth = sel ? 2.5 : 1; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+      // The frame is a tube of the card's colour, brighter on the chosen card, with light pooling at its top edge.
+      const lit = sel && !sold ? 1 : 0.16;
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = a * show * fade * (sel ? 0.55 : 0.16);
+      ctx.drawImage(glowSprite(col.slice(0, 7)), x - 30, y - 34, w + 60, 68);
+      ctx.globalCompositeOperation = 'source-over';
+      this.tube(ctx, () => ctx.rect(x + 0.5, y + 0.5, w - 1, h - 1), sel ? edge : col, lit, a * show * fade);
+      ctx.globalAlpha = a * show * fade; ctx.fillStyle = col; ctx.fillRect(x, y, w, sel ? 4 : 2.5);
+      if (sel && !sold) { ctx.fillStyle = '#ffffff'; ctx.globalAlpha = a * show * 0.8; ctx.fillRect(x + 2, y + 1.2, w - 4, 1.2); }
+      ctx.globalAlpha = a * show * fade;
       if (sel && !sold) {
         // The chosen card glows; a legendary one shimmers.
         ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = a * (0.08 + Math.sin(this.t * 4) * 0.03); ctx.fillStyle = col; ctx.fillRect(x, y, w, h);
@@ -579,19 +612,25 @@ export class Hud {
         ctx.globalCompositeOperation = 'lighter';
         for (let q = 0; q < 4; q++) { ctx.globalAlpha = a * show * (sel ? 0.16 : 0.08) * (1 - q / 4); ctx.fillStyle = col; ctx.fillRect(mx - aw + q * 5, top + q * 4, (aw - q * 5) * 2, bot - top - q * 4); }
         ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = a * show;
-        ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(mx - aw, bot); ctx.lineTo(mx - aw, top); ctx.arc(mx, top, aw, Math.PI, 0); ctx.lineTo(mx + aw, bot); ctx.stroke();
+        this.tube(ctx, () => { ctx.moveTo(mx - aw, bot); ctx.lineTo(mx - aw, top); ctx.arc(mx, top, aw, Math.PI, 0); ctx.lineTo(mx + aw, bot); }, col, sel ? 1 : 0.55, a * show);
+        ctx.strokeStyle = col;
         ctx.lineWidth = 1; ctx.globalAlpha = a * show * 0.5; ctx.beginPath(); ctx.moveTo(mx - aw - 16, bot); ctx.lineTo(mx + aw + 16, bot); ctx.stroke();
         ctx.globalAlpha = a * show;
         this.glyph(ctx, A.glyph, mx, y + 90, sel ? 14 : 12, col);
       } else {
         // The picture, in a ring of the card's colour.
-        ctx.globalAlpha = a * show * fade * 0.28; ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(mx, y + 76, small ? 24 : 30, 0, 6.283); ctx.stroke();
+        // The sign sits in a dark socket ringed with a thinner tube of the same light.
+        const rr = small ? 24 : 30;
+        ctx.globalAlpha = a * show * fade * 0.55; ctx.fillStyle = '#05080e'; ctx.beginPath(); ctx.arc(mx, y + 76, rr, 0, 6.283); ctx.fill();
+        this.tube(ctx, () => ctx.arc(mx, y + 76, rr, 0, 6.283), col, sel && !sold ? 0.5 : 0.2, a * show * fade);
         ctx.globalAlpha = a * show * fade;
-        this.glyph(ctx, isP ? POWER_GLYPH[id] : isF ? FORM_GLYPH[id] || 'slash' : A.glyph, mx, y + 76, (sel ? 19 : 17) * (small ? 0.8 : 1), col);
+        this.glyph(ctx, isP ? POWER_GLYPH[id] : isF ? FORM_GLYPH[id] || 'slash' : A.glyph, mx, y + 76, (sel ? 19 : 17) * (small ? 0.8 : 1), col, !sold);
       }
       const size = folded ? 14 : small ? 17 : w < 250 ? 21 : 25, bs = small ? 12.5 : 16, lh = small ? 17 : 22;
       const name = this.wrap(ctx, A.name.toUpperCase(), w - (small ? 16 : 30), size, 700, small ? 1.5 : 3);
+      if (sel && !sold) { ctx.shadowColor = col; ctx.shadowBlur = 16; }
       name.forEach((l, k) => this.text(ctx, l, mx, y + 134 + k * (size + 3), size, '#ffffff', 'center', 700, small ? 1.5 : 3));
+      ctx.shadowBlur = 0;
       const ty = y + 134 + name.length * (size + 3) + 2;
       ctx.fillStyle = `${col}66`; ctx.fillRect(mx - 40, ty - 9, 80, 1.5);
       if (folded) {
