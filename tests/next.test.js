@@ -369,7 +369,8 @@ test('doors bend the next floor or lead to a room, and the quartermaster takes s
   assert.equal(dir.state, 'draft', 'buying closed the shop');
   const wi = shop.kinds.indexOf('form'), was = world.formId;
   dir.choose(wi);
-  assert.equal(world.formId, shop.options[wi]); assert.notEqual(world.formId, was); assert.equal(world.form2, null);
+  // A weapon bought joins the ones carried and comes to hand; the old one is a switch away.
+  assert.equal(world.formId, shop.options[wi]); assert.notEqual(world.formId, was); assert.deepEqual(world.arsenal, [was, shop.options[wi]]); assert.equal(world.form2, was);
   dir.choose(-1);
   assert.notEqual(dir.draft, shop, 'leaving did not close the shop');
   // An unmarked door is one of the others.
@@ -406,25 +407,63 @@ test('pacts give and take, and are only offered at a shrine', () => {
   assert.ok(used && p.hp < p.maxHp && world.focus === 0, 'the tithe was not paid in health');
 });
 
-test('a second sheath keeps the old blade, and switching makes the next hit land harder', () => {
+test('weapons found in the tower are carried, and T switches through all of them', () => {
   const g = boot(3, 9, { auto: false }), { world, dir } = g;
   if (dir.state === 'draft') dir.choose(0);
-  assert.equal(world.swapForm(), false, 'switched with no sheath');
+  const first = world.formId;
+  assert.deepEqual(world.arsenal, [first]);
+  assert.equal(world.swapForm(), false, 'switched with one weapon');
+  const [second, third] = FORM_IDS.filter((id) => id !== first);
+  dir.take({ type: 'armory', options: [second], kinds: ['form'] }, 0);
+  assert.equal(world.formId, second); assert.deepEqual(world.arsenal, [first, second]); assert.equal(world.form2, first);
+  dir.take({ type: 'augment', options: [third], kinds: ['form'] }, 0);
+  assert.deepEqual(world.arsenal, [first, second, third]); assert.equal(world.formId, third);
+  // Switching goes round all three and back, and each one's own blade comes with it.
+  const seen = [];
+  for (let i = 0; i < 3; i++) { assert.ok(world.swapForm()); seen.push(world.formId); assert.equal(world.player.blade, FORMS[world.formId].blade); }
+  assert.deepEqual(seen, [first, second, third]);
+  // Nothing already carried is offered again.
+  for (let n = 3; n < 30; n++) {
+    for (const d of [dir.armory(n), dir.shop(n), dir.offer(n)]) if (d) d.options.forEach((id, i) => { if (d.kinds?.[i] === 'form') assert.ok(!world.arsenal.includes(id), `${id} was offered while carried`); });
+  }
+  // The Second Sheath is what makes a switch hit harder.
+  world.swapForm(); assert.ok(!(world.swapT > 0), 'a switch hit harder without the sheath');
   dir.build.sheath = 1; world.setBuild(dir.build);
-  assert.equal(world.swapForm(), false, 'switched with nothing in the sheath');
-  const first = world.formId, other = FORM_IDS.find((id) => id !== first);
-  dir.take({ type: 'armory', options: [other], kinds: ['form'] }, 0);
-  assert.equal(world.formId, other); assert.equal(world.form2, first);
-  assert.ok(world.swapForm());
-  assert.equal(world.formId, first); assert.equal(world.form2, other); assert.ok(world.swapT > 0);
-  assert.equal(world.player.blade, FORMS[first].blade);
-  // The pair is saved and restored.
+  world.swapForm(); assert.ok(world.swapT > 0);
+  // The arsenal is saved and restored, and so is an older save that named one spare.
   let saved = null; dir.hooks.onFloor = (s) => { saved = s; }; dir.save();
-  assert.equal(saved.v, 2); assert.equal(saved.form2, other); assert.equal(saved.mode, 'sprint');
-  const w2 = new World(); w2.input = new BotInput(w2, 0.9);
-  const d2 = new Director(w2, { setArena: () => 2200, auto: true });
-  d2.startRun(saved.floor - 1, saved.seed, saved.diff, saved);
-  assert.equal(d2.mode, 'sprint'); assert.equal(w2.formId, first); assert.equal(w2.form2, other); assert.equal(d2.run.count, 30);
+  assert.equal(saved.v, 2); assert.deepEqual(saved.arsenal, world.arsenal); assert.equal(saved.form, world.formId); assert.equal(saved.mode, 'sprint');
+  const load = (sv) => { const w = new World(); w.input = new BotInput(w, 0.9); const d = new Director(w, { setArena: () => 2200, auto: true, forms: () => ['saber'] }); d.startRun(sv.floor - 1, sv.seed, sv.diff, sv); return { w, d }; };
+  let r = load(saved);
+  assert.equal(r.d.mode, 'sprint'); assert.equal(r.w.formId, saved.form); assert.deepEqual([...r.w.arsenal].sort(), [...saved.arsenal].sort()); assert.equal(r.d.run.count, 30);
+  r = load({ ...saved, arsenal: undefined, form: 'lash', form2: 'great' });
+  assert.equal(r.w.formId, 'lash'); assert.deepEqual(r.w.arsenal, ['lash', 'great']);
+});
+
+test('only earned weapons can start a run; the rest are locked on the first screen and found in the tower', () => {
+  const open = ['saber', 'twin', 'great'];
+  const world = new World(); world.input = new BotInput(world, 0.9);
+  world.carry(['lash']);   // the title screen's sparring match leaves any weapon in hand
+  const dir = new Director(world, { setArena: () => 2200, forms: () => open });
+  dir.startRun(0, 321, 'normal', null, 'sprint');
+  const d = dir.draft;
+  assert.equal(d.type, 'form'); assert.deepEqual(d.options, FORM_IDS);
+  assert.deepEqual(d.locked, FORM_IDS.map((id) => !open.includes(id)));
+  assert.ok(open.includes(world.formId) && !d.locked[d.idx], 'the run would start with a locked weapon in hand');
+  // A locked card cannot be taken by any route: the choice stays open and nothing changes.
+  const li = d.locked.indexOf(true), before = world.formId;
+  dir.t = 1; dir.choose(li);
+  assert.equal(dir.draft, d); assert.equal(dir.state, 'draft'); assert.equal(world.formId, before);
+  dir.choose(open.indexOf('great'));
+  assert.equal(world.formId, 'great'); assert.deepEqual(world.arsenal, ['great']); assert.equal(dir.state, 'intro');
+  // The tower offers the locked ones more often than the open ones.
+  let lockedSeen = 0, openSeen = 0;
+  for (let n = 2; n < 30; n++) for (const id of dir.armory(n).options) { if (open.includes(id)) openSeen++; else lockedSeen++; }
+  assert.ok(lockedSeen > openSeen * 2, `locked ${lockedSeen}, open ${openSeen}`);
+  // With no shell to say otherwise (tests, scripted players) every weapon is open.
+  const d2 = new Director(new World(), { setArena: () => 2200 }); d2.world.input = new BotInput(d2.world, 0.9);
+  d2.startRun(0, 5, 'normal', null, 'sprint');
+  assert.ok(d2.draft.locked.every((x) => !x));
 });
 
 test('boons are offered when earned and spent as ordinary build', () => {

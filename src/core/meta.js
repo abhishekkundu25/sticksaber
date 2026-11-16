@@ -6,13 +6,18 @@ import { BEAST_PLANS } from '../game/beasts.js';
 import { FORM_IDS } from '../game/forms.js';
 
 const KEY = 'sticksaber.meta', V = 2;
-const TABLES = ['kills', 'bosses', 'surprises', 'feats', 'objectives', 'forms', 'best', 'seen', 'clears', 'done'];
+const TABLES = ['kills', 'bosses', 'surprises', 'feats', 'objectives', 'forms', 'best', 'seen', 'clears', 'done', 'arms'];
+// Weapons a run may start with from the first day, and how many floors a weapon found in the tower
+// has to clear before it joins them. `arms` counts those floors. It is separate from `forms`, which
+// was counting before weapons were locked: a player who had already tried everything would see no locks.
+export const START_FORMS = ['saber', 'twin', 'great'];
+export const ARM_FLOORS = 3;
 const COUNTS = ['runs', 'wins', 'floors', 'shades'];
 // `feats` counts floor challenges met, by challenge type. `done` latches finished meta feats (FEATS
 // below), so one stays finished even if what it counts is later reshaped. `seen` files what was met
 // but not beaten, under the same keys as `kills` and `bosses`. `clears` counts wins per `mode:diff`,
 // because `best` keeps only the highest-scoring run and a later loss can outscore a win.
-const blank = () => ({ v: V, kills: {}, bosses: {}, surprises: {}, feats: {}, objectives: {}, forms: {}, best: {}, seen: {}, clears: {}, done: {}, runs: 0, wins: 0, floors: 0, shades: 0 });
+const blank = () => ({ v: V, kills: {}, bosses: {}, surprises: {}, feats: {}, objectives: {}, forms: {}, best: {}, seen: {}, clears: {}, done: {}, arms: {}, runs: 0, wins: 0, floors: 0, shades: 0 });
 
 // The base enemy types and the keepers, in the order the codex shows them. Generated keepers are
 // filed by their school; strains.js keeps the schools to itself, so they are listed here and a test
@@ -84,6 +89,8 @@ export class Meta {
     for (const f of FEATS) if (!out.includes(f.boon) && FEATS.every((g) => g.boon !== f.boon || this.data.done[g.id])) out.push(f.boon);
     return out;
   }
+  // The weapons a run may start with: the first three, and any found in the tower and used long enough.
+  weapons() { return FORM_IDS.filter((id) => START_FORMS.includes(id) || (this.data.arms[id] || 0) >= ARM_FLOORS); }
   // Latch every feat that is now met. Returns whether any was new.
   check(announce = true) {
     let any = false;
@@ -118,7 +125,12 @@ export class Meta {
       if (e.kind === 'shade') { D.shades++; }
     } else if (e.type === 'surprise') this.bump('surprises', e.kind);
     else if (e.type === 'feat') this.bump('feats', e.kind);
-    else if (e.type === 'floor') { D.floors++; this.dirty = true; if (e.objective) this.bump('objectives', e.objective); this.bump('forms', world.formId); }
+    else if (e.type === 'floor') {
+      D.floors++; this.dirty = true; if (e.objective) this.bump('objectives', e.objective); this.bump('forms', world.formId);
+      // A locked weapon in hand earns its place at the start, one floor at a time.
+      const id = world.formId;
+      if (FORM_IDS.includes(id) && !START_FORMS.includes(id) && (D.arms[id] || 0) < ARM_FLOORS) { this.bump('arms', id); if (D.arms[id] >= ARM_FLOORS) this.fresh.push(`weapon:${id}`); }
+    }
     else if (e.type === 'run') {
       D.runs++; this.dirty = true;
       const k = `${e.mode}:${e.diff}`;

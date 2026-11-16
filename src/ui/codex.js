@@ -2,7 +2,7 @@
 // bestiary of everything met and beaten, and the records. Also the notice shown when a feat is done.
 // Drawn on the game canvas in logical (720-high) units by the HUD, which lends its text and glyphs.
 import { clamp } from '../core/math.js';
-import { FEATS, FEAT, BASES, SCHOOLS, KEEPERS, progress } from '../core/meta.js';
+import { FEATS, FEAT, BASES, SCHOOLS, KEEPERS, ARM_FLOORS, progress } from '../core/meta.js';
 import { BOONS, BOON_IDS } from '../game/boons.js';
 import { ENEMIES } from '../game/enemies.js';
 import { BEAST_PLANS, BEAST_INFO } from '../game/beasts.js';
@@ -73,7 +73,10 @@ function build(meta) {
   }) }));
   const dl = readDaily();
   const daily = dl ? { score: n2s(dl.score), line: `FLOOR ${dl.floor}${dl.won ? '  ·  CLEARED' : ''}` } : null;
-  const forms = FORM_IDS.map((id) => ({ id, name: FORMS[id].name, col: FORMS[id].color || CYAN, glyph: FORM_GLYPH[id] || 'slash', n: D.forms[id] || 0, sub: D.forms[id] ? `${n2s(D.forms[id])} FLOOR${D.forms[id] > 1 ? 'S' : ''}` : 'NOT YET USED' }));
+  // A weapon not yet earned shows how far along it is: it is found in the tower, then used for three floors.
+  const open = meta.weapons();
+  const forms = FORM_IDS.map((id) => ({ id, name: FORMS[id].name, col: FORMS[id].color || CYAN, glyph: FORM_GLYPH[id] || 'slash', n: open.includes(id) ? 1 : 0,
+    sub: !open.includes(id) ? `LOCKED  ·  ${D.arms[id] || 0} / ${ARM_FLOORS} FLOORS` : D.forms[id] ? `${n2s(D.forms[id])} FLOOR${D.forms[id] > 1 ? 'S' : ''}` : 'NOT YET USED' }));
   const tasks = [
     ...Object.keys(OBJECTIVES).map((o) => ({ name: OBJECTIVES[o].name, n: D.objectives[o] || 0, col: OBJ_COL[o] || CYAN })),
     ...Object.keys(CHALLENGES).map((c) => ({ name: CHALLENGES[c].name, n: D.feats[c] || 0, col: GOLD })),
@@ -94,6 +97,7 @@ export function drawCodex(hud, ctx, W, H, app, dt) {
     page(hud, ctx, W, H, app, S.snap);
   } else S.open = false;
   if (app.feat && FEAT[app.feat.id]) notice(hud, ctx, W, app.feat, meta);
+  else if (app.feat && String(app.feat.id).startsWith('weapon:')) armNotice(hud, ctx, W, app.feat);
 }
 
 // Ease a card in: `i` staggers it after the ones before.
@@ -268,7 +272,7 @@ function records(hud, ctx, W, H, top, bot, snap, u) {
   // The weapons used, and floors of each kind cleared.
   y += rh * 2 + gap + 26 * u;
   hud.text(ctx, 'WEAPONS', mx, y, 12 * u, '#ffffffcc', 'left', 700, 5);
-  hud.text(ctx, 'FLOORS CLEARED WITH EACH', mx + hud.width(ctx, 'WEAPONS', 12 * u, 5) + 16, y, 10 * u, DIM, 'left', 600, 2);
+  hud.text(ctx, 'FIND A LOCKED ONE IN THE TOWER AND CLEAR THREE FLOORS WITH IT', mx + hud.width(ctx, 'WEAPONS', 12 * u, 5) + 16, y, 10 * u, DIM, 'left', 600, 2);
   y += 12;
   const F = snap.forms, fw = Math.min(170, (span - gap * (F.length - 1)) / F.length), fh = clamp(bot - y - 44 * u, 44 * u, 118 * u);
   const fx0 = W / 2 - (F.length * fw + (F.length - 1) * gap) / 2;
@@ -348,6 +352,24 @@ function beast(ctx, plan, x, y, k, col) {
     default: E(0, 0, 0.5, 0.25); for (const lx of [-0.3, 0.3]) L(lx, 0.2, lx, 0.6);
   }
   ctx.restore();
+}
+
+// A weapon earned for the start of every run: the same card, in the weapon's colour.
+function armNotice(hud, ctx, W, F) {
+  const id = F.id.slice(7), A = FORMS[id];
+  if (!A) return;
+  const col = A.color, t = F.t, a = clamp(Math.min(t * 3, (F.max - t) * 4), 0, 1), w = 470, h = 76, x = W / 2 - w / 2, y = 112 - (1 - a) * 24;
+  ctx.globalAlpha = a; ctx.fillStyle = '#070b12'; ctx.fillRect(x, y, w, h);
+  ctx.globalAlpha = a * 0.16; ctx.fillStyle = col; ctx.fillRect(x, y, w, h * 0.5);
+  ctx.globalAlpha = a; ctx.fillStyle = col; ctx.fillRect(x, y, w, 3);
+  ctx.strokeStyle = `${col}aa`; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  ctx.globalAlpha = a * 0.3; ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x + 40, y + h / 2, 24, 0, 6.283); ctx.stroke();
+  ctx.globalAlpha = a;
+  hud.glyph(ctx, FORM_GLYPH[id] || 'slash', x + 40, y + h / 2, 13, col);
+  hud.text(ctx, 'WEAPON EARNED', x + 80, y + 18, 10, GOLD, 'left', 700, 5);
+  hud.text(ctx, A.name, x + 80, y + 40, 21, '#ffffff', 'left', 700, 3);
+  hud.text(ctx, 'YOU CAN START A RUN WITH IT FROM NOW ON', x + 80, y + 61, 10, col, 'left', 700, 3);
+  ctx.globalAlpha = 1;
 }
 
 // A feat done during play: a card that drops in from the top for a few seconds.

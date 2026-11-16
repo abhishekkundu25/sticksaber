@@ -17,7 +17,7 @@ const MOVELIST = [
   ['LIGHT STRING', 'J  J  J  J'], ['HEAVY  ·  hold to charge', 'K'], ['GUARD  ·  tap on impact to PARRY', 'L'],
   ['RIPOSTE  (after a parry)', 'J or K'], ['LAUNCHER', 'S + K   or   J J K'], ['BREAKER  ·  COMET', 'J K   ·   J J J K'],
   ['AIR STRING  ·  SPIKE', 'J J J   ·   K'], ['PLUNGE  (in the air)', 'S + K'], ['DASH CUT', 'SHIFT then J'],
-  ['FOCUS POWER  (the one shown)', 'I'], ['SWITCH POWER', 'U   or   1 - 9'], ['SWITCH WEAPON  (with a Second Sheath)', 'T'], ['BURST  (1 focus, while hit or down)', 'I'], ['OVERDRIVE  (full focus)', 'O'],
+  ['FOCUS POWER  (the one shown)', 'I'], ['SWITCH POWER', 'U   or   1 - 9'], ['SWITCH WEAPON  (once you carry two)', 'T'], ['BURST  (1 focus, while hit or down)', 'I'], ['OVERDRIVE  (full focus)', 'O'],
   ['RECOVER  (as you hit the floor)', 'SHIFT'], ['PAUSE  ·  GRAPHICS QUALITY', 'ESC   ·   G'],
 ];
 
@@ -230,7 +230,7 @@ export class Hud {
     const x = 36, y = 34, w = Math.min(420, 320 * Math.sqrt(p.maxHp / 100));
     const hp = Math.max(0, p.hp) / p.maxHp;
     this.hpLag += (hp - this.hpLag) * Math.min(1, dt * (hp < this.hpLag ? 2.5 : 20));
-    this.text(ctx, world.formId === 'saber' && !world.form2 ? 'INITIATE ZERO' : `INITIATE ZERO  ·  ${world.form.name}${world.form2 ? `   ⇄  ${FORMS[world.form2].name}  [${touch ? 'BLADE' : 'T'}]` : ''}`, x, y - 12, 12, '#ffffff99', 'left', 600, 3);
+    this.text(ctx, world.formId === 'saber' && !world.form2 ? 'INITIATE ZERO' : `INITIATE ZERO  ·  ${world.form.name}${world.form2 ? `   ⇄  ${FORMS[world.form2].name}  [${touch ? 'BLADE' : 'T'}]${world.arsenal.length > 2 ? `  +${world.arsenal.length - 2}` : ''}` : ''}`, x, y - 12, 12, '#ffffff99', 'left', 600, 3);
     this.text(ctx, `${Math.ceil(Math.max(0, p.hp))} / ${p.maxHp}`, x + w, y - 12, 11, '#ffffff66', 'right', 600, 1);
     ctx.fillStyle = '#00000088'; ctx.fillRect(x - 2, y - 2, w + 4, 14);
     ctx.fillStyle = '#ffffff1c'; ctx.fillRect(x, y, w, 10);
@@ -498,7 +498,7 @@ export class Hud {
       const c = draftCard(W, n, i, focus), sel = i === d.idx, id = d.options[i], folded = focus >= 0 && !sel;
       const show = clamp(dir.t * 3.2 - i * 0.3, 0, 1);
       const kind = d.kinds?.[i] || (d.type === 'power' ? 'power' : d.type === 'form' ? 'form' : 'aug');
-      const isP = kind === 'power', isF = kind === 'form', isD = kind === 'door', isI = kind === 'item', isB = kind === 'boon', sold = !!d.sold?.[i];
+      const isP = kind === 'power', isF = kind === 'form', isD = kind === 'door', isI = kind === 'item', isB = kind === 'boon', locked = !!d.locked?.[i], sold = !!d.sold?.[i] || locked;
       const x = c.x, y = c.y + (1 - show) ** 2 * 60 - (sel && !sold ? 10 : 0), w = c.w, h = c.h, mx = x + w / 2, small = w < 210;
       const A = isP ? POWERS[id] : isF ? FORMS[id] : isD ? DOORS[id] : isI ? ITEMS[id] : isB ? BOONS[id] : AUG[id];
       const col = A.color || '#56e9ff', have = kind === 'aug' ? dir.build[id] || 0 : 0;
@@ -518,7 +518,8 @@ export class Hud {
         ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = a;
       }
       ctx.globalAlpha = a * show * fade;
-      this.text(ctx, isP ? 'FOCUS POWER' : isF ? 'WEAPON' : isD ? DOOR_TAG[id] : isI ? 'SUPPLIES' : isB ? 'BOON' : RARITY[A.r], mx, y + 26, 11, edge, 'center', 700, 5);
+      this.text(ctx, locked ? 'LOCKED' : isP ? 'FOCUS POWER' : isF ? 'WEAPON' : isD ? DOOR_TAG[id] : isI ? 'SUPPLIES' : isB ? 'BOON' : RARITY[A.r], mx, y + 26, 11, edge, 'center', 700, 5);
+      if (locked && sel && d.deny > 0) { ctx.globalAlpha = a * d.deny * 2; ctx.strokeStyle = '#ff6b6b'; ctx.lineWidth = 3; ctx.strokeRect(x, y, w, h); ctx.globalAlpha = a * show * fade; }
       if (!touch) this.text(ctx, String(i + 1), x + 14, y + 26, 12, '#ffffff55', 'left', 600, 0);
       if (isD) {
         // A doorway: an arch of the door's colour with light coming through it.
@@ -546,7 +547,8 @@ export class Hud {
         if (d.prices) this.text(ctx, sold ? 'SOLD' : String(d.prices[i]), mx, y + h - 24, 13, sold ? '#ffffff88' : world.shards >= d.prices[i] ? '#ffd36b' : '#ff6b6b', 'center', 700, 2);
         continue;
       }
-      const words = isD ? A.text(d.doors[i]) : kind === 'aug' ? A.text(have + 1) : A.text;
+      const words = locked ? 'Not yours yet. Find it in the tower, at an armoury, the quartermaster or among the cards, and clear three floors with it' : isD ? A.text(d.doors[i]) : kind === 'aug' ? A.text(have + 1) : A.text;
+      if (locked) ctx.globalAlpha = a * show * 0.7;
       const body = this.wrap(ctx, words, w - (small ? 18 : 36), bs, 600, 0.5).slice(0, small ? 8 : 7);
       body.forEach((l, k) => this.text(ctx, l, mx, ty + 14 + k * lh, bs, '#e3edf8', 'center', 600, 0.5));
       if (d.prices) {
@@ -554,7 +556,7 @@ export class Hud {
         const can = world.shards >= d.prices[i];
         this.text(ctx, sold ? 'SOLD' : `${d.prices[i]}  SHARDS`, mx, y + h - 24, small ? 12 : 13, sold ? '#ffffff88' : can ? '#ffd36b' : '#ff6b6b', 'center', 700, 3);
         if (!sold && !can && sel && d.deny > 0) { ctx.globalAlpha = a * d.deny * 2; ctx.strokeStyle = '#ff6b6b'; ctx.lineWidth = 3; ctx.strokeRect(x, y, w, h); ctx.globalAlpha = a; }
-      } else if (isF) {
+      } else if (isF && !locked) {
         (A.traits || []).slice(0, 4).forEach((tr, k) => this.text(ctx, tr.toUpperCase(), mx, ty + 26 + body.length * lh + k * 17, 11, col, 'center', 600, 2));
       } else if (isP) {
         const px = mx - (A.cost * 22 - 6) / 2;
@@ -577,7 +579,7 @@ export class Hud {
     this.text(ctx, how, W / 2, H - 112, 14, '#ffffffcc', 'center', 600, 3);
     // What the build already holds.
     const own = AUGMENTS.filter((g) => dir.build[g.id]).map((g) => `${g.name}${dir.build[g.id] > 1 ? ` ${roman(dir.build[g.id])}` : ''}`);
-    const lines = this.wrap(ctx, own.length ? own.join('   ·   ') : d.type === 'boon' ? 'A head start for this run only' : d.first ? 'An armoury on the way up will trade it for another' : 'Your build is empty', W - 220, 12, 600, 1).slice(0, 3);
+    const lines = this.wrap(ctx, own.length ? own.join('   ·   ') : d.type === 'boon' ? 'A head start for this run only' : d.first ? `You keep every weapon you find on the way up, and ${touch ? 'BLADE' : 'T'} switches between them` : 'Your build is empty', W - 220, 12, 600, 1).slice(0, 3);
     lines.forEach((l, k) => this.text(ctx, l.toUpperCase(), W / 2, H - 78 + k * 17, 12, '#ffffff66', 'center', 600, 1));
     ctx.globalAlpha = 1;
   }

@@ -160,3 +160,32 @@ test('every keeper a run can field is one the codex lists', () => {
     }
   }
 });
+
+test('three weapons are open from the first day, and a found one is earned by clearing three floors with it', async () => {
+  const { START_FORMS, ARM_FLOORS } = await import('../src/core/meta.js');
+  const store = fakeStore(), m = new Meta(store);
+  assert.deepEqual(m.weapons(), START_FORMS);
+  assert.ok(START_FORMS.every((id) => FORM_IDS.includes(id)) && START_FORMS.length < FORM_IDS.length);
+  // Floors cleared before weapons were locked do not count: a player who had tried everything still sees locks.
+  m.data.forms = Object.fromEntries(FORM_IDS.map((id) => [id, 40]));
+  assert.deepEqual(m.weapons(), START_FORMS);
+  const floor = { type: 'floor', n: 5, kind: 'skirmish' }, w = worldOf();
+  // An open weapon in hand earns nothing new.
+  for (let i = 0; i < 5; i++) m.note(floor, w, null);
+  assert.deepEqual(m.weapons(), START_FORMS);
+  m.fresh.length = 0;   // the hand-built record above finished a feat, which is not what this test is about
+  // A locked one: two floors are not enough, the third earns it, and it is announced once.
+  w.formId = 'lash';
+  for (let i = 0; i < ARM_FLOORS - 1; i++) m.note(floor, w, null);
+  assert.ok(!m.weapons().includes('lash')); assert.equal(m.data.arms.lash, ARM_FLOORS - 1);
+  m.note(floor, w, null);
+  assert.ok(m.weapons().includes('lash'));
+  assert.deepEqual(m.fresh, ['weapon:lash']);
+  m.note(floor, w, null); m.note(floor, w, null);
+  assert.deepEqual(m.fresh, ['weapon:lash'], 'the weapon was announced again');
+  // It survives a reload, and corrupt counts are dropped without throwing.
+  assert.ok(new Meta(store).weapons().includes('lash'));
+  const bad = fakeStore({ 'sticksaber.meta': JSON.stringify({ v: 2, arms: { lash: 'many', drawblade: 9 } }) });
+  const m2 = new Meta(bad);
+  assert.ok(!m2.weapons().includes('lash') && m2.weapons().includes('drawblade'));
+});

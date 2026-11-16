@@ -14,7 +14,7 @@ export const BOONS = {
   gift: { name: 'A Second Power', color: '#56e9ff', glyph: 'star', text: 'Begin with one more Focus power, chosen by the tower',
     apply: (w, d, r) => { const left = POWER_IDS.filter((id) => !w.powers.includes(id)); if (left.length) w.powers.push(left[(r() * left.length) | 0]); } },
   phoenix: { name: 'Unfinished', color: '#ffe08a', glyph: 'wing', text: 'Begin with Second Wind: once per floor a killing blow leaves you standing', apply: (w, d) => add(d, 'wind', 1) },
-  twoblades: { name: 'Two Blades', color: '#9fe8ff', glyph: 'twin', text: 'Begin with a Second Sheath and a second weapon already in it',
-    apply: (w, d, r) => { add(d, 'sheath', 1); const left = FORM_IDS.filter((id) => id !== w.formId); if (left.length) w.form2 = left[(r() * left.length) | 0]; } },
+  twoblades: { name: 'Two Blades', color: '#9fe8ff', glyph: 'twin', text: 'Begin with a second weapon, and a Second Sheath to make each switch hit harder',
+    apply: (w, d, r) => { add(d, 'sheath', 1); const first = w.formId, left = FORM_IDS.filter((id) => !w.arsenal.includes(id)); if (left.length) { w.addForm(left[(r() * left.length) | 0]); w.setForm(first); } } },
 };
 export const BOON_IDS = Object.keys(BOONS);

@@ -89,6 +89,9 @@ const director = new Director(world, {
   onEnd() { if (live()) finish(true); },
   // Boons are earned between runs. `?boons=all` offers every one, for trying them out.
   boons: () => (query.get('boons') === 'all' ? BOON_IDS : meta.boons()),
+  // The weapons a run may start with. `?forms=all` opens every one.
+  forms: () => (query.get('forms') === 'all' ? FORM_IDS : meta.weapons()),
+  touch: () => app.touch,
   // The parry lesson on floor 1 is given once per browser.
   lesson: () => live() && !store.get(TAUGHT_KEY),
   lessonDone: () => store.set(TAUGHT_KEY, 1),
@@ -141,7 +144,7 @@ function toMenu() {
   world.input = new BotInput(world, 0.78);
   world.input.show = true;
   // A different weapon in the sparring match each time the title comes up.
-  world.setForm(pick(FORM_IDS));
+  world.carry([pick(FORM_IDS)]);
   demoQueue.length = 0; demoGap = 0; demoAlive = 0;
   buildMenu();
 }
@@ -392,7 +395,7 @@ function advance(dt, now) {
     touch.setReady(world.focus >= world.maxFocus && world.overdrive <= 0);
     const pl = world.player;
     touch.setPower(world.power.short, world.powers.length > 1);
-    touch.setBlade(fighting && !!world.form2 && !!world.mods.sheath);
+    touch.setBlade(fighting && !!world.form2);
     touch.setBurst(fighting && pl && !pl.dead && BURST_STATES[pl.state] === 1 && world.focus >= 100 && world.time - world.lastBurst >= 1.5);
   }
   sound(dt);

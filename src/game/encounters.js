@@ -61,7 +61,7 @@ export class Director {
     this.runTime = saved?.time || 0; this.deaths = saved?.deaths || 0; this.draft = null; this.queue = []; this.bonus = [];
     this.tally = { ...newTally(), ...(saved?.tally || {}) }; this.route = saved?.route || null;
     this.daily = saved?.daily || null; this.won = false;
-    w.shards = saved?.shards || 0; w.stats.shards = saved?.earned || 0; w.form2 = null;
+    w.shards = saved?.shards || 0; w.stats.shards = saved?.earned || 0;
     if (saved?.build) { this.build = { ...saved.build }; w.powers = saved.powers.filter((id) => POWERS[id]); if (!w.powers.length) w.powers = ['throw']; }
     else {
       this.build = {}; w.powers = ['throw'];
@@ -70,17 +70,34 @@ export class Director {
     w.powerIdx = clamp(saved?.powerIdx || 0, 0, w.powers.length - 1);
     w.setBuild(this.build);
     // A saved run keeps its weapons. A new run played by a person chooses one before the first floor.
-    if (saved?.form) w.setForm(saved.form);
-    if (saved?.form2 && FORMS[saved.form2] && this.build.sheath) w.form2 = saved.form2;
+    // (A save from before weapons were carried names one in hand and at most one more.)
+    if (saved?.form) { w.carry([saved.form, ...(saved.arsenal || [saved.form2]).filter((id) => id && id !== saved.form)]); }
+    else w.carry([FORMS[w.formId] && this.unlocked().includes(w.formId) ? w.formId : this.unlocked()[0]]);
     this.enterStage(stage, 0, true);
     if (!saved && !this.hooks.auto && FORM_IDS.length > 1) {
-      this.draft = { type: 'form', title: 'CHOOSE YOUR BLADE', sub: 'You can trade it at an armoury on the way up', options: [...FORM_IDS], idx: Math.max(0, FORM_IDS.indexOf(w.formId)), first: true };
+      // Every weapon is shown. The ones not yet earned are locked: they are found in the tower first.
+      const open = this.unlocked();
+      this.draft = { type: 'form', title: 'CHOOSE YOUR BLADE', sub: open.length < FORM_IDS.length ? 'The locked ones are found in the tower. Clear three floors with one and it is yours' : 'More are found on the way up, and you keep what you find',
+        options: [...FORM_IDS], locked: FORM_IDS.map((id) => !open.includes(id)), idx: Math.max(0, FORM_IDS.indexOf(w.formId)), first: true };
       this.state = 'draft'; this.t = 0; w.bannerMsg = null;
       // Then one boon, if any have been earned in earlier runs.
       const r = makeRng(hash32(this.seed, 0xb00a)), have = (this.hooks.boons?.() || []).filter((id) => BOONS[id]);
       for (let i = have.length - 1; i > 0; i--) { const j = (r() * (i + 1)) | 0; [have[i], have[j]] = [have[j], have[i]]; }
       if (have.length) this.queue = [{ type: 'boon', title: 'CHOOSE A BOON', sub: 'Earned on earlier climbs', options: have.slice(0, 3), kinds: have.slice(0, 3).map(() => 'boon'), idx: 0, first: true }];
     }
+  }
+
+  // The weapons a run may start with. The shell keeps the list between runs; with no shell (tests,
+  // scripted players) every weapon is open.
+  unlocked() { const L = (this.hooks.forms?.() || FORM_IDS).filter((id) => FORMS[id]); return L.length ? L : ['saber']; }
+  // A weapon the player does not carry, for a card, the quartermaster or an armoury. Ones they have
+  // not yet earned come up twice as often, so the tower is where new weapons are met.
+  spare(r, n = 1) {
+    const w = this.world, open = this.unlocked(), pool = [];
+    for (const id of FORM_IDS) if (!w.arsenal.includes(id)) { pool.push(id); if (!open.includes(id)) pool.push(id); }
+    const out = [];
+    while (pool.length && out.length < n) { const id = pool[(r() * pool.length) | 0]; out.push(id); for (let i = pool.length - 1; i >= 0; i--) if (pool[i] === id) pool.splice(i, 1); }
+    return out;
   }
 
   startTraining() {
@@ -94,8 +111,8 @@ export class Director {
     this.run = generateRun((Math.random() * 0xffffffff) >>> 0 || 1); this.floors = this.run.floors;
     w.roster = this.run.roster.defs;
     w.hpMul = 1; w.rateMul = 1; w.cdMul = 1; w.gravK = 1; w.anom = null; w.freeCast = false; w.windUsed = false;
-    this.build = {}; w.bonusHp = 0; w.setBuild(this.build); w.powers = [...POWER_IDS]; w.powerIdx = 0; w.form2 = null;
-    if (!FORMS[w.formId]) w.setForm('saber');
+    this.build = {}; w.bonusHp = 0; w.setBuild(this.build); w.powers = [...POWER_IDS]; w.powerIdx = 0;
+    w.carry([FORMS[w.formId] ? w.formId : 'saber']);
     w.spawnPlayer(-200); w.enemyDmg = 1; w.maxAttackers = 2; w.focus = w.maxFocus; w.floor = 100;
     w.spawnEnemy('dummy', 160, false);
     this.state = 'fight'; this.pending.length = 0; this.music = 'combat';
@@ -152,7 +169,7 @@ export class Director {
   }
   save() {
     const w = this.world;
-    this.hooks.onFloor?.({ v: 2, seed: this.seed, diff: this.diff, mode: this.mode, daily: this.daily || null, floor: this.stageDef.n, build: { ...this.build }, powers: [...w.powers], powerIdx: w.powerIdx, form: w.formId, form2: w.form2,
+    this.hooks.onFloor?.({ v: 2, seed: this.seed, diff: this.diff, mode: this.mode, daily: this.daily || null, floor: this.stageDef.n, build: { ...this.build }, powers: [...w.powers], powerIdx: w.powerIdx, form: w.formId, arsenal: [...w.arsenal],
       shards: w.shards, earned: w.stats.shards, route: this.route, tally: { ...this.tally }, time: this.runTime, deaths: this.deaths });
   }
 
@@ -327,11 +344,11 @@ export class Director {
     const legend = def.reward === 'legend', tier = legend ? 2 : def.reward === 'augment' && !lift ? 0 : 1;
     const d = this.cards(r, tier, n, legend ? 'The keeper falls' : lift ? 'The elite guard falls' : `Floor ${n} cleared`);
     if (!d) return null;
-    // Now and then a weapon lies among the cards: taking it trades the blade in hand.
+    // Now and then a weapon lies among the cards: taking it adds it to the ones carried.
     const rw = makeRng(hash32(this.seed, 0x3ea9 + n * 17));
-    if (def.reward !== 'legend' && n > 2 && rw() < 0.16 && d.options.length === 3) {
-      const others = FORM_IDS.filter((id) => id !== w.formId && id !== w.form2);
-      if (others.length) { d.options[2] = others[(rw() * others.length) | 0]; d.kinds[2] = 'form'; }
+    if (def.reward !== 'legend' && n > 1 && rw() < 0.2 && d.options.length === 3) {
+      const [id] = this.spare(rw);
+      if (id) { d.options[2] = id; d.kinds[2] = 'form'; }
     }
     return d;
   }
@@ -344,8 +361,8 @@ export class Director {
     const w = this.world, r = makeRng(hash32(this.seed, 0x540b + n * 71)), K = w.mods.shopK;
     const ids = [...draftAugments(this.build, r, 1, n), ...draftAugments(this.build, r, 2, n).slice(0, 1)].filter((id, i, a) => a.indexOf(id) === i).slice(0, 4);
     const d = { type: 'shop', title: 'QUARTERMASTER', sub: 'Spend what the fallen left behind', options: ids, kinds: ids.map(() => 'aug'), prices: ids.map((id) => Math.round(PRICE[Math.min(3, AUG[id].r)] * K)), sold: [], idx: 0, skip: 'LEAVE' };
-    const others = FORM_IDS.filter((id) => id !== w.formId && id !== w.form2);
-    if (others.length) { d.options.push(others[(r() * others.length) | 0]); d.kinds.push('form'); d.prices.push(Math.round(60 * K)); }
+    const [arm] = this.spare(r);
+    if (arm) { d.options.push(arm); d.kinds.push('form'); d.prices.push(Math.round(60 * K)); }
     d.options.push('heal'); d.kinds.push('item'); d.prices.push(Math.round(35 * K));
     return d;
   }
@@ -354,10 +371,8 @@ export class Director {
     return options.length ? { type: 'pact', title: 'THE SHRINE OFFERS A PACT', sub: 'Each gives much and takes something back. It cannot be undone', options, kinds: options.map(() => 'aug'), idx: 1, skip: 'REFUSE' } : null;
   }
   armory(n) {
-    const w = this.world, r = makeRng(hash32(this.seed, 0xa4a0 + n * 29)), others = FORM_IDS.filter((id) => id !== w.formId && id !== w.form2);
-    for (let i = others.length - 1; i > 0; i--) { const j = (r() * (i + 1)) | 0; [others[i], others[j]] = [others[j], others[i]]; }
-    const options = others.slice(0, 3);
-    return options.length ? { type: 'armory', title: 'ARMOURY', sub: this.build.sheath ? 'The blade you hold goes to your second sheath' : 'Trade the blade you hold. Your build comes with you', options, kinds: options.map(() => 'form'), idx: 0, skip: 'KEEP YOUR BLADE' } : null;
+    const options = this.spare(makeRng(hash32(this.seed, 0xa4a0 + n * 29)), 3);
+    return options.length ? { type: 'armory', title: 'ARMOURY', sub: 'Take one. It joins the blades you carry, and T switches between them', options, kinds: options.map(() => 'form'), idx: 0, skip: 'TAKE NOTHING' } : null;
   }
   doors(n) {
     const list = doorsFor(this.run, n);
@@ -369,9 +384,8 @@ export class Director {
     const w = this.world, id = d.options[i], kind = d.kinds?.[i] || (d.type === 'power' ? 'power' : d.type === 'form' ? 'form' : 'aug');
     if (kind === 'power') { w.powers.push(id); if (!quiet) w.powerIdx = w.powers.length - 1; }
     else if (kind === 'form') {
-      // With a second sheath the old blade is kept; without one it is traded away.
-      if (!d.first && this.build.sheath && id !== w.formId) w.form2 = w.formId;
-      w.setForm(id);
+      // The first choice is the whole arsenal. Anything taken later joins it and comes to hand.
+      if (d.first) w.carry([id]); else w.addForm(id);
     } else if (kind === 'item') { const p = w.player; p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.4); }
     else if (kind === 'boon') { BOONS[id].apply(w, this, makeRng(hash32(this.seed, 0xb00b))); w.setBuild(this.build); w.player.hp = w.player.maxHp; }
     else {
@@ -386,12 +400,14 @@ export class Director {
     if (!d || this.state !== 'draft') return;
     if (i < 0) { if (d.skip) { w.sfx('uiBack', w.player.x); this.draft = null; this.next(); } return; }
     if (i >= d.options.length) return;
+    if (d.locked?.[i]) { w.sfx('uiDeny', w.player.x); d.deny = 0.4; return; }
     if (d.type === 'doors') { w.sfx('doorPick', w.player.x); this.draft = null; this.through(d.doors[i]); return this.next(); }
     if (d.type === 'shop') {
       if (d.sold[i]) return;
       if (w.shards < d.prices[i]) { w.sfx('uiDeny', w.player.x); d.deny = 0.4; return; }
       w.shards -= d.prices[i]; d.sold[i] = true; this.take(d, i);
       w.sfx('buy', w.player.x); this.save();
+      this.hooks.onEvent?.({ type: 'weapon', id: d.kinds[i] === 'form' ? d.options[i] : null });
       return;
     }
     const id = this.take(d, i), kind = d.kinds?.[i] || d.type;
@@ -408,6 +424,7 @@ export class Director {
       return;
     }
     this.picked = { name: kind === 'power' ? POWERS[id].name : kind === 'form' ? FORMS[id].name : AUG[id].name.toUpperCase(), t: 1.6 };
+    if (kind === 'form') { this.picked.sub = this.hooks.touch?.() ? 'IN HAND  ·  BLADE SWITCHES WEAPON' : 'IN HAND  ·  T SWITCHES WEAPON'; this.picked.color = FORMS[id].color; this.picked.t = 2; }
     this.next();
   }
   // Go through a door: it either bends the next floor or leads to a room first.
@@ -460,11 +477,13 @@ export class Director {
       this.through(d.doors[i]);
     } else if (d.type === 'shop') {
       for (let i = 0; i < d.options.length; i++) {
-        if (d.kinds[i] === 'form' || w.shards < d.prices[i]) continue;
+        if ((d.kinds[i] === 'form' && !this.hooks.takeArms) || w.shards < d.prices[i]) continue;
         if (d.kinds[i] === 'item' && w.player.hp > w.player.maxHp * 0.6) continue;
         w.shards -= d.prices[i]; this.take(d, i, true);
       }
-    } else if (d.type !== 'pact' && d.type !== 'armory') this.take(d, 0, true);
+    } else if (d.type === 'armory') { if (this.hooks.takeArms) this.take(d, 0, true); }
+    // (`takeArms` makes a scripted player pick weapons up, to measure how long earning them takes.)
+    else if (d.type !== 'pact') this.take(d, this.hooks.takeArms && d.kinds?.includes('form') ? d.kinds.indexOf('form') : 0, true);
   }
   advance() {
     const p = this.world.player;

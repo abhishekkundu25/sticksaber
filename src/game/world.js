@@ -110,7 +110,7 @@ export class World {
     this.shards = 0;                       // the run's currency, dropped by the fallen and spent at the quartermaster
     this.dark = 0; this.darkK = 0;         // a blackout: `dark` is where the lights are heading, `darkK` where they are
     this.zone = null;                      // a ring on the floor the director is watching: { x, r, k, color }
-    this.form2 = null;                     // the second weapon, for a build that carries two
+    this.arsenal = ['saber'];              // every weapon carried this run, the one in hand included
     this.pits = []; this.lift = false;     // open edges of the floor ({ x0, x1 }), and whether the room is a rising lift
   }
 
@@ -140,12 +140,17 @@ export class World {
     p.speedMul = this.mods.speed * (F.speed ?? 1);
     if (this.overdrive <= 0) p.bladeLen = this.baseBlade(p);
   }
-  // Second Sheath: trade the weapon in hand for the one on the back. The first hit after it lands harder.
+  // The weapon that a switch would bring to hand, or null when only one is carried.
+  get form2() { const A = this.arsenal, i = A.indexOf(this.formId); return A.length > 1 ? A[(i + 1) % A.length] : null; }
+  // Start a run's arsenal over: these weapons, the first of them in hand.
+  carry(list) { this.arsenal = [...new Set(list.filter((id) => FORMS[id]))]; if (!this.arsenal.length) this.arsenal = ['saber']; this.setForm(this.arsenal[0]); }
+  // Pick a weapon up: it joins the ones carried and comes to hand.
+  addForm(id) { if (!FORMS[id]) return; if (!this.arsenal.includes(id)) this.arsenal.push(id); this.setForm(id); }
+  // Bring the next carried weapon to hand. With a Second Sheath the first hit after it lands harder.
   swapForm() {
-    const p = this.player;
-    if (!this.mods.sheath || !FORMS[this.form2] || !p || p.dead || p.rag) return false;
-    const old = this.formId;
-    this.setForm(this.form2); this.form2 = old; this.swapT = 2.5;
+    const p = this.player, next = this.form2;
+    if (!next || !p || p.dead || p.rag) return false;
+    this.setForm(next); this.swapT = this.mods.sheath ? 2.5 : 0;
     if (p.state === 'attack') p.setState('free');
     this.fx.ring(p.cx, p.cy, 14, 130, 0.3, this.form.color, 1, 4); this.fx.flash(p.cx, p.cy, 120, this.form.color, 0.18);
     this.fx.text(p.x, p.j[1] - 44, this.form.name, this.form.color, 16, 0.9); this.fx.ghost(p, this.form.color, 0.3);

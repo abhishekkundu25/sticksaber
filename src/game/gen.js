@@ -97,7 +97,7 @@ export const DOORS = {
   rest: { name: 'SANCTUARY', color: '#7dffb0', glyph: 'plus', text: () => 'Recover 45% of your health before you go on' },
   shop: { name: 'QUARTERMASTER', color: '#ffb347', glyph: 'orb', text: () => 'Spend shards on cards, a weapon or repairs' },
   shrine: { name: 'SHRINE', color: '#ff5c8a', glyph: 'flame', text: () => 'A pact: great power at a real price. You may refuse it' },
-  armory: { name: 'ARMOURY', color: '#56e9ff', glyph: 'slash', text: () => 'Trade your weapon for another. Your build comes with you' },
+  armory: { name: 'ARMOURY', color: '#56e9ff', glyph: 'slash', text: () => 'Take another weapon. You keep the ones you carry and switch between them' },
   unknown: { name: 'UNMARKED', color: '#e6fdff', glyph: 'dice', text: () => 'Nobody knows what is behind this one' },
 };
 export const CURSES = {

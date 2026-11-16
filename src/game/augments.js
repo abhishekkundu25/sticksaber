@@ -54,7 +54,7 @@ export const AUGMENTS = [
   { id: 'colossus', color: '#ffb080', glyph: 'plus', name: 'Colossus', r: 2, max: 1, text: () => 'Maximum health +40. You take 12% less damage', apply: (m) => { m.maxHp += 40; m.taken *= 0.88; } },
   { id: 'whet', color: '#ff6a55', glyph: 'slash', name: 'Whetstone', r: 2, max: 1, text: () => 'All damage +20%', apply: (m) => { m.dmg *= 1.2; } },
   { id: 'reaper', color: '#c084ff', glyph: 'skull', name: 'Reaper', r: 2, max: 1, text: () => 'Kills heal 3 more and refill a fifth of a focus pip', apply: (m) => { m.killHeal += 3; m.reap = 20; } },
-  { id: 'sheath', color: '#9fe8ff', glyph: 'twin', name: 'Second Sheath', r: 2, max: 1, text: () => 'Carry two weapons. The next one you take joins the one you hold. T switches, and the first hit after a switch lands half again as hard', apply: (m) => { m.sheath = 1; } },
+  { id: 'sheath', color: '#9fe8ff', glyph: 'twin', name: 'Second Sheath', r: 2, max: 1, text: () => 'The first hit after you switch weapons lands half again as hard', apply: (m) => { m.sheath = 1; } },
 
   // Techniques change what a move does. One copy each, offered after event floors and now and then elsewhere.
   { id: 'undertow', color: '#6bd0ff', glyph: 'loop', name: 'Undertow', r: 3, max: 1, text: () => 'Your launcher first drags nearby enemies in, so it lifts the whole group', apply: (m) => { m.undertow = 1; } },
